@@ -30,10 +30,13 @@ export default function DateField({
 }) {
   const [show, setShow] = useState(false);
 
-  const onPick = (event, selected) => {
+  const handleValueChange = (event, selected) => {
     if (Platform.OS === 'android') setShow(false);
-    if (event.type === 'dismissed') return;
     if (selected) onChange(toIso(selected));
+  };
+
+  const handleDismiss = () => {
+    setShow(false);
   };
 
   return (
@@ -61,7 +64,8 @@ export default function DateField({
           value={parseIso(value)}
           mode="date"
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={onPick}
+          onValueChange={handleValueChange}
+          onDismiss={handleDismiss}
           maximumDate={maximumDate}
           minimumDate={minimumDate}
           locale="fr-FR"

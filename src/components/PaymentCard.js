@@ -10,11 +10,20 @@ export default function PaymentCard({ paiement, onPress, showAdherent = false })
   const statusColor = getStatusColor(paiement.statut);
   const statusLabel = getStatusLabel(paiement.statut);
   const statusIcon = getStatusIcon(paiement.statut);
-  const netAmount = paiement.montantDu - (paiement.remiseMontant || 0);
+  const netAmount = (paiement.montantDu || 0) - (paiement.remiseMontant || 0);
+  const paidAmount = paiement.montantPaye || 0;
+  const resteAmount = Math.max(0, netAmount - paidAmount);
+
+  const displayStatusLabel = (paiement.statut !== 'paye' && paidAmount > 0)
+    ? 'Partiel'
+    : statusLabel;
+  const displayStatusColor = (paiement.statut !== 'paye' && paidAmount > 0)
+    ? COLORS.warning
+    : statusColor;
 
   return (
     <TouchableOpacity
-      style={[styles.card, { borderLeftColor: statusColor }]}
+      style={[styles.card, { borderLeftColor: displayStatusColor }]}
       onPress={onPress}
       activeOpacity={0.8}
     >
@@ -27,9 +36,9 @@ export default function PaymentCard({ paiement, onPress, showAdherent = false })
           />
           <Text style={styles.label} numberOfLines={1}>{paiement.label}</Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: statusColor + '20' }]}>
-          <MaterialCommunityIcons name={statusIcon} size={13} color={statusColor} />
-          <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: displayStatusColor + '20' }]}>
+          <MaterialCommunityIcons name={statusIcon} size={13} color={displayStatusColor} />
+          <Text style={[styles.statusText, { color: displayStatusColor }]}>{displayStatusLabel}</Text>
         </View>
       </View>
 
@@ -51,11 +60,19 @@ export default function PaymentCard({ paiement, onPress, showAdherent = false })
           </View>
         )}
         <View style={styles.amountItem}>
-          <Text style={styles.amountLabel}>Payé</Text>
-          <Text style={[styles.amountValue, { color: statusColor }]}>
-            {(paiement.montantPaye || 0).toLocaleString()} DA
+          <Text style={styles.amountLabel}>Versé</Text>
+          <Text style={[styles.amountValue, { color: displayStatusColor }]}>
+            {paidAmount.toLocaleString()} DA
           </Text>
         </View>
+        {resteAmount > 0 && paidAmount > 0 ? (
+          <View style={styles.amountItem}>
+            <Text style={styles.amountLabel}>Reste à payer</Text>
+            <Text style={[styles.amountValue, { color: COLORS.danger }]}>
+              {resteAmount.toLocaleString()} DA
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {paiement.datePaiement && (

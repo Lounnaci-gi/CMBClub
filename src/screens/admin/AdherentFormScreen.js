@@ -16,6 +16,8 @@ import { generatePaymentSchedule, PAYMENT_STATUS } from '../../utils/payments';
 import { buildAdherentCodeBase, canGenerateAdherentCode } from '../../utils/adherentCode';
 import { generateUniqueAdherentCode } from '../../database/database';
 
+import AdherentCardModal from '../../components/AdherentCardModal';
+
 const GENRES = [{ label: 'Masculin', value: 'M' }, { label: 'Féminin', value: 'F' }];
 
 function FormField({
@@ -24,6 +26,7 @@ function FormField({
   onChangeText,
   placeholder,
   keyboardType = 'default',
+  autoCapitalize = 'words',
   required = false,
   error,
 }) {
@@ -39,6 +42,7 @@ function FormField({
         value={value}
         onChangeText={onChangeText}
         keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
         autoCorrect={false}
       />
       {error ? <Text style={styles.errorMsg}>{error}</Text> : null}
@@ -72,6 +76,17 @@ export default function AdherentFormScreen({ navigation, route }) {
   const [showBloodPicker, setShowBloodPicker] = useState(false);
   const [editLoaded, setEditLoaded] = useState(false);
 
+  // Paiement à l'inscription
+  const [payAtRegistration, setPayAtRegistration] = useState(true);
+  const [paymentOption, setPaymentOption] = useState('inscription'); // 'inscription' | 'inscription_mensualite' | 'custom'
+  const [customAmount, setCustomAmount] = useState('');
+  const [paymentMode, setPaymentMode] = useState('Espèces');
+  const [paymentNotes, setPaymentNotes] = useState('');
+
+  // Impression carte d'adhérent
+  const [createdAdherent, setCreatedAdherent] = useState(null);
+  const [showCardModal, setShowCardModal] = useState(false);
+
   useEffect(() => {
     if (!isEdit || editLoaded) return;
     const existing = adherents.find(a => a.id === adherentId);
@@ -93,9 +108,22 @@ export default function AdherentFormScreen({ navigation, route }) {
 
   const category = form.dateNaissance ? getCategoryByAge(form.dateNaissance) : null;
 
+  const getInitialPaymentAmount = () => {
+    if (!payAtRegistration) return 0;
+    if (paymentOption === 'inscription') return config?.fraisInscription || 2000;
+    if (paymentOption === 'inscription_mensualite') return (config?.fraisInscription || 2000) + (config?.fraisMensuel || 1500);
+    if (paymentOption === 'custom') return parseFloat(customAmount) || 0;
+    return 0;
+  };
+
   const set = (key, val) => {
     setForm(f => ({ ...f, [key]: val }));
-    setErrors(e => (e[key] ? { ...e, [key]: undefined } : e));
+    setErrors(e => {
+      if (!e[key]) return e;
+      const copy = { ...e };
+      delete copy[key];
+      return copy;
+    });
   };
 
   const validate = () => {
@@ -121,14 +149,33 @@ export default function AdherentFormScreen({ navigation, route }) {
         const code = await generateUniqueAdherentCode(form);
         const adherent = { ...form, id: uuidv4(), code };
         await createAdherent(adherent);
+        setCreatedAdherent(adherent);
         const password = (form.dateNaissance || '').replace(/-/g, '').slice(2);
 
         if (saisonActive) {
           const today = new Date().toISOString();
           await enrollAdherent(adherent.id, saisonActive.id, today);
 
+          let initialPaymentRemaining = getInitialPaymentAmount();
           const schedule = generatePaymentSchedule(saisonActive.annee, config, today);
+
           for (const s of schedule) {
+            let montantPaye = 0;
+            let statut = PAYMENT_STATUS.A_PAYER;
+            let datePaiement = null;
+            let notes = null;
+
+            if (initialPaymentRemaining > 0) {
+              const allocated = Math.min(initialPaymentRemaining, s.montantDu);
+              montantPaye = allocated;
+              initialPaymentRemaining -= allocated;
+              if (montantPaye >= s.montantDu) {
+                statut = PAYMENT_STATUS.PAYE;
+              }
+              datePaiement = today;
+              notes = `Réglé à l'inscription (${paymentMode}${paymentNotes ? ' - ' + paymentNotes : ''})`;
+            }
+
             await createPaiement({
               id: uuidv4(),
               adherentId: adherent.id,
@@ -138,15 +185,46 @@ export default function AdherentFormScreen({ navigation, route }) {
               mois: s.month,
               annee: s.year,
               montantDu: s.montantDu,
-              statut: PAYMENT_STATUS.A_PAYER,
+              montantPaye,
+              datePaiement,
+              statut,
+              notes,
             });
           }
         }
 
+        const verse = getInitialPaymentAmount();
+        const fraisInsc = config?.fraisInscription || 2000;
+        let paymentSummaryInfo = '';
+
+        if (payAtRegistration && verse > 0) {
+          if (verse < fraisInsc) {
+            const resteInsc = fraisInsc - verse;
+            paymentSummaryInfo = `\n\n💳 Paiement à l'inscription :\n• Montant versé : ${verse.toLocaleString()} DA (${paymentMode})\n• Reste à payer (Frais d'inscription) : ${resteInsc.toLocaleString()} DA`;
+          } else {
+            const surplus = verse - fraisInsc;
+            paymentSummaryInfo = `\n\n💳 Paiement à l'inscription :\n• Montant versé : ${verse.toLocaleString()} DA (${paymentMode})\n• Frais d'inscription : Réglés à 100%`;
+            if (surplus > 0) {
+              paymentSummaryInfo += `\n• Avance mensualités : ${surplus.toLocaleString()} DA`;
+            }
+          }
+        } else {
+          paymentSummaryInfo = `\n\n💳 Paiement à l'inscription :\nAucun versement (0 DA)\n• Reste à payer (Frais d'inscription) : ${fraisInsc.toLocaleString()} DA`;
+        }
+
         Alert.alert(
-          'Adhérent inscrit',
-          `${form.prenom} ${form.nom}\nCode : ${code}\nMot de passe (espace adhérent) : ${password}`,
-          [{ text: 'OK', onPress: () => navigation.goBack() }],
+          'Adhérent inscrit avec succès',
+          `Nom : ${form.prenom} ${form.nom}\nCode : ${code}\nMot de passe : ${password}${paymentSummaryInfo}`,
+          [
+            {
+              text: 'Imprimer la carte 🖨️',
+              onPress: () => setShowCardModal(true),
+            },
+            {
+              text: 'Terminer',
+              onPress: () => navigation.goBack(),
+            },
+          ],
         );
       }
     } catch (e) {
@@ -162,7 +240,6 @@ export default function AdherentFormScreen({ navigation, route }) {
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
       >
 
         <View style={styles.section}>
@@ -237,12 +314,13 @@ export default function AdherentFormScreen({ navigation, route }) {
             value={form.telephone}
             onChangeText={v => set('telephone', v)}
             keyboardType="phone-pad"
+            autoCapitalize="none"
           />
 
           <View style={[styles.codeBadge, !previewCode && styles.codeBadgeHidden]}>
             <MaterialCommunityIcons name="barcode" size={16} color={COLORS.primary} />
             <Text style={styles.codeBadgeLabel}>Code</Text>
-            <Text style={styles.codeBadgeValue} selectable>
+            <Text style={styles.codeBadgeValue}>
               {previewCode || '—'}
             </Text>
           </View>
@@ -312,7 +390,7 @@ export default function AdherentFormScreen({ navigation, route }) {
             <Text style={[styles.pickerValue, !form.discipline && { color: COLORS.textMuted }]}>
               {form.discipline || 'Choisir une discipline...'}
             </Text>
-            <MaterialCommunityIcons name={showDiscPicker ? 'chevron-up' : 'chevron-down'} size={20} color={COLORS.textMuted} />
+            <MaterialCommunityIcons name="chevron-down" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
           {errors.discipline ? <Text style={styles.errorMsg}>{errors.discipline}</Text> : null}
           {showDiscPicker ? (
@@ -331,6 +409,121 @@ export default function AdherentFormScreen({ navigation, route }) {
           ) : null}
         </View>
 
+        {!isEdit ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <MaterialCommunityIcons name="cash-register" size={20} color={COLORS.primary} />
+              <Text style={styles.sectionTitle}>Paiement à l'inscription</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.toggleRowBox}
+              onPress={() => setPayAtRegistration(v => !v)}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons
+                name={payAtRegistration ? 'checkbox-marked-circle' : 'checkbox-blank-circle-outline'}
+                size={22}
+                color={payAtRegistration ? COLORS.primary : COLORS.textMuted}
+              />
+              <Text style={styles.toggleRowLabel}>
+                Enregistrer un paiement immédiat
+              </Text>
+            </TouchableOpacity>
+
+            {payAtRegistration ? (
+              <View style={{ gap: 12, marginTop: 4 }}>
+                <Text style={styles.fieldLabel}>Montant perçu</Text>
+                <View style={styles.optionGrid}>
+                  <TouchableOpacity
+                    style={[styles.optionChip, paymentOption === 'inscription' && styles.optionChipActive]}
+                    onPress={() => setPaymentOption('inscription')}
+                  >
+                    <Text style={[styles.optionChipText, paymentOption === 'inscription' && styles.optionChipTextActive]}>
+                      Frais d'inscription ({config?.fraisInscription || 2000} DA)
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.optionChip, paymentOption === 'inscription_mensualite' && styles.optionChipActive]}
+                    onPress={() => setPaymentOption('inscription_mensualite')}
+                  >
+                    <Text style={[styles.optionChipText, paymentOption === 'inscription_mensualite' && styles.optionChipTextActive]}>
+                      Inscription + 1er mois ({(config?.fraisInscription || 2000) + (config?.fraisMensuel || 1500)} DA)
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.optionChip, paymentOption === 'custom' && styles.optionChipActive]}
+                    onPress={() => setPaymentOption('custom')}
+                  >
+                    <Text style={[styles.optionChipText, paymentOption === 'custom' && styles.optionChipTextActive]}>
+                      Autre montant personnalisé
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {paymentOption === 'custom' ? (
+                  <FormField
+                    label="Saisir le montant payé (DA)"
+                    value={customAmount}
+                    onChangeText={setCustomAmount}
+                    keyboardType="numeric"
+                    placeholder="ex: 2000"
+                  />
+                ) : null}
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Mode de paiement</Text>
+                  <View style={styles.modeRow}>
+                    {['Espèces', 'Chèque', 'Virement'].map(mode => (
+                      <TouchableOpacity
+                        key={mode}
+                        style={[styles.modeBtn, paymentMode === mode && styles.modeBtnActive]}
+                        onPress={() => setPaymentMode(mode)}
+                      >
+                        <Text style={[styles.modeText, paymentMode === mode && styles.modeTextActive]}>
+                          {mode}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <FormField
+                  label="Notes / Référence (optionnel)"
+                  value={paymentNotes}
+                  onChangeText={setPaymentNotes}
+                  placeholder="ex: N° de chèque, reçu..."
+                  autoCapitalize="sentences"
+                />
+
+                {/* Live Payment Summary Box */}
+                <View style={styles.recapBox}>
+                  <View style={styles.recapRow}>
+                    <Text style={styles.recapLabel}>Montant versé :</Text>
+                    <Text style={styles.recapVerse}>{getInitialPaymentAmount().toLocaleString()} DA</Text>
+                  </View>
+
+                  {getInitialPaymentAmount() < (config?.fraisInscription || 2000) ? (
+                    <View style={styles.recapRow}>
+                      <Text style={styles.recapLabel}>Reste à payer (Inscription) :</Text>
+                      <Text style={styles.recapReste}>
+                        {((config?.fraisInscription || 2000) - getInitialPaymentAmount()).toLocaleString()} DA
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.recapRow}>
+                      <Text style={styles.recapLabel}>Statut inscription :</Text>
+                      <Text style={styles.recapSuccess}>Frais d'inscription réglés (100%)</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave} activeOpacity={0.85} disabled={loading}>
           {loading ? (
             <ActivityIndicator color="#fff" />
@@ -345,6 +538,17 @@ export default function AdherentFormScreen({ navigation, route }) {
         </TouchableOpacity>
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {createdAdherent && (
+        <AdherentCardModal
+          visible={showCardModal}
+          adherent={createdAdherent}
+          onClose={() => {
+            setShowCardModal(false);
+            navigation.goBack();
+          }}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -471,6 +675,112 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
   },
   discText: { color: COLORS.textPrimary, fontSize: 14 },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  toggleRowBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: COLORS.bgInput,
+    padding: 12,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  toggleRowLabel: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  optionGrid: {
+    gap: 8,
+  },
+  optionChip: {
+    backgroundColor: COLORS.bgInput,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  optionChipActive: {
+    backgroundColor: COLORS.primary + '15',
+    borderColor: COLORS.primary,
+  },
+  optionChipText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  optionChipTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  modeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    backgroundColor: COLORS.bgInput,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  modeBtnActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary + '15',
+  },
+  modeText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modeTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  recapBox: {
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.md,
+    padding: 12,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: COLORS.primary + '35',
+    marginTop: 4,
+  },
+  recapRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  recapLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  recapVerse: {
+    color: COLORS.primary,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  recapReste: {
+    color: COLORS.warning,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  recapSuccess: {
+    color: COLORS.success,
+    fontWeight: '700',
+    fontSize: 13,
+  },
   saveBtn: {
     margin: 16,
     marginTop: 20,

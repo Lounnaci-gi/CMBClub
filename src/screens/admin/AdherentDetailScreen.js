@@ -34,6 +34,7 @@ export default function AdherentDetailScreen({ navigation, route }) {
   const [refreshing, setRefreshing] = useState(false);
   const [account, setAccount] = useState(null);
   const [enrolled, setEnrolled] = useState(false);
+  const [showCardModal, setShowCardModal] = useState(false);
 
   const adherent = adherents.find(a => a.id === adherentId);
 
@@ -206,6 +207,15 @@ export default function AdherentDetailScreen({ navigation, route }) {
             <MaterialCommunityIcons name="pencil" size={18} color={COLORS.primary} />
             <Text style={[styles.actionText, { color: COLORS.primary }]}>Modifier</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderColor: COLORS.primary + '50' }]}
+            onPress={() => setShowCardModal(true)}
+          >
+            <MaterialCommunityIcons name="badge-account-horizontal" size={18} color={COLORS.primary} />
+            <Text style={[styles.actionText, { color: COLORS.primary }]}>Carte</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.actionBtn, { borderColor: COLORS.success + '40' }]}
             onPress={() => navigation.navigate('PaymentDetail', { adherentId: adherent.id })}
@@ -213,6 +223,7 @@ export default function AdherentDetailScreen({ navigation, route }) {
             <MaterialCommunityIcons name="cash" size={18} color={COLORS.success} />
             <Text style={[styles.actionText, { color: COLORS.success }]}>Paiements</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.actionBtn, { borderColor: COLORS.danger + '40' }]}
             onPress={handleDelete}
@@ -320,6 +331,12 @@ export default function AdherentDetailScreen({ navigation, route }) {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <AdherentCardModal
+        visible={showCardModal}
+        adherent={adherent}
+        onClose={() => setShowCardModal(false)}
+      />
     </View>
   );
 }
