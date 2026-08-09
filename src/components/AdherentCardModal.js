@@ -18,7 +18,6 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
 
   const category = adherent.dateNaissance ? getCategoryByAge(adherent.dateNaissance) : { label: 'Inconnu', color: COLORS.primary, icon: '⚽' };
   const qrData = buildAdherentQrData(adherent, category.label);
-  const qrDataString = JSON.stringify(qrData, null, 2);
   const qrImageUrl = getQrCodeImageUrl(qrData);
 
   const generatePrintableHtml = () => {
@@ -379,14 +378,6 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
                   <Text style={styles.qrLabel}>SCAN QR</Text>
                 </View>
               </View>
-            </View>
-
-            <View style={styles.qrDataInfoBox}>
-              <View style={styles.qrDataHeader}>
-                <MaterialCommunityIcons name="qrcode-scan" size={16} color={COLORS.primary} />
-                <Text style={styles.qrDataTitle}>Données encodées dans le QR Code :</Text>
-              </View>
-              <Text style={styles.qrDataText}>{qrDataString}</Text>
             </View>
           </ScrollView>
 

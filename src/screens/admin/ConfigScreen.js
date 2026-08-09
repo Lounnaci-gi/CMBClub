@@ -11,7 +11,12 @@ import useStore from '../../store/useStore';
 import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
 
 export default function ConfigScreen() {
-  const { config, updateConfig, remises, loadRemises, createRemise, updateRemise, deleteRemise, logout } = useStore();
+  const {
+    config, updateConfig,
+    remises, loadRemises, createRemise, updateRemise, deleteRemise,
+    disciplines, loadDisciplines, createDiscipline, updateDiscipline, deleteDiscipline,
+    logout,
+  } = useStore();
   const [fraisInscription, setFraisInscription] = useState(String(config.fraisInscription || 2000));
   const [fraisMensuel, setFraisMensuel] = useState(String(config.fraisMensuel || 1500));
   const [showRemiseModal, setShowRemiseModal] = useState(false);
@@ -20,7 +25,15 @@ export default function ConfigScreen() {
   const [remisePct, setRemisePct] = useState('');
   const [configSaved, setConfigSaved] = useState(false);
 
-  useFocusEffect(useCallback(() => { loadRemises(); }, []));
+  // Disciplines state
+  const [showDiscModal, setShowDiscModal] = useState(false);
+  const [editingDisc, setEditingDisc] = useState(null);
+  const [discNom, setDiscNom] = useState('');
+
+  useFocusEffect(useCallback(() => {
+    loadRemises();
+    loadDisciplines();
+  }, []));
 
   const handleSaveConfig = async () => {
     const fi = parseFloat(fraisInscription);
@@ -60,6 +73,39 @@ export default function ConfigScreen() {
     Alert.alert('Supprimer la remise', 'Confirmer la suppression ?', [
       { text: 'Annuler', style: 'cancel' },
       { text: 'Supprimer', style: 'destructive', onPress: () => deleteRemise(id) },
+    ]);
+  };
+
+  // Discipline handlers
+  const openDiscModal = (disc = null) => {
+    setEditingDisc(disc);
+    setDiscNom(disc?.nom || '');
+    setShowDiscModal(true);
+  };
+
+  const handleSaveDisc = async () => {
+    const nom = discNom.trim();
+    if (!nom) {
+      Alert.alert('Erreur', 'Nom de la discipline requis');
+      return;
+    }
+    try {
+      if (editingDisc) {
+        await updateDiscipline({ ...editingDisc, nom }, editingDisc.nom);
+      } else {
+        const slug = nom.toLowerCase().replace(/[^a-z0-9]/g, '');
+        await createDiscipline({ id: `disc-${Date.now()}-${slug}`, nom });
+      }
+      setShowDiscModal(false);
+    } catch (e) {
+      Alert.alert('Erreur', e.message || 'Impossible d\'enregistrer la discipline');
+    }
+  };
+
+  const handleDeleteDisc = (disc) => {
+    Alert.alert('Supprimer la discipline', `Confirmer la suppression de "${disc.nom}" ?`, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Supprimer', style: 'destructive', onPress: () => deleteDiscipline(disc.id) },
     ]);
   };
 
@@ -109,6 +155,41 @@ export default function ConfigScreen() {
           <MaterialCommunityIcons name={configSaved ? 'check' : 'content-save'} size={18} color="#fff" />
           <Text style={styles.saveBtnText}>{configSaved ? 'Enregistré !' : 'Sauvegarder les tarifs'}</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Disciplines */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="run" size={20} color={COLORS.primary} />
+          <Text style={styles.sectionTitle}>Disciplines sportives</Text>
+          <TouchableOpacity style={styles.addRemiseBtn} onPress={() => openDiscModal()}>
+            <MaterialCommunityIcons name="plus" size={18} color={COLORS.primary} />
+            <Text style={styles.addRemiseText}>Ajouter</Text>
+          </TouchableOpacity>
+        </View>
+
+        {disciplines.length === 0 ? (
+          <Text style={styles.emptyText}>Aucune discipline configurée</Text>
+        ) : (
+          disciplines.map(d => (
+            <View key={d.id} style={styles.remiseCard}>
+              <View style={styles.discIconBox}>
+                <MaterialCommunityIcons name="trophy-outline" size={22} color={COLORS.primary} />
+              </View>
+              <View style={styles.remiseInfo}>
+                <Text style={styles.remiseLabel}>{d.nom}</Text>
+              </View>
+              <View style={styles.remiseActions}>
+                <TouchableOpacity onPress={() => openDiscModal(d)} style={styles.iconBtn}>
+                  <MaterialCommunityIcons name="pencil" size={18} color={COLORS.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDeleteDisc(d)} style={styles.iconBtn}>
+                  <MaterialCommunityIcons name="trash-can" size={18} color={COLORS.danger} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
       </View>
 
       {/* Remises */}
@@ -163,6 +244,35 @@ export default function ConfigScreen() {
       </TouchableOpacity>
 
       <View style={{ height: 40 }} />
+
+      {/* Discipline Modal */}
+      <Modal visible={showDiscModal} transparent animationType="slide" onRequestClose={() => setShowDiscModal(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{editingDisc ? 'Modifier la discipline' : 'Nouvelle discipline'}</Text>
+
+            <Text style={styles.fieldLabel}>Nom de la discipline</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={discNom}
+              onChangeText={setDiscNom}
+              placeholder="Ex: Football, Taekwondo..."
+              placeholderTextColor={COLORS.textMuted}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowDiscModal(false)}>
+                <Text style={styles.cancelText}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSaveDisc}>
+                <MaterialCommunityIcons name="content-save" size={18} color="#fff" />
+                <Text style={styles.saveBtnText}>Enregistrer</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Remise Modal */}
       <Modal visible={showRemiseModal} transparent animationType="slide" onRequestClose={() => setShowRemiseModal(false)}>
@@ -300,6 +410,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: COLORS.secondary + '40',
+  },
+  discIconBox: {
+    width: 44,
+    height: 44,
+    backgroundColor: COLORS.primary + '15',
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primary + '30',
   },
   remisePct: { color: COLORS.secondary, fontWeight: '800', fontSize: 16 },
   remiseInfo: { flex: 1 },

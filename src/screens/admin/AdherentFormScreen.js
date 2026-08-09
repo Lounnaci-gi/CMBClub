@@ -53,7 +53,21 @@ function FormField({
 export default function AdherentFormScreen({ navigation, route }) {
   const { adherentId } = route.params || {};
   const isEdit = !!adherentId;
-  const { adherents, createAdherent, updateAdherent, saisonActive, config, createPaiement, enrollAdherent } = useStore();
+  const {
+    adherents, createAdherent, updateAdherent, saisonActive, config,
+    createPaiement, enrollAdherent, disciplines, loadDisciplines,
+  } = useStore();
+
+  useEffect(() => {
+    loadDisciplines();
+  }, [loadDisciplines]);
+
+  const activeDisciplines = useMemo(() => {
+    if (disciplines && disciplines.length > 0) {
+      return disciplines.map(d => d.nom);
+    }
+    return DISCIPLINES;
+  }, [disciplines]);
 
   const [form, setForm] = useState({
     code: '',
@@ -395,7 +409,7 @@ export default function AdherentFormScreen({ navigation, route }) {
           {errors.discipline ? <Text style={styles.errorMsg}>{errors.discipline}</Text> : null}
           {showDiscPicker ? (
             <View style={styles.pickerDropdown}>
-              {DISCIPLINES.map(d => (
+              {activeDisciplines.map(d => (
                 <TouchableOpacity
                   key={d}
                   style={[styles.discItem, form.discipline === d && { backgroundColor: COLORS.primary + '20' }]}

@@ -2,8 +2,9 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Image, RefreshControl,
+  TextInput, Image, RefreshControl, Alert, ActivityIndicator,
 } from 'react-native';
+import * as Print from 'expo-print';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
@@ -12,6 +13,7 @@ import CategoryBadge from '../../components/CategoryBadge';
 import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
 import { CATEGORIES, DISCIPLINES, getCategoryByAge } from '../../utils/categories';
 import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/payments';
+import { formatDate } from '../../utils/seasons';
 import { getPaymentStatusByAdherent } from '../../database/database';
 
 const STATUS_FILTERS = [
@@ -22,23 +24,25 @@ const STATUS_FILTERS = [
 ];
 
 export default function AdherentListScreen({ navigation }) {
-  const { adherents, loadAdherents, saisonActive, loadSaisons } = useStore();
+  const { adherents, loadAdherents, saisonActive, loadSaisons, disciplines, loadDisciplines } = useStore();
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('all');
   const [discFilter, setDiscFilter] = useState('all');
   const [payFilter, setPayFilter] = useState('all');
   const [payStatusMap, setPayStatusMap] = useState({});
   const [refreshing, setRefreshing] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const load = useCallback(async () => {
     await loadSaisons();
     await loadAdherents();
+    await loadDisciplines();
     const saison = useStore.getState().saisonActive;
     if (saison) {
       const map = await getPaymentStatusByAdherent(saison.id);
       setPayStatusMap(map);
     }
-  }, [loadAdherents, loadSaisons]);
+  }, [loadAdherents, loadSaisons, loadDisciplines]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -53,10 +57,15 @@ export default function AdherentListScreen({ navigation }) {
     ...CATEGORIES.map(c => ({ value: c.label, label: c.label, icon: c.icon, color: c.color })),
   ], []);
 
-  const disciplineFilters = useMemo(() => [
-    { value: 'all', label: 'Toutes' },
-    ...DISCIPLINES.map(d => ({ value: d, label: d })),
-  ], []);
+  const disciplineFilters = useMemo(() => {
+    const list = (disciplines && disciplines.length > 0)
+      ? disciplines.map(d => d.nom)
+      : DISCIPLINES;
+    return [
+      { value: 'all', label: 'Toutes' },
+      ...list.map(d => ({ value: d, label: d })),
+    ];
+  }, [disciplines]);
 
   const filtered = useMemo(() => {
     return adherents.filter(a => {
@@ -75,6 +84,124 @@ export default function AdherentListScreen({ navigation }) {
       return true;
     });
   }, [adherents, search, catFilter, discFilter, payFilter, payStatusMap]);
+
+  const handlePrintList = async () => {
+    if (filtered.length === 0) {
+      Alert.alert('Information', 'Aucun adhérent à imprimer avec les filtres actuels.');
+      return;
+    }
+    setPrinting(true);
+    try {
+      const now = new Date().toLocaleDateString('fr-FR', {
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      const saisonText = saisonActive ? saisonActive.label : 'N/A';
+      const catText = catFilter === 'all' ? 'Toutes' : catFilter;
+      const discText = discFilter === 'all' ? 'Toutes' : discFilter;
+      const payText = payFilter === 'all' ? 'Tous' : getStatusLabel(payFilter);
+
+      const rowsHtml = filtered.map((item, index) => {
+        const cat = getCategoryByAge(item.dateNaissance);
+        const st = payStatusMap[item.id];
+        const stLabel = st ? getStatusLabel(st) : '—';
+        const stColor = st ? getStatusColor(st) : '#888';
+        const birthDate = formatDate(item.dateNaissance);
+
+        return `
+          <tr style="border-bottom: 1px solid #E2E8F0;">
+            <td style="padding: 8px 10px; text-align: center; font-weight: 600; color: #64748B;">${index + 1}</td>
+            <td style="padding: 8px 10px; font-family: monospace; font-weight: 700; color: #0F172A;">${item.code}</td>
+            <td style="padding: 8px 10px; font-weight: 700; color: #0F172A;">${item.nom.toUpperCase()} ${item.prenom}</td>
+            <td style="padding: 8px 10px; color: #334155;">${cat.label}</td>
+            <td style="padding: 8px 10px; font-weight: 600; color: #0284C7;">${item.discipline || '—'}</td>
+            <td style="padding: 8px 10px; color: #475569;">${birthDate}</td>
+            <td style="padding: 8px 10px; color: #475569;">${item.telephone || '—'}</td>
+            <td style="padding: 8px 10px;">
+              <span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; color: ${stColor}; background-color: ${stColor}18; border: 1px solid ${stColor}40;">
+                ${stLabel}
+              </span>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Liste des Adhérents - CMB CLUB</title>
+            <style>
+              @page { size: A4 landscape; margin: 12mm; }
+              body { font-family: 'Segoe UI', Arial, sans-serif; background: #ffffff; color: #0F172A; margin: 0; padding: 10px; }
+              .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1DD1A1; padding-bottom: 12px; margin-bottom: 15px; }
+              .title-box h1 { margin: 0; font-size: 22px; font-weight: 900; color: #0A1520; letter-spacing: 1px; }
+              .title-box p { margin: 3px 0 0 0; font-size: 12px; color: #64748B; }
+              .meta-box { text-align: right; font-size: 11px; color: #475569; }
+              .meta-badge { display: inline-block; background: #0A1520; color: #1DD1A1; font-weight: 700; padding: 3px 10px; border-radius: 12px; margin-bottom: 4px; }
+              .filter-bar { display: flex; gap: 15px; background: #F8FAFC; border: 1px solid #E2E8F0; padding: 8px 14px; border-radius: 8px; font-size: 11.5px; margin-bottom: 15px; }
+              .filter-item { font-weight: 600; color: #334155; }
+              .filter-item span { color: #0F172A; font-weight: 700; }
+              table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+              th { background: #0A1520; color: #FFFFFF; text-align: left; padding: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+              th:first-child { border-top-left-radius: 6px; }
+              th:last-child { border-top-right-radius: 6px; }
+              .footer { margin-top: 20px; display: flex; justify-content: space-between; font-size: 10px; color: #94A3B8; border-top: 1px solid #E2E8F0; padding-top: 8px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div class="title-box">
+                <h1>🏆 CMB CLUB - LISTE DES ADHÉRENTS</h1>
+                <p>Club Omnisports CMB</p>
+              </div>
+              <div class="meta-box">
+                <div class="meta-badge">Saison ${saisonText}</div>
+                <div>Imprimé le : ${now}</div>
+                <div>Total adhérents : <strong>${filtered.length}</strong></div>
+              </div>
+            </div>
+
+            <div class="filter-bar">
+              <div class="filter-item">Catégorie : <span>${catText}</span></div>
+              <div class="filter-item">Discipline : <span>${discText}</span></div>
+              <div class="filter-item">Statut paiement : <span>${payText}</span></div>
+              ${search ? `<div class="filter-item">Recherche : <span>"${search}"</span></div>` : ''}
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 30px; text-align: center;">#</th>
+                  <th style="width: 90px;">Code</th>
+                  <th>Nom & Prénom</th>
+                  <th>Catégorie</th>
+                  <th>Discipline</th>
+                  <th>Date Naiss.</th>
+                  <th>Téléphone</th>
+                  <th>Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+
+            <div class="footer">
+              <div>CMBClub App v1.0.0 — Document officiel</div>
+              <div>Page 1 sur 1</div>
+            </div>
+          </body>
+        </html>
+      `;
+
+      await Print.printAsync({ html });
+    } catch (e) {
+      Alert.alert('Erreur d\'impression', e.message);
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const renderItem = ({ item }) => {
     const cat = getCategoryByAge(item.dateNaissance);
@@ -145,7 +272,24 @@ export default function AdherentListScreen({ navigation }) {
       <Text style={styles.filterLabel}>Discipline</Text>
       <FilterBar filters={disciplineFilters} activeFilter={discFilter} onSelect={setDiscFilter} />
 
-      <Text style={styles.countText}>{filtered.length} adhérent{filtered.length > 1 ? 's' : ''}</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.countText}>{filtered.length} adhérent{filtered.length > 1 ? 's' : ''}</Text>
+        <TouchableOpacity
+          style={styles.printListBtn}
+          onPress={handlePrintList}
+          disabled={printing}
+          activeOpacity={0.8}
+        >
+          {printing ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <>
+              <MaterialCommunityIcons name="printer" size={16} color={COLORS.primary} />
+              <Text style={styles.printListText}>Imprimer la liste</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
 
       <FlatList
         data={filtered}
@@ -202,11 +346,33 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
   countText: {
     color: COLORS.textSecondary,
     fontSize: 13,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
+    fontWeight: '600',
+  },
+  printListBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary + '15',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.primary + '30',
+  },
+  printListText: {
+    color: COLORS.primary,
+    fontWeight: '700',
+    fontSize: 12,
   },
   list: { paddingHorizontal: 16, paddingBottom: 100, gap: 10 },
   card: {

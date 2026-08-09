@@ -6,11 +6,18 @@ import { buildAdherentCodeBase } from '../utils/adherentCode';
 import { computePaymentStatus, PAYMENT_STATUS } from '../utils/payments';
 
 let db = null;
+let dbInitPromise = null;
 
 export async function getDatabase() {
   if (db) return db;
-  db = await SQLite.openDatabaseAsync('cmbclub.db');
-  await initDatabase(db);
+  if (!dbInitPromise) {
+    dbInitPromise = (async () => {
+      const database = await SQLite.openDatabaseAsync('cmbclub.db');
+      await initDatabase(database);
+      db = database;
+    })();
+  }
+  await dbInitPromise;
   return db;
 }
 
@@ -98,6 +105,12 @@ async function initDatabase(database) {
       adherentId TEXT,
       createdAt TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS disciplines (
+      id TEXT PRIMARY KEY,
+      nom TEXT UNIQUE NOT NULL,
+      createdAt TEXT NOT NULL
+    );
   `);
 
   // Seed config defaults
@@ -129,6 +142,25 @@ async function initDatabase(database) {
   await database.runAsync(
     `INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) VALUES ('remise-fidelite', 'Remise Fidélité', 5, 1, datetime('now'))`,
   );
+
+  // Seed disciplines par défaut
+  const defaultDisciplines = [
+    'Football', 'Basketball', 'Volleyball', 'Handball',
+    'Judo', 'Karaté', 'Taekwondo', 'Boxe',
+    'Natation', 'Athlétisme', 'Tennis', 'Badminton',
+    'Cyclisme', 'Gym', 'Autre',
+  ];
+  for (const d of defaultDisciplines) {
+    const slug = d.toLowerCase().replace(/[^a-z0-9]/g, '');
+    try {
+      await database.runAsync(
+        `INSERT OR IGNORE INTO disciplines (id, nom, createdAt) VALUES (?, ?, datetime('now'))`,
+        [`disc-${slug}`, d],
+      );
+    } catch (_e) {
+      // ignore any seeding error to avoid blocking startup
+    }
+  }
 }
 
 // ──────────────── CONFIG ────────────────
@@ -481,4 +513,54 @@ export async function generateUniqueAdherentCode(data) {
     suffix += 1;
   }
   return code;
+}
+
+// ──────────────── DISCIPLINES ────────────────
+
+export async function getDisciplines() {
+  const db = await getDatabase();
+  return await db.getAllAsync('SELECT * FROM disciplines ORDER BY nom ASC');
+}
+
+export async function createDiscipline(discipline) {
+  const db = await getDatabase();
+  const createdAt = discipline.createdAt || new Date().toISOString();
+  try {
+    await db.runAsync(
+      `INSERT INTO disciplines (id, nom, createdAt) VALUES (?, ?, ?)`,
+      [discipline.id, discipline.nom.trim(), createdAt],
+    );
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE constraint failed: disciplines.nom')) {
+      throw new Error(`La discipline "${discipline.nom.trim()}" existe déjà.`);
+    }
+    throw e;
+  }
+}
+
+export async function updateDiscipline(discipline, oldNom) {
+  const db = await getDatabase();
+  try {
+    await db.runAsync(
+      `UPDATE disciplines SET nom = ? WHERE id = ?`,
+      [discipline.nom.trim(), discipline.id],
+    );
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE constraint failed: disciplines.nom')) {
+      throw new Error(`La discipline "${discipline.nom.trim()}" existe déjà.`);
+    }
+    throw e;
+  }
+  const trimmedNom = discipline.nom.trim();
+  if (oldNom && oldNom !== trimmedNom) {
+    await db.runAsync(
+      `UPDATE adherents SET discipline = ? WHERE discipline = ?`,
+      [trimmedNom, oldNom],
+    );
+  }
+}
+
+export async function deleteDiscipline(id) {
+  const db = await getDatabase();
+  await db.runAsync(`DELETE FROM disciplines WHERE id = ?`, [id]);
 }

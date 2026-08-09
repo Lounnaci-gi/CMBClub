@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import useStore from '../../store/useStore';
 import CategoryBadge from '../../components/CategoryBadge';
 import PaymentCard from '../../components/PaymentCard';
+import AdherentCardModal from '../../components/AdherentCardModal';
 import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
 import { getCategoryByAge, calculateAge } from '../../utils/categories';
 import { calculateBalance, generatePaymentSchedule, PAYMENT_STATUS } from '../../utils/payments';

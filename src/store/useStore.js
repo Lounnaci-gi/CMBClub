@@ -10,6 +10,7 @@ import {
   getPaiementsByAdherent,
   createPaiement, updatePaiement,
   getRemises, createRemise, updateRemise, deleteRemise,
+  getDisciplines, createDiscipline, updateDiscipline, deleteDiscipline,
   getStatsBySaison,
   refreshPaymentStatuses,
   ensureAdherentAccount,
@@ -104,6 +105,26 @@ const useStore = create((set, get) => ({
   deleteRemise: async (id) => {
     await deleteRemise(id);
     await get().loadRemises();
+  },
+
+  // ── Disciplines ──
+  disciplines: [],
+  loadDisciplines: async () => {
+    const disciplines = await getDisciplines();
+    set({ disciplines });
+  },
+  createDiscipline: async (discipline) => {
+    await createDiscipline(discipline);
+    await get().loadDisciplines();
+  },
+  updateDiscipline: async (discipline, oldNom) => {
+    await updateDiscipline(discipline, oldNom);
+    await get().loadDisciplines();
+    await get().loadAdherents();
+  },
+  deleteDiscipline: async (id) => {
+    await deleteDiscipline(id);
+    await get().loadDisciplines();
   },
 
   // ── Stats ──
