@@ -304,7 +304,7 @@ export async function getPaiementsByAdherent(adherentId, saisonId) {
 export async function getAllPaiementsBySaison(saisonId) {
   const db = await getDatabase();
   return await db.getAllAsync(
-    `SELECT p.*, a.nom, a.prenom, a.code FROM paiements p
+    `SELECT p.*, a.nom, a.prenom, a.code, a.discipline, a.dateNaissance FROM paiements p
      JOIN adherents a ON a.id = p.adherentId
      WHERE p.saisonId = ? ORDER BY p.statut, a.nom`,
     [saisonId],

@@ -40,7 +40,7 @@ export default function PhotoPicker({ value, onChange }) {
     requestAndLaunch(async () => {
       await ImagePicker.requestMediaLibraryPermissionsAsync();
       return ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaType?.images || ['images'],
         allowsEditing: true,
         aspect: [3, 4],
         quality: 0.8,
