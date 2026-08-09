@@ -557,5 +557,15 @@ export async function updateDiscipline(discipline, oldNom) {
 
 export async function deleteDiscipline(id) {
   const db = await getDatabase();
+  const disc = await db.getFirstAsync('SELECT nom FROM disciplines WHERE id = ?', [id]);
+  if (disc) {
+    const row = await db.getFirstAsync(
+      'SELECT COUNT(*) as count FROM adherents WHERE discipline = ?',
+      [disc.nom],
+    );
+    if (row && row.count > 0) {
+      throw new Error(`Impossible de supprimer "${disc.nom}" car ${row.count} adhérent(s) y sont inscrit(s).`);
+    }
+  }
   await db.runAsync(`DELETE FROM disciplines WHERE id = ?`, [id]);
 }

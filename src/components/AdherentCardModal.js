@@ -5,6 +5,7 @@ import {
   ActivityIndicator, ScrollView, Alert, Platform,
 } from 'react-native';
 import * as Print from 'expo-print';
+import * as FileSystem from 'expo-file-system/legacy';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import useTheme from '../theme/useTheme';
 import { getCategoryByAge } from '../utils/categories';
@@ -23,10 +24,10 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
   const qrImageUrl = getQrCodeImageUrl(qrData);
   const logoUri = Image.resolveAssetSource(require('../../assets/cmbclub.png')).uri;
 
-  const generatePrintableHtml = () => {
-    const photoHtml = adherent.photo
-      ? `<img src="${adherent.photo}" style="width: 100px; height: 120px; object-fit: cover; border-radius: 8px; border: 2px solid #1DD1A1;" />`
-      : `<div style="width: 100px; height: 120px; border-radius: 8px; background-color: #162A3B; display: flex; align-items: center; justify-content: center; font-size: 40px; border: 2px solid #1DD1A1;">${category.icon}</div>`;
+  const generatePrintableHtml = (photoSrc) => {
+    const photoHtml = photoSrc
+      ? `<img src="${photoSrc}" class="photo-img" />`
+      : `<div class="photo-placeholder">${category.icon}</div>`;
 
     return `
       <!DOCTYPE html>
@@ -273,7 +274,23 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
   const handlePrint = async () => {
     setPrinting(true);
     try {
-      const html = generatePrintableHtml();
+      let photoSrc = null;
+      if (adherent.photo) {
+        if (adherent.photo.startsWith('data:image')) {
+          photoSrc = adherent.photo;
+        } else {
+          try {
+            const base64 = await FileSystem.readAsStringAsync(adherent.photo, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            photoSrc = `data:image/jpeg;base64,${base64}`;
+          } catch (e) {
+            console.warn('Erreur de conversion photo Base64:', e);
+            photoSrc = adherent.photo;
+          }
+        }
+      }
+      const html = generatePrintableHtml(photoSrc);
       await Print.printAsync({ html });
     } catch (e) {
       Alert.alert('Erreur d\'impression', e.message);

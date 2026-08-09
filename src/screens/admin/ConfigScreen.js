@@ -111,7 +111,17 @@ export default function ConfigScreen() {
   const handleDeleteDisc = (disc) => {
     Alert.alert('Supprimer la discipline', `Confirmer la suppression de "${disc.nom}" ?`, [
       { text: 'Annuler', style: 'cancel' },
-      { text: 'Supprimer', style: 'destructive', onPress: () => deleteDiscipline(disc.id) },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteDiscipline(disc.id);
+          } catch (e) {
+            Alert.alert('Suppression impossible', e.message);
+          }
+        },
+      },
     ]);
   };
 
