@@ -5,6 +5,7 @@ import {
   ActivityIndicator, ScrollView, Alert, Platform,
 } from 'react-native';
 import * as Print from 'expo-print';
+import { File } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import useTheme from '../theme/useTheme';
@@ -280,13 +281,18 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
           photoSrc = adherent.photo;
         } else {
           try {
-            const base64 = await FileSystem.readAsStringAsync(adherent.photo, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
+            const file = new File(adherent.photo);
+            const base64 = await file.base64();
             photoSrc = `data:image/jpeg;base64,${base64}`;
           } catch (e) {
-            console.warn('Erreur de conversion photo Base64:', e);
-            photoSrc = adherent.photo;
+            try {
+              const base64 = await FileSystem.readAsStringAsync(adherent.photo, {
+                encoding: FileSystem.EncodingType.Base64,
+              });
+              photoSrc = `data:image/jpeg;base64,${base64}`;
+            } catch (_err) {
+              photoSrc = adherent.photo;
+            }
           }
         }
       }
