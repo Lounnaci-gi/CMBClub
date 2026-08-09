@@ -143,13 +143,8 @@ async function initDatabase(database) {
     `INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) VALUES ('remise-fidelite', 'Remise Fidélité', 5, 1, datetime('now'))`,
   );
 
-  // Seed disciplines par défaut
-  const defaultDisciplines = [
-    'Football', 'Basketball', 'Volleyball', 'Handball',
-    'Judo', 'Karaté', 'Taekwondo', 'Boxe',
-    'Natation', 'Athlétisme', 'Tennis', 'Badminton',
-    'Cyclisme', 'Gym', 'Autre',
-  ];
+  // Disciplines par défaut
+  const defaultDisciplines = ['KickBoxing', 'Natation'];
   for (const d of defaultDisciplines) {
     const slug = d.toLowerCase().replace(/[^a-z0-9]/g, '');
     try {

@@ -1,14 +1,18 @@
 // src/components/StatCard.js
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOWS } from '../theme/colors';
+import useTheme from '../theme/useTheme';
 
-export default function StatCard({ icon, label, value, color = COLORS.primary, suffix = '' }) {
+export default function StatCard({ icon, label, value, color, suffix = '' }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const resolvedColor = color ?? COLORS.primary;
+
   return (
     <View style={[styles.card, SHADOWS.card]}>
-      <View style={[styles.iconBox, { backgroundColor: color + '20' }]}>
-        <MaterialCommunityIcons name={icon} size={24} color={color} />
+      <View style={[styles.iconBox, { backgroundColor: resolvedColor + '20' }]}>
+        <MaterialCommunityIcons name={icon} size={24} color={resolvedColor} />
       </View>
       <Text style={styles.value}>{value}{suffix}</Text>
       <Text style={styles.label}>{label}</Text>
@@ -16,7 +20,7 @@ export default function StatCard({ icon, label, value, color = COLORS.primary, s
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   card: {
     flex: 1,
     backgroundColor: COLORS.bgCard,

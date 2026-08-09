@@ -2,6 +2,7 @@
 // Zustand global store
 
 import { create } from 'zustand';
+import { THEME_IDS } from '../theme/themes';
 import {
   getConfig, setConfig,
   getSaisons, getSaisonActive, createSaison, activateSaison,
@@ -24,13 +25,21 @@ const useStore = create((set, get) => ({
 
   // ── Config ──
   config: { fraisInscription: 2000, fraisMensuel: 1500 },
+  themeId: THEME_IDS.DARK,
   loadConfig: async () => {
     const config = await getConfig();
-    set({ config });
+    const themeId = config.theme && Object.values(THEME_IDS).includes(config.theme)
+      ? config.theme
+      : THEME_IDS.DARK;
+    set({ config, themeId });
   },
   updateConfig: async (key, value) => {
     await setConfig(key, value);
     set(state => ({ config: { ...state.config, [key]: parseFloat(value) || value } }));
+  },
+  setTheme: async (themeId) => {
+    await setConfig('theme', themeId);
+    set({ themeId });
   },
 
   // ── Saisons ──

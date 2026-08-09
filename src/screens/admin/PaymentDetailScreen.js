@@ -1,5 +1,5 @@
 // src/screens/admin/PaymentDetailScreen.js
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, Alert, RefreshControl,
@@ -8,11 +8,13 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import PaymentCard from '../../components/PaymentCard';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
 import { calculateBalance, getStatusColor, getStatusLabel, PAYMENT_STATUS } from '../../utils/payments';
 import { getPaiementsByAdherent, refreshPaymentStatuses } from '../../database/database';
 
 export default function PaymentDetailScreen({ route, navigation }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { adherentId } = route.params;
   const { adherents, saisonActive, remises, loadRemises, updatePaiement } = useStore();
   const [paiements, setPaiements] = useState([]);
@@ -258,7 +260,7 @@ export default function PaymentDetailScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   balanceCard: {
     backgroundColor: COLORS.primary,

@@ -1,17 +1,19 @@
 // src/components/AdherentCardModal.js
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Modal, TouchableOpacity, Image,
   ActivityIndicator, ScrollView, Alert, Platform,
 } from 'react-native';
 import * as Print from 'expo-print';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOWS } from '../theme/colors';
+import useTheme from '../theme/useTheme';
 import { getCategoryByAge } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 import { getQrCodeImageUrl, buildAdherentQrData } from '../utils/qrGenerator';
 
 export default function AdherentCardModal({ visible, adherent, onClose }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const [printing, setPrinting] = useState(false);
 
   if (!adherent) return null;
@@ -19,6 +21,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
   const category = adherent.dateNaissance ? getCategoryByAge(adherent.dateNaissance) : { label: 'Inconnu', color: COLORS.primary, icon: '⚽' };
   const qrData = buildAdherentQrData(adherent, category.label);
   const qrImageUrl = getQrCodeImageUrl(qrData);
+  const logoUri = Image.resolveAssetSource(require('../../assets/cmbclub.png')).uri;
 
   const generatePrintableHtml = () => {
     const photoHtml = adherent.photo
@@ -213,7 +216,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
             <div class="card">
               <div class="card-header">
                 <div class="logo-title">
-                  <span style="font-size: 16px;">🏆</span>
+                  <img src="${logoUri}" style="width: 28px; height: 28px; border-radius: 50%; object-fit: contain;" alt="CMB Club" />
                   <div>
                     <h1>CMB CLUB</h1>
                     <div class="subtitle">Carte Officielle d'Adhérent</div>
@@ -303,9 +306,11 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
             <View style={styles.cardVisual}>
               <View style={styles.cardHeaderVisual}>
                 <View style={styles.logoRow}>
-                  <View style={styles.logoCircle}>
-                    <MaterialCommunityIcons name="trophy" size={18} color={COLORS.secondary} />
-                  </View>
+                  <Image
+                    source={require('../../assets/cmbclub.png')}
+                    style={styles.logoImage}
+                    resizeMode="contain"
+                  />
                   <View>
                     <Text style={styles.clubTitle}>CMB CLUB</Text>
                     <Text style={styles.clubSub}>Carte Officielle d'Adhérent</Text>
@@ -409,7 +414,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   modalBg: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
@@ -476,13 +481,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  logoCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.bgCard,
-    alignItems: 'center',
-    justifyContent: 'center',
+  logoImage: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
   },
   clubTitle: {
     color: '#FFF',

@@ -1,5 +1,5 @@
 // src/screens/adherent/AdherentHomeScreen.js
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   RefreshControl, StatusBar, Image,
@@ -10,12 +10,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import PaymentCard from '../../components/PaymentCard';
 import CategoryBadge from '../../components/CategoryBadge';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
 import { getCategoryByAge, calculateAge } from '../../utils/categories';
 import { calculateBalance, PAYMENT_STATUS } from '../../utils/payments';
 import { getAdherentById, getPaiementsByAdherent } from '../../database/database';
 
 export default function AdherentHomeScreen() {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { user, saisonActive, loadSaisons, logout } = useStore();
   const [adherent, setAdherent] = useState(null);
   const [paiements, setPaiements] = useState([]);
@@ -159,7 +161,7 @@ export default function AdherentHomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: {
     paddingTop: 56,

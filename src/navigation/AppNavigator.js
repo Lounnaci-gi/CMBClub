@@ -1,9 +1,10 @@
 // src/navigation/AppNavigator.js
-import React from 'react';
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import React, { useMemo } from 'react';
+import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import useStore from '../store/useStore';
-import { COLORS } from '../theme/colors';
+import useTheme from '../theme/useTheme';
+import { THEME_IDS } from '../theme/themes';
 
 import LoginScreen from '../screens/auth/LoginScreen';
 import AdminDashboard from '../screens/admin/AdminDashboard';
@@ -18,27 +19,7 @@ import AdherentHomeScreen from '../screens/adherent/AdherentHomeScreen';
 
 const Stack = createNativeStackNavigator();
 
-const navTheme = {
-  ...DarkTheme,
-  colors: {
-    ...DarkTheme.colors,
-    background: COLORS.bg,
-    card: COLORS.bgCard,
-    text: COLORS.textPrimary,
-    border: COLORS.border,
-    primary: COLORS.primary,
-  },
-};
-
-const screenOptions = {
-  headerStyle: { backgroundColor: COLORS.bgCard },
-  headerTintColor: COLORS.textPrimary,
-  headerTitleStyle: { fontWeight: '700', fontSize: 17 },
-  headerShadowVisible: false,
-  contentStyle: { backgroundColor: COLORS.bg },
-};
-
-function AdminStack() {
+function AdminStack({ screenOptions }) {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen
@@ -87,7 +68,7 @@ function AdminStack() {
   );
 }
 
-function AdherentStack() {
+function AdherentStack({ screenOptions }) {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen
@@ -101,17 +82,41 @@ function AdherentStack() {
 
 export default function AppNavigator() {
   const user = useStore(s => s.user);
+  const { colors: COLORS, themeId } = useTheme();
+
+  const navTheme = useMemo(() => {
+    const base = themeId === THEME_IDS.LIGHT ? DefaultTheme : DarkTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        background: COLORS.bg,
+        card: COLORS.bgCard,
+        text: COLORS.textPrimary,
+        border: COLORS.border,
+        primary: COLORS.primary,
+      },
+    };
+  }, [COLORS, themeId]);
+
+  const screenOptions = useMemo(() => ({
+    headerStyle: { backgroundColor: COLORS.bgCard },
+    headerTintColor: COLORS.textPrimary,
+    headerTitleStyle: { fontWeight: '700', fontSize: 17 },
+    headerShadowVisible: false,
+    contentStyle: { backgroundColor: COLORS.bg },
+  }), [COLORS]);
 
   return (
     <NavigationContainer theme={navTheme}>
       {!user ? (
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: COLORS.bg } }}>
           <Stack.Screen name="Login" component={LoginScreen} />
         </Stack.Navigator>
       ) : user.role === 'admin' ? (
-        <AdminStack />
+        <AdminStack screenOptions={screenOptions} />
       ) : (
-        <AdherentStack />
+        <AdherentStack screenOptions={screenOptions} />
       )}
     </NavigationContainer>
   );

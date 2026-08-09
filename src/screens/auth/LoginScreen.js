@@ -1,5 +1,5 @@
 // src/screens/auth/LoginScreen.js
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   KeyboardAvoidingView, Platform, ActivityIndicator, Image,
@@ -9,9 +9,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getUserByCredentials } from '../../database/database';
 import useStore from '../../store/useStore';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
 
 export default function LoginScreen() {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -57,9 +59,11 @@ export default function LoginScreen() {
         {/* Logo & Brand */}
         <View style={styles.brand}>
           <View style={styles.logoRing}>
-            <View style={styles.logo}>
-              <MaterialCommunityIcons name="trophy" size={40} color={COLORS.secondary} />
-            </View>
+            <Image
+              source={require('../../../assets/cmbclub.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
           </View>
           <Text style={styles.appName}>CMBClub</Text>
           <Text style={styles.tagline}>Gestion des adhésions sportives</Text>
@@ -165,7 +169,7 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   gradient: { flex: 1 },
   container: {
     flex: 1,
@@ -185,12 +189,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   logo: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: COLORS.bgCard,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     ...SHADOWS.card,
   },
   appName: {

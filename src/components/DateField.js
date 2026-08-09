@@ -1,9 +1,9 @@
 // src/components/DateField.js
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, RADIUS } from '../theme/colors';
+import useTheme from '../theme/useTheme';
 import { formatDate } from '../utils/seasons';
 
 function parseIso(value) {
@@ -28,6 +28,8 @@ export default function DateField({
   maximumDate = new Date(),
   minimumDate = new Date(1950, 0, 1),
 }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const [show, setShow] = useState(false);
 
   const handleValueChange = (event, selected) => {
@@ -80,7 +82,7 @@ export default function DateField({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   fieldGroup: { gap: 6 },
   fieldLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
   input: {

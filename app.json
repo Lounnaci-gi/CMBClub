@@ -4,13 +4,13 @@
     "slug": "CMBClub",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/cmbclub.png",
     "userInterfaceStyle": "dark",
     "plugins": [
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-icon.png",
+          "image": "./assets/cmbclub.png",
           "resizeMode": "contain",
           "backgroundColor": "#0F1923"
         }
@@ -37,7 +37,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/android-icon-foreground.png",
+        "foregroundImage": "./assets/cmbclub.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png",
         "backgroundColor": "#0F1923"
@@ -45,7 +45,7 @@
       "package": "com.cmbclub.app"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/cmbclub.png"
     }
   }
 }

@@ -1,12 +1,14 @@
 // src/components/PaymentCard.js
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOWS } from '../theme/colors';
+import useTheme from '../theme/useTheme';
 import { getStatusColor, getStatusLabel, getStatusIcon } from '../utils/payments';
 import { formatDate } from '../utils/seasons';
 
 export default function PaymentCard({ paiement, onPress, showAdherent = false }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const statusColor = getStatusColor(paiement.statut);
   const statusLabel = getStatusLabel(paiement.statut);
   const statusIcon = getStatusIcon(paiement.statut);
@@ -85,7 +87,7 @@ export default function PaymentCard({ paiement, onPress, showAdherent = false })
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   card: {
     backgroundColor: COLORS.bgCard,
     borderRadius: RADIUS.md,

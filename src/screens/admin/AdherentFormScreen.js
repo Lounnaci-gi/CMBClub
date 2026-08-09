@@ -10,7 +10,7 @@ import useStore from '../../store/useStore';
 import PhotoPicker from '../../components/PhotoPicker';
 import CategoryBadge from '../../components/CategoryBadge';
 import DateField from '../../components/DateField';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
 import { DISCIPLINES, BLOOD_GROUPS, getCategoryByAge } from '../../utils/categories';
 import { generatePaymentSchedule, PAYMENT_STATUS } from '../../utils/payments';
 import { buildAdherentCodeBase, canGenerateAdherentCode } from '../../utils/adherentCode';
@@ -29,6 +29,8 @@ function FormField({
   autoCapitalize = 'words',
   required = false,
   error,
+  COLORS,
+  styles,
 }) {
   return (
     <View style={styles.fieldGroup}>
@@ -51,6 +53,8 @@ function FormField({
 }
 
 export default function AdherentFormScreen({ navigation, route }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { adherentId } = route.params || {};
   const isEdit = !!adherentId;
   const {
@@ -294,6 +298,8 @@ export default function AdherentFormScreen({ navigation, route }) {
                 onChangeText={v => set('nom', v)}
                 required
                 error={errors.nom}
+                COLORS={COLORS}
+                styles={styles}
               />
             </View>
             <View style={{ flex: 1 }}>
@@ -303,6 +309,8 @@ export default function AdherentFormScreen({ navigation, route }) {
                 onChangeText={v => set('prenom', v)}
                 required
                 error={errors.prenom}
+                COLORS={COLORS}
+                styles={styles}
               />
             </View>
           </View>
@@ -321,6 +329,8 @@ export default function AdherentFormScreen({ navigation, route }) {
             onChangeText={v => set('lieuNaissance', v)}
             required
             error={errors.lieuNaissance}
+            COLORS={COLORS}
+            styles={styles}
           />
 
           <FormField
@@ -329,6 +339,8 @@ export default function AdherentFormScreen({ navigation, route }) {
             onChangeText={v => set('telephone', v)}
             keyboardType="phone-pad"
             autoCapitalize="none"
+            COLORS={COLORS}
+            styles={styles}
           />
 
           <View style={[styles.codeBadge, !previewCode && styles.codeBadgeHidden]}>
@@ -348,6 +360,8 @@ export default function AdherentFormScreen({ navigation, route }) {
             value={form.taille}
             onChangeText={v => set('taille', v)}
             keyboardType="numeric"
+            COLORS={COLORS}
+            styles={styles}
           />
 
           <View style={styles.fieldGroup}>
@@ -484,6 +498,8 @@ export default function AdherentFormScreen({ navigation, route }) {
                     onChangeText={setCustomAmount}
                     keyboardType="numeric"
                     placeholder="ex: 2000"
+                    COLORS={COLORS}
+                    styles={styles}
                   />
                 ) : null}
 
@@ -510,6 +526,8 @@ export default function AdherentFormScreen({ navigation, route }) {
                   onChangeText={setPaymentNotes}
                   placeholder="ex: N° de chèque, reçu..."
                   autoCapitalize="sentences"
+                  COLORS={COLORS}
+                  styles={styles}
                 />
 
                 {/* Live Payment Summary Box */}
@@ -567,7 +585,7 @@ export default function AdherentFormScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   scroll: { flex: 1 },
   section: {

@@ -1,5 +1,5 @@
 // src/screens/admin/SeasonScreen.js
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Modal, TextInput, Alert, RefreshControl,
@@ -8,10 +8,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { v4 as uuidv4 } from 'uuid';
 import useStore from '../../store/useStore';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
 import { generateSeasonLabel, getCurrentSeasonYear } from '../../utils/seasons';
 
 export default function SeasonScreen() {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { saisons, saisonActive, loadSaisons, createSaison, activateSaison } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [annee, setAnnee] = useState(String(getCurrentSeasonYear() + 1));
@@ -166,7 +168,7 @@ export default function SeasonScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: {
     flexDirection: 'row',

@@ -9,18 +9,19 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import PaymentCard from '../../components/PaymentCard';
 import FilterBar from '../../components/FilterBar';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
 import { getAllPaiementsBySaison, refreshPaymentStatuses } from '../../database/database';
 import { PAYMENT_STATUS } from '../../utils/payments';
 
-const STATUS_FILTERS = [
-  { value: 'all', label: 'Tous', icon: '📋' },
-  { value: PAYMENT_STATUS.EN_RETARD, label: 'En retard', icon: '⚠️', color: COLORS.danger },
-  { value: PAYMENT_STATUS.A_PAYER, label: 'À payer', icon: '🕐', color: COLORS.warning },
-  { value: PAYMENT_STATUS.PAYE, label: 'Payés', icon: '✅', color: COLORS.success },
-];
-
 export default function PaymentListScreen({ navigation }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const STATUS_FILTERS = useMemo(() => [
+    { value: 'all', label: 'Tous', icon: '📋' },
+    { value: PAYMENT_STATUS.EN_RETARD, label: 'En retard', icon: '⚠️', color: COLORS.danger },
+    { value: PAYMENT_STATUS.A_PAYER, label: 'À payer', icon: '🕐', color: COLORS.warning },
+    { value: PAYMENT_STATUS.PAYE, label: 'Payés', icon: '✅', color: COLORS.success },
+  ], [COLORS]);
   const { saisonActive, saisons, loadSaisons } = useStore();
   const [paiements, setPaiements] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
@@ -137,7 +138,7 @@ export default function PaymentListScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   banner: {
     backgroundColor: COLORS.bgCard,

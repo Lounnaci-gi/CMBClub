@@ -10,20 +10,21 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import FilterBar from '../../components/FilterBar';
 import CategoryBadge from '../../components/CategoryBadge';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
 import { CATEGORIES, DISCIPLINES, getCategoryByAge } from '../../utils/categories';
 import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
 import { getPaymentStatusByAdherent } from '../../database/database';
 
-const STATUS_FILTERS = [
-  { value: 'all', label: 'Tous', icon: '👥' },
-  { value: PAYMENT_STATUS.PAYE, label: 'À jour', icon: '✅', color: COLORS.success },
-  { value: PAYMENT_STATUS.EN_RETARD, label: 'En retard', icon: '⚠️', color: COLORS.danger },
-  { value: PAYMENT_STATUS.A_PAYER, label: 'À payer', icon: '🕐', color: COLORS.warning },
-];
-
 export default function AdherentListScreen({ navigation }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const STATUS_FILTERS = useMemo(() => [
+    { value: 'all', label: 'Tous', icon: '👥' },
+    { value: PAYMENT_STATUS.PAYE, label: 'À jour', icon: '✅', color: COLORS.success },
+    { value: PAYMENT_STATUS.EN_RETARD, label: 'En retard', icon: '⚠️', color: COLORS.danger },
+    { value: PAYMENT_STATUS.A_PAYER, label: 'À payer', icon: '🕐', color: COLORS.warning },
+  ], [COLORS]);
   const { adherents, loadAdherents, saisonActive, loadSaisons, disciplines, loadDisciplines } = useStore();
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('all');
@@ -317,7 +318,7 @@ export default function AdherentListScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   searchBox: {
     flexDirection: 'row',

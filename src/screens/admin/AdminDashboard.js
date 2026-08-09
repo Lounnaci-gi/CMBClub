@@ -1,5 +1,5 @@
 // src/screens/admin/AdminDashboard.js
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   RefreshControl, StatusBar,
@@ -9,9 +9,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import StatCard from '../../components/StatCard';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
 
 export default function AdminDashboard({ navigation }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { user, stats, saisonActive, loadStats, loadSaisons, loadAdherents, loadRemises, loadConfig, logout } = useStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
@@ -126,7 +128,7 @@ export default function AdminDashboard({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: {
     paddingTop: 56,

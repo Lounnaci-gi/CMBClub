@@ -1,9 +1,12 @@
 // src/components/FilterBar.js
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { COLORS, RADIUS } from '../theme/colors';
+import useTheme from '../theme/useTheme';
 
 export default function FilterBar({ filters, activeFilter, onSelect }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+
   return (
     <ScrollView
       horizontal
@@ -36,7 +39,7 @@ export default function FilterBar({ filters, activeFilter, onSelect }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   scroll: { flexGrow: 0 },
   container: {
     paddingHorizontal: 16,

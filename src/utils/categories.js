@@ -11,12 +11,7 @@ export const CATEGORIES = [
   { label: 'Vétéran',  minAge: 35, maxAge: 200, color: '#C8D6E5', icon: '🏆' },
 ];
 
-export const DISCIPLINES = [
-  'Football', 'Basketball', 'Volleyball', 'Handball',
-  'Judo', 'Karaté', 'Taekwondo', 'Boxe',
-  'Natation', 'Athlétisme', 'Tennis', 'Badminton',
-  'Cyclisme', 'Gym', 'Autre',
-];
+export const DISCIPLINES = ['KickBoxing', 'Natation'];
 
 export const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 

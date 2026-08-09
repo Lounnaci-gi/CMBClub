@@ -1,13 +1,15 @@
 // src/components/PhotoPicker.js
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Alert, Modal, Pressable,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOWS } from '../theme/colors';
+import useTheme from '../theme/useTheme';
 
 export default function PhotoPicker({ value, onChange }) {
+  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const [showModal, setShowModal] = useState(false);
 
   const requestAndLaunch = async (launcher) => {
@@ -126,7 +128,7 @@ export default function PhotoPicker({ value, onChange }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { alignItems: 'center', marginBottom: 8 },
   picker: {
     width: 130,

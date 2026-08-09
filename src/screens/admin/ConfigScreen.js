@@ -1,14 +1,15 @@
 // src/screens/admin/ConfigScreen.js
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
-  Alert, Modal, Switch,
+  Alert, Modal,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { v4 as uuidv4 } from 'uuid';
 import useStore from '../../store/useStore';
-import { COLORS, RADIUS, SHADOWS } from '../../theme/colors';
+import useTheme from '../../theme/useTheme';
+import { THEME_OPTIONS } from '../../theme/themes';
 
 export default function ConfigScreen() {
   const {
@@ -17,6 +18,9 @@ export default function ConfigScreen() {
     disciplines, loadDisciplines, createDiscipline, updateDiscipline, deleteDiscipline,
     logout,
   } = useStore();
+  const { colors: COLORS, RADIUS, shadows: SHADOWS, themeId, setTheme } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+
   const [fraisInscription, setFraisInscription] = useState(String(config.fraisInscription || 2000));
   const [fraisMensuel, setFraisMensuel] = useState(String(config.fraisMensuel || 1500));
   const [showRemiseModal, setShowRemiseModal] = useState(false);
@@ -25,7 +29,6 @@ export default function ConfigScreen() {
   const [remisePct, setRemisePct] = useState('');
   const [configSaved, setConfigSaved] = useState(false);
 
-  // Disciplines state
   const [showDiscModal, setShowDiscModal] = useState(false);
   const [editingDisc, setEditingDisc] = useState(null);
   const [discNom, setDiscNom] = useState('');
@@ -76,7 +79,10 @@ export default function ConfigScreen() {
     ]);
   };
 
-  // Discipline handlers
+  const handleThemeChange = async (id) => {
+    if (id !== themeId) await setTheme(id);
+  };
+
   const openDiscModal = (disc = null) => {
     setEditingDisc(disc);
     setDiscNom(disc?.nom || '');
@@ -109,8 +115,45 @@ export default function ConfigScreen() {
     ]);
   };
 
+  const getDisciplineIcon = (nom) => {
+    const key = nom.toLowerCase();
+    if (key.includes('natation') || key.includes('swim')) return 'swim';
+    if (key.includes('kick') || key.includes('box')) return 'boxing-glove';
+    return 'run';
+  };
+
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      {/* Thème */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="palette" size={20} color={COLORS.primary} />
+          <Text style={styles.sectionTitle}>Thème de l'application</Text>
+        </View>
+        <Text style={styles.sectionHint}>Choisissez l'apparence de l'interface</Text>
+        <View style={styles.themeGrid}>
+          {THEME_OPTIONS.map(option => {
+            const active = themeId === option.id;
+            return (
+              <TouchableOpacity
+                key={option.id}
+                style={[styles.themeCard, active && styles.themeCardActive]}
+                onPress={() => handleThemeChange(option.id)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.themePreview, { backgroundColor: option.preview }]}>
+                  <MaterialCommunityIcons name={option.icon} size={22} color="#fff" />
+                </View>
+                <Text style={[styles.themeLabel, active && styles.themeLabelActive]}>{option.label}</Text>
+                {active ? (
+                  <MaterialCommunityIcons name="check-circle" size={18} color={COLORS.primary} />
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
       {/* Tarifs */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -174,7 +217,7 @@ export default function ConfigScreen() {
           disciplines.map(d => (
             <View key={d.id} style={styles.remiseCard}>
               <View style={styles.discIconBox}>
-                <MaterialCommunityIcons name="trophy-outline" size={22} color={COLORS.primary} />
+                <MaterialCommunityIcons name={getDisciplineIcon(d.nom)} size={22} color={COLORS.primary} />
               </View>
               <View style={styles.remiseInfo}>
                 <Text style={styles.remiseLabel}>{d.nom}</Text>
@@ -237,7 +280,6 @@ export default function ConfigScreen() {
         <Text style={styles.aboutText}>CMBClub v1.0.0{'\n'}Gestion des adhésions sportives{'\n'}Mode hors ligne (SQLite local)</Text>
       </View>
 
-      {/* Logout */}
       <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
         <MaterialCommunityIcons name="logout" size={18} color={COLORS.danger} />
         <Text style={styles.logoutText}>Se déconnecter</Text>
@@ -257,7 +299,7 @@ export default function ConfigScreen() {
               style={styles.modalInput}
               value={discNom}
               onChangeText={setDiscNom}
-              placeholder="Ex: Football, Taekwondo..."
+              placeholder="Ex: Judo, Football..."
               placeholderTextColor={COLORS.textMuted}
             />
 
@@ -316,7 +358,7 @@ export default function ConfigScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   section: {
     backgroundColor: COLORS.bgCard,
@@ -339,6 +381,56 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     flex: 1,
+  },
+  sectionHint: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    marginTop: -6,
+  },
+  themeGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  themeCard: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.md,
+    padding: 12,
+    borderWidth: 2,
+    borderColor: COLORS.border,
+  },
+  themeCardActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary + '10',
+  },
+  themePreview: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  themeLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  themeLabelActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  discIconBox: {
+    width: 44,
+    height: 44,
+    backgroundColor: COLORS.primary + '15',
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primary + '30',
   },
   fieldGroup: { gap: 6 },
   fieldLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
@@ -410,16 +502,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: COLORS.secondary + '40',
-  },
-  discIconBox: {
-    width: 44,
-    height: 44,
-    backgroundColor: COLORS.primary + '15',
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.primary + '30',
   },
   remisePct: { color: COLORS.secondary, fontWeight: '800', fontSize: 16 },
   remiseInfo: { flex: 1 },
