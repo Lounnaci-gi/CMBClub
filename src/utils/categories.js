@@ -38,10 +38,4 @@ export function getCategoryByAge(dateNaissance) {
   return CATEGORIES.find(c => age >= c.minAge && age <= c.maxAge) || CATEGORIES[CATEGORIES.length - 1];
 }
 
-/**
- * Retourne la couleur de la catégorie
- */
-export function getCategoryColor(categorieLabel) {
-  const cat = CATEGORIES.find(c => c.label === categorieLabel);
-  return cat ? cat.color : '#888';
-}
+

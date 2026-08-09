@@ -19,7 +19,6 @@ export default function LoginScreen() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [activeRole, setActiveRole] = useState('admin');
   const setUser = useStore(s => s.setUser);
 
   const handleLogin = async () => {
@@ -33,12 +32,6 @@ export default function LoginScreen() {
       const user = await getUserByCredentials(username.trim(), password.trim());
       if (!user) {
         setError('Identifiants incorrects');
-      } else if (user.role !== activeRole) {
-        setError(
-          activeRole === 'admin'
-            ? 'Ce compte n\'est pas administrateur'
-            : 'Ce compte n\'est pas un compte adhérent',
-        );
       } else {
         setUser(user);
       }
@@ -69,36 +62,6 @@ export default function LoginScreen() {
           <Text style={styles.tagline}>Gestion des adhésions sportives</Text>
         </View>
 
-        {/* Role tabs */}
-        <View style={styles.roleTabs}>
-          <TouchableOpacity
-            style={[styles.roleTab, activeRole === 'admin' && styles.roleTabActive]}
-            onPress={() => setActiveRole('admin')}
-          >
-            <MaterialCommunityIcons
-              name="shield-account"
-              size={18}
-              color={activeRole === 'admin' ? COLORS.primary : COLORS.textMuted}
-            />
-            <Text style={[styles.roleTabText, activeRole === 'admin' && styles.roleTabTextActive]}>
-              Administrateur
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.roleTab, activeRole === 'adherent' && styles.roleTabActive]}
-            onPress={() => setActiveRole('adherent')}
-          >
-            <MaterialCommunityIcons
-              name="account"
-              size={18}
-              color={activeRole === 'adherent' ? COLORS.primary : COLORS.textMuted}
-            />
-            <Text style={[styles.roleTabText, activeRole === 'adherent' && styles.roleTabTextActive]}>
-              Adhérent
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Form */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Connexion</Text>
@@ -107,10 +70,10 @@ export default function LoginScreen() {
             <MaterialCommunityIcons name="account-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder={activeRole === 'adherent' ? 'Code adhérent' : 'Nom d\'utilisateur'}
+              placeholder="Identifiant"
               placeholderTextColor={COLORS.textMuted}
               value={username}
-              onChangeText={setUsername}
+              onChangeText={t => { setUsername(t); setError(''); }}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -123,7 +86,7 @@ export default function LoginScreen() {
               placeholder="Mot de passe"
               placeholderTextColor={COLORS.textMuted}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={t => { setPassword(t); setError(''); }}
               secureTextEntry={!showPass}
             />
             <TouchableOpacity onPress={() => setShowPass(v => !v)} style={styles.eyeBtn}>
@@ -152,14 +115,6 @@ export default function LoginScreen() {
               </>
             )}
           </TouchableOpacity>
-
-          <Text style={styles.hint}>
-            {activeRole === 'admin' ? (
-              <>Admin : <Text style={{ color: COLORS.primary }}>admin</Text> / <Text style={{ color: COLORS.primary }}>admin123</Text></>
-            ) : (
-              <>Identifiant = code adhérent · Mot de passe = date de naissance (AAMMJJ)</>
-            )}
-          </Text>
         </View>
 
         {/* Footer */}
@@ -205,34 +160,6 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     fontSize: 13,
     letterSpacing: 0.5,
   },
-  roleTabs: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.full,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  roleTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: RADIUS.full,
-  },
-  roleTabActive: {
-    backgroundColor: COLORS.primary + '20',
-    borderWidth: 1,
-    borderColor: COLORS.primary + '50',
-  },
-  roleTabText: {
-    color: COLORS.textMuted,
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  roleTabTextActive: { color: COLORS.primary },
   card: {
     backgroundColor: COLORS.bgCard,
     borderRadius: RADIUS.xl,
@@ -295,11 +222,6 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
-  },
-  hint: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    textAlign: 'center',
   },
   footer: {
     color: COLORS.textMuted,

@@ -5,8 +5,8 @@ import useTheme from '../theme/useTheme';
 import { CATEGORIES } from '../utils/categories';
 
 export default function CategoryBadge({ category, size = 'md' }) {
-  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
-  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const { colors: COLORS, RADIUS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS), [COLORS, RADIUS]);
   const cat = CATEGORIES.find(c => c.label === category) || CATEGORIES[0];
   const isSmall = size === 'sm';
 
@@ -20,7 +20,7 @@ export default function CategoryBadge({ category, size = 'md' }) {
   );
 }
 
-const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
+const createStyles = (COLORS, RADIUS) => StyleSheet.create({
   badge: {
     flexDirection: 'row',
     alignItems: 'center',

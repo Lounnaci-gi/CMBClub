@@ -1,7 +1,7 @@
 // src/utils/seasons.js
 // Helpers pour la gestion des saisons
 
-import { format, parse, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
+import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
 /**
@@ -56,8 +56,4 @@ export function formatDateTime(dateStr) {
   } catch {
     return dateStr;
   }
-}
-
-export function formatMonthYear(month, year) {
-  return getMonthLabel(month, year);
 }

@@ -22,8 +22,9 @@ export default function AdherentListScreen({ navigation }) {
   const STATUS_FILTERS = useMemo(() => [
     { value: 'all', label: 'Tous', icon: '👥' },
     { value: PAYMENT_STATUS.PAYE, label: 'À jour', icon: '✅', color: COLORS.success },
+    { value: PAYMENT_STATUS.AVANCE, label: 'Partiel', icon: '🔵', color: COLORS.info },
     { value: PAYMENT_STATUS.EN_RETARD, label: 'En retard', icon: '⚠️', color: COLORS.danger },
-    { value: PAYMENT_STATUS.A_PAYER, label: 'À payer', icon: '🕐', color: COLORS.warning },
+    { value: PAYMENT_STATUS.A_PAYER, label: 'Non Payé', icon: '🕐', color: COLORS.warning },
   ], [COLORS]);
   const { adherents, loadAdherents, saisonActive, loadSaisons, disciplines, loadDisciplines } = useStore();
   const [search, setSearch] = useState('');
@@ -79,6 +80,7 @@ export default function AdherentListScreen({ navigation }) {
       if (payFilter !== 'all') {
         const st = payStatusMap[a.id];
         if (payFilter === PAYMENT_STATUS.PAYE && st !== PAYMENT_STATUS.PAYE) return false;
+        if (payFilter === PAYMENT_STATUS.AVANCE && st !== PAYMENT_STATUS.AVANCE) return false;
         if (payFilter === PAYMENT_STATUS.EN_RETARD && st !== PAYMENT_STATUS.EN_RETARD) return false;
         if (payFilter === PAYMENT_STATUS.A_PAYER && st !== PAYMENT_STATUS.A_PAYER) return false;
       }

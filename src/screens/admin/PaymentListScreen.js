@@ -21,9 +21,10 @@ export default function PaymentListScreen({ navigation }) {
 
   const STATUS_FILTERS = useMemo(() => [
     { value: 'all', label: 'Tous', icon: '📋' },
-    { value: PAYMENT_STATUS.EN_RETARD, label: 'En retard', icon: '⚠️', color: COLORS.danger },
-    { value: PAYMENT_STATUS.A_PAYER, label: 'À payer', icon: '🕐', color: COLORS.warning },
     { value: PAYMENT_STATUS.PAYE, label: 'Payés', icon: '✅', color: COLORS.success },
+    { value: PAYMENT_STATUS.AVANCE, label: 'Partiel', icon: '🔵', color: COLORS.info },
+    { value: PAYMENT_STATUS.EN_RETARD, label: 'En retard', icon: '⚠️', color: COLORS.danger },
+    { value: PAYMENT_STATUS.A_PAYER, label: 'Non Payé', icon: '🕐', color: COLORS.warning },
   ], [COLORS]);
 
   const { saisonActive, saisons, loadSaisons, disciplines, loadDisciplines } = useStore();
@@ -98,9 +99,10 @@ export default function PaymentListScreen({ navigation }) {
 
   const counts = useMemo(() => ({
     all: paiements.length,
+    [PAYMENT_STATUS.PAYE]: paiements.filter(p => p.statut === PAYMENT_STATUS.PAYE).length,
+    [PAYMENT_STATUS.AVANCE]: paiements.filter(p => p.statut === PAYMENT_STATUS.AVANCE).length,
     [PAYMENT_STATUS.EN_RETARD]: paiements.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD).length,
     [PAYMENT_STATUS.A_PAYER]: paiements.filter(p => p.statut === PAYMENT_STATUS.A_PAYER).length,
-    [PAYMENT_STATUS.PAYE]: paiements.filter(p => p.statut === PAYMENT_STATUS.PAYE).length,
   }), [paiements]);
 
   const totalCollected = useMemo(() =>
@@ -111,6 +113,18 @@ export default function PaymentListScreen({ navigation }) {
     filtered.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD).reduce((s, p) => s + (p.montantDu - (p.remiseMontant || 0) - (p.montantPaye || 0)), 0),
     [filtered]
   );
+
+  // Totaux des colonnes sur la liste filtrée
+  const totals = useMemo(() => {
+    const totalDu = filtered.reduce((s, p) => s + (p.montantDu || 0), 0);
+    const totalVerse = filtered.reduce((s, p) => s + (p.montantPaye || 0), 0);
+    const totalRemise = filtered.reduce((s, p) => s + (p.remiseMontant || 0), 0);
+    const totalReste = filtered.reduce((s, p) => {
+      const net = (p.montantDu || 0) - (p.remiseMontant || 0);
+      return s + Math.max(0, net - (p.montantPaye || 0));
+    }, 0);
+    return { totalDu, totalVerse, totalRemise, totalReste };
+  }, [filtered]);
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -393,6 +407,32 @@ export default function PaymentListScreen({ navigation }) {
           />
         )}
         ListHeaderComponent={renderHeader}
+        ListFooterComponent={
+          filtered.length > 0 ? (
+            <View style={styles.totalsFooter}>
+              <View style={styles.totalsRow}>
+                <View style={styles.totalsCol}>
+                  <Text style={styles.totalsLabel}>Montant dû</Text>
+                  <Text style={styles.totalsValue}>{totals.totalDu.toLocaleString()} DA</Text>
+                </View>
+                <View style={styles.totalsDivider} />
+                <View style={styles.totalsCol}>
+                  <Text style={styles.totalsLabel}>Versé</Text>
+                  <Text style={[styles.totalsValue, { color: COLORS.success }]}>
+                    {totals.totalVerse.toLocaleString()} DA
+                  </Text>
+                </View>
+                <View style={styles.totalsDivider} />
+                <View style={styles.totalsCol}>
+                  <Text style={styles.totalsLabel}>Reste</Text>
+                  <Text style={[styles.totalsValue, { color: totals.totalReste > 0 ? COLORS.danger : COLORS.success }]}>
+                    {totals.totalReste.toLocaleString()} DA
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : null
+        }
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
@@ -587,9 +627,48 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 4,
   },
-  list: { paddingHorizontal: 16, paddingBottom: 40, gap: 8 },
+  list: { paddingHorizontal: 16, paddingBottom: 16, gap: 8 },
   empty: { alignItems: 'center', paddingTop: 40, gap: 12 },
   emptyText: { color: COLORS.textMuted, fontSize: 15 },
+  totalsFooter: {
+    marginHorizontal: 0,
+    marginTop: 8,
+    marginBottom: 24,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+    ...SHADOWS.card,
+  },
+  totalsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+  },
+  totalsCol: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  totalsDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: COLORS.border,
+  },
+  totalsLabel: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  totalsValue: {
+    color: COLORS.textPrimary,
+    fontSize: 15,
+    fontWeight: '800',
+  },
   modalBg: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',

@@ -12,7 +12,7 @@ import useTheme from '../../theme/useTheme';
 import { calculateBalance, getStatusColor, getStatusLabel, PAYMENT_STATUS } from '../../utils/payments';
 import { getPaiementsByAdherent, refreshPaymentStatuses } from '../../database/database';
 
-export default function PaymentDetailScreen({ route, navigation }) {
+export default function PaymentDetailScreen({ route }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { adherentId } = route.params;

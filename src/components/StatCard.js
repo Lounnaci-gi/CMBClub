@@ -6,7 +6,7 @@ import useTheme from '../theme/useTheme';
 
 export default function StatCard({ icon, label, value, color, suffix = '' }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
-  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const styles = useMemo(() => createStyles(COLORS, RADIUS), [COLORS, RADIUS]);
   const resolvedColor = color ?? COLORS.primary;
 
   return (
@@ -20,7 +20,7 @@ export default function StatCard({ icon, label, value, color, suffix = '' }) {
   );
 }
 
-const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
+const createStyles = (COLORS, RADIUS) => StyleSheet.create({
   card: {
     flex: 1,
     backgroundColor: COLORS.bgCard,

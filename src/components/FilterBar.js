@@ -4,8 +4,8 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import useTheme from '../theme/useTheme';
 
 export default function FilterBar({ filters, activeFilter, onSelect }) {
-  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
-  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const { colors: COLORS, RADIUS } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS, RADIUS), [COLORS, RADIUS]);
 
   return (
     <ScrollView
@@ -39,7 +39,7 @@ export default function FilterBar({ filters, activeFilter, onSelect }) {
   );
 }
 
-const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
+const createStyles = (COLORS, RADIUS) => StyleSheet.create({
   scroll: { flexGrow: 0 },
   container: {
     paddingHorizontal: 16,

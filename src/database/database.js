@@ -261,15 +261,6 @@ export async function deleteAdherent(id) {
 
 // ──────────────── ADHÉRENT-SAISONS ────────────────
 
-export async function getAdherentSaisons(adherentId) {
-  const db = await getDatabase();
-  return await db.getAllAsync(
-    `SELECT as2.*, s.label, s.annee FROM adherent_saisons as2
-     JOIN saisons s ON s.id = as2.saisonId
-     WHERE as2.adherentId = ? ORDER BY s.annee DESC`,
-    [adherentId],
-  );
-}
 
 export async function enrollAdherentInSaison(adherentId, saisonId, dateInscription) {
   const db = await getDatabase();
@@ -280,16 +271,6 @@ export async function enrollAdherentInSaison(adherentId, saisonId, dateInscripti
   );
 }
 
-export async function getAdherentsBySaison(saisonId) {
-  const db = await getDatabase();
-  return await db.getAllAsync(
-    `SELECT a.*, as2.dateInscription FROM adherents a
-     JOIN adherent_saisons as2 ON as2.adherentId = a.id
-     WHERE as2.saisonId = ? AND as2.actif = 1
-     ORDER BY a.nom, a.prenom`,
-    [saisonId],
-  );
-}
 
 // ──────────────── PAIEMENTS ────────────────
 

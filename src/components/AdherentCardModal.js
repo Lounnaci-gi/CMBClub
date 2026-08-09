@@ -619,32 +619,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     fontSize: 8,
     fontWeight: '800',
   },
-  qrDataInfoBox: {
-    backgroundColor: COLORS.bgInput,
-    borderRadius: RADIUS.md,
-    padding: 12,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  qrDataHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  qrDataTitle: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  qrDataText: {
-    color: COLORS.textMuted,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    fontSize: 11,
-    backgroundColor: COLORS.bgCard,
-    padding: 8,
-    borderRadius: RADIUS.sm,
-  },
+
   footer: {
     flexDirection: 'row',
     gap: 10,
