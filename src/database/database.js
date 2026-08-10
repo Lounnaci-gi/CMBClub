@@ -148,10 +148,20 @@ async function initDatabase(database) {
     `INSERT OR IGNORE INTO config (key, value) VALUES ('fraisMensuel', '1500')`,
   );
 
-  // Seed admin user
+  // Seed single admin user
   await database.runAsync(
     `INSERT OR IGNORE INTO users (id, username, password, role, createdAt) VALUES ('admin-001', 'admin', 'admin123', 'admin', datetime('now'))`,
   );
+
+  // Enforce single admin policy: keep only one admin user, downgrade any extra admin users to 'adherent'
+  const admins = await database.getAllAsync("SELECT id FROM users WHERE role = 'admin' ORDER BY CASE WHEN id = 'admin-001' THEN 0 ELSE 1 END, id ASC");
+  if (admins.length > 1) {
+    const keepId = admins[0].id;
+    await database.runAsync(
+      "UPDATE users SET role = 'adherent' WHERE role = 'admin' AND id != ?",
+      [keepId],
+    );
+  }
 
   // Seed saison courante
   const yearNow = new Date().getMonth() + 1 >= 9 ? new Date().getFullYear() : new Date().getFullYear() - 1;
@@ -205,7 +215,132 @@ async function initDatabase(database) {
       // ignore seeding error
     }
   }
+
+  // ─── Seed 70 adhérents algériens ──────────────────────────────────────────
+  // Catégories : Poussin (≤7), Pupille (8-10), Minime (11-13), Cadet (14-16),
+  //              Junior (17-19), Sénior (20-34), Vétéran (≥35)
+  // Disciplines : KickBoxing, Natation
+  // Genre : M / F
+  // Toutes les dates de naissance sont relatives à 2026-08-10 (date courante du projet)
+  const seedAdherents = [
+    // ── Poussin (nés 2019–2026) ──────────────────────────────────────────────
+    { id: 'adh-001', nom: 'BELKADI',    prenom: 'Ryane',      dn: '2021-03-14', lieu: 'Alger',     disc: 'Natation',   genre: 'M', tel: '0551234001', gs: 'A+' },
+    { id: 'adh-002', nom: 'MEDDAH',     prenom: 'Nour',       dn: '2020-07-22', lieu: 'Oran',      disc: 'Natation',   genre: 'F', tel: '0551234002', gs: 'O+' },
+    { id: 'adh-003', nom: 'HADJADJ',    prenom: 'Amir',       dn: '2022-01-05', lieu: 'Blida',     disc: 'Natation',   genre: 'M', tel: '0551234003', gs: 'B+' },
+    { id: 'adh-004', nom: 'BENBRAHIM',  prenom: 'Lina',       dn: '2021-11-18', lieu: 'Sétif',     disc: 'Natation',   genre: 'F', tel: '0551234004', gs: 'AB+' },
+    { id: 'adh-005', nom: 'ZERROUK',    prenom: 'Youcef',     dn: '2019-06-30', lieu: 'Annaba',    disc: 'Natation',   genre: 'M', tel: '0551234005', gs: 'O-' },
+
+    // ── Pupille (nés 2016–2018) ──────────────────────────────────────────────
+    { id: 'adh-006', nom: 'AMRANI',     prenom: 'Ines',       dn: '2016-04-12', lieu: 'Alger',     disc: 'KickBoxing', genre: 'F', tel: '0551234006', gs: 'A-' },
+    { id: 'adh-007', nom: 'FERHAT',     prenom: 'Bilal',      dn: '2017-08-09', lieu: 'Tizi Ouzou',disc: 'KickBoxing', genre: 'M', tel: '0551234007', gs: 'B-' },
+    { id: 'adh-008', nom: 'AISSAOUI',   prenom: 'Sara',       dn: '2016-12-25', lieu: 'Constantine',disc: 'Natation',  genre: 'F', tel: '0551234008', gs: 'O+' },
+    { id: 'adh-009', nom: 'BOUDAOUD',   prenom: 'Ilyes',      dn: '2018-02-14', lieu: 'Béjaïa',    disc: 'KickBoxing', genre: 'M', tel: '0551234009', gs: 'A+' },
+    { id: 'adh-010', nom: 'MEZIANE',    prenom: 'Amira',      dn: '2017-05-20', lieu: 'Jijel',     disc: 'Natation',   genre: 'F', tel: '0551234010', gs: 'AB-' },
+
+    // ── Minime (nés 2013–2015) ──────────────────────────────────────────────
+    { id: 'adh-011', nom: 'KHELIFI',    prenom: 'Rayane',     dn: '2013-09-03', lieu: 'Alger',     disc: 'KickBoxing', genre: 'M', tel: '0551234011', gs: 'B+' },
+    { id: 'adh-012', nom: 'TEBBOUNE',   prenom: 'Hadjer',     dn: '2014-06-17', lieu: 'Mostaganem',disc: 'KickBoxing', genre: 'F', tel: '0551234012', gs: 'O+' },
+    { id: 'adh-013', nom: 'BOUDIAF',    prenom: 'Zakaria',    dn: '2015-01-28', lieu: 'Chlef',     disc: 'Natation',   genre: 'M', tel: '0551234013', gs: 'A+' },
+    { id: 'adh-014', nom: 'MAKHLOUFI',  prenom: 'Manel',      dn: '2013-11-11', lieu: 'Médéa',     disc: 'Natation',   genre: 'F', tel: '0551234014', gs: 'AB+' },
+    { id: 'adh-015', nom: 'CHERIFI',    prenom: 'Anes',       dn: '2014-03-07', lieu: 'Batna',     disc: 'KickBoxing', genre: 'M', tel: '0551234015', gs: 'O-' },
+    { id: 'adh-016', nom: 'BENALI',     prenom: 'Wissem',     dn: '2015-07-19', lieu: 'Skikda',    disc: 'KickBoxing', genre: 'M', tel: '0551234016', gs: 'B-' },
+    { id: 'adh-017', nom: 'SELLAMI',    prenom: 'Rania',      dn: '2013-04-25', lieu: 'Alger',     disc: 'Natation',   genre: 'F', tel: '0551234017', gs: 'A-' },
+
+    // ── Cadet (nés 2010–2012) ──────────────────────────────────────────────
+    { id: 'adh-018', nom: 'BENAISSA',   prenom: 'Hamza',      dn: '2010-08-22', lieu: 'Alger',     disc: 'KickBoxing', genre: 'M', tel: '0551234018', gs: 'O+' },
+    { id: 'adh-019', nom: 'GHOMARI',    prenom: 'Cylia',      dn: '2011-02-14', lieu: 'Oran',      disc: 'KickBoxing', genre: 'F', tel: '0551234019', gs: 'A+' },
+    { id: 'adh-020', nom: 'SAADI',      prenom: 'Fares',      dn: '2012-06-05', lieu: 'Sétif',     disc: 'Natation',   genre: 'M', tel: '0551234020', gs: 'B+' },
+    { id: 'adh-021', nom: 'HADJAB',     prenom: 'Asma',       dn: '2010-11-30', lieu: 'Annaba',    disc: 'Natation',   genre: 'F', tel: '0551234021', gs: 'AB+' },
+    { id: 'adh-022', nom: 'LALAOUI',    prenom: 'Nassim',     dn: '2011-04-18', lieu: 'Constantine',disc: 'KickBoxing', genre: 'M', tel: '0551234022', gs: 'O-' },
+    { id: 'adh-023', nom: 'BOUZIDI',    prenom: 'Yasmina',    dn: '2012-09-12', lieu: 'Béjaïa',    disc: 'KickBoxing', genre: 'F', tel: '0551234023', gs: 'A-' },
+    { id: 'adh-024', nom: 'AOUAD',      prenom: 'Samy',       dn: '2010-03-27', lieu: 'Tizi Ouzou',disc: 'Natation',   genre: 'M', tel: '0551234024', gs: 'B-' },
+    { id: 'adh-025', nom: 'CHIBANE',    prenom: 'Lyna',       dn: '2011-07-08', lieu: 'Blida',     disc: 'KickBoxing', genre: 'F', tel: '0551234025', gs: 'O+' },
+    { id: 'adh-026', nom: 'MOKRANI',    prenom: 'Adel',       dn: '2012-01-15', lieu: 'Djelfa',    disc: 'KickBoxing', genre: 'M', tel: '0551234026', gs: 'A+' },
+
+    // ── Junior (nés 2007–2009) ──────────────────────────────────────────────
+    { id: 'adh-027', nom: 'BENADDA',    prenom: 'Ishak',      dn: '2007-05-16', lieu: 'Alger',     disc: 'KickBoxing', genre: 'M', tel: '0551234027', gs: 'O+' },
+    { id: 'adh-028', nom: 'BOUAKKAZ',   prenom: 'Nawel',      dn: '2008-09-28', lieu: 'Oran',      disc: 'KickBoxing', genre: 'F', tel: '0551234028', gs: 'B+' },
+    { id: 'adh-029', nom: 'HADJ SAID',  prenom: 'Karim',      dn: '2009-03-10', lieu: 'Sétif',     disc: 'Natation',   genre: 'M', tel: '0551234029', gs: 'A+' },
+    { id: 'adh-030', nom: 'DJAMAI',     prenom: 'Sabrina',    dn: '2007-12-22', lieu: 'Bejaia',    disc: 'Natation',   genre: 'F', tel: '0551234030', gs: 'AB+' },
+    { id: 'adh-031', nom: 'MENACER',    prenom: 'Yassine',    dn: '2008-06-04', lieu: 'Constantine',disc: 'KickBoxing', genre: 'M', tel: '0551234031', gs: 'O-' },
+    { id: 'adh-032', nom: 'BOULENOUAR', prenom: 'Meriem',     dn: '2009-10-17', lieu: 'Annaba',    disc: 'KickBoxing', genre: 'F', tel: '0551234032', gs: 'A-' },
+    { id: 'adh-033', nom: 'AISSANI',    prenom: 'Djawad',     dn: '2007-07-31', lieu: 'Tizi Ouzou',disc: 'Natation',   genre: 'M', tel: '0551234033', gs: 'B-' },
+    { id: 'adh-034', nom: 'HAMIDOU',    prenom: 'Douaa',      dn: '2008-02-19', lieu: 'Bouira',    disc: 'Natation',   genre: 'F', tel: '0551234034', gs: 'O+' },
+
+    // ── Sénior (nés 1992–2006) ──────────────────────────────────────────────
+    { id: 'adh-035', nom: 'BENHADJ',    prenom: 'Rachid',     dn: '2001-04-05', lieu: 'Alger',     disc: 'KickBoxing', genre: 'M', tel: '0551234035', gs: 'A+' },
+    { id: 'adh-036', nom: 'MEDJDOUB',   prenom: 'Soraya',     dn: '2003-09-13', lieu: 'Oran',      disc: 'KickBoxing', genre: 'F', tel: '0551234036', gs: 'O+' },
+    { id: 'adh-037', nom: 'BELOUFA',    prenom: 'Mehdi',      dn: '2000-01-27', lieu: 'Sétif',     disc: 'Natation',   genre: 'M', tel: '0551234037', gs: 'B+' },
+    { id: 'adh-038', nom: 'ZIANI',      prenom: 'Djamila',    dn: '1999-06-08', lieu: 'Blida',     disc: 'Natation',   genre: 'F', tel: '0551234038', gs: 'AB+' },
+    { id: 'adh-039', nom: 'KADA',       prenom: 'Abdelaziz',  dn: '2002-11-20', lieu: 'Constantine',disc: 'KickBoxing', genre: 'M', tel: '0551234039', gs: 'O-' },
+    { id: 'adh-040', nom: 'BOURAHLA',   prenom: 'Houria',     dn: '2004-03-15', lieu: 'Annaba',    disc: 'KickBoxing', genre: 'F', tel: '0551234040', gs: 'A-' },
+    { id: 'adh-041', nom: 'SAIDANI',    prenom: 'Lotfi',      dn: '1998-08-02', lieu: 'Tizi Ouzou',disc: 'Natation',   genre: 'M', tel: '0551234041', gs: 'B-' },
+    { id: 'adh-042', nom: 'HADJAJ',     prenom: 'Zineb',      dn: '2005-12-11', lieu: 'Jijel',     disc: 'Natation',   genre: 'F', tel: '0551234042', gs: 'O+' },
+    { id: 'adh-043', nom: 'GHELLAL',    prenom: 'Nassim',     dn: '1997-04-24', lieu: 'Mostaganem',disc: 'KickBoxing', genre: 'M', tel: '0551234043', gs: 'A+' },
+    { id: 'adh-044', nom: 'TOUMI',      prenom: 'Lydia',      dn: '2006-07-07', lieu: 'Alger',     disc: 'KickBoxing', genre: 'F', tel: '0551234044', gs: 'AB-' },
+    { id: 'adh-045', nom: 'BOUCHAMA',   prenom: 'Walid',      dn: '1995-02-18', lieu: 'Batna',     disc: 'Natation',   genre: 'M', tel: '0551234045', gs: 'O+' },
+    { id: 'adh-046', nom: 'BENSALEM',   prenom: 'Amina',      dn: '2000-10-30', lieu: 'Chlef',     disc: 'KickBoxing', genre: 'F', tel: '0551234046', gs: 'B+' },
+    { id: 'adh-047', nom: 'REZKI',      prenom: 'Karim',      dn: '2002-05-09', lieu: 'Skikda',    disc: 'KickBoxing', genre: 'M', tel: '0551234047', gs: 'A+' },
+    { id: 'adh-048', nom: 'OUALI',      prenom: 'Rima',       dn: '1996-09-21', lieu: 'Oran',      disc: 'Natation',   genre: 'F', tel: '0551234048', gs: 'O-' },
+    { id: 'adh-049', nom: 'HAMACHE',    prenom: 'Tarek',      dn: '2003-01-14', lieu: 'Alger',     disc: 'Natation',   genre: 'M', tel: '0551234049', gs: 'AB+' },
+    { id: 'adh-050', nom: 'ZITOUNI',    prenom: 'Chaima',     dn: '2005-04-26', lieu: 'Sétif',     disc: 'KickBoxing', genre: 'F', tel: '0551234050', gs: 'A+' },
+    { id: 'adh-051', nom: 'BENNACER',   prenom: 'Adlane',     dn: '1993-07-03', lieu: 'Constantine',disc: 'KickBoxing', genre: 'M', tel: '0551234051', gs: 'B+' },
+    { id: 'adh-052', nom: 'SELLOUM',    prenom: 'Selma',      dn: '2004-11-16', lieu: 'Annaba',    disc: 'Natation',   genre: 'F', tel: '0551234052', gs: 'O+' },
+    { id: 'adh-053', nom: 'BOUHIRED',   prenom: 'Djamel',     dn: '1999-03-08', lieu: 'Blida',     disc: 'KickBoxing', genre: 'M', tel: '0551234053', gs: 'A-' },
+    { id: 'adh-054', nom: 'OUARAB',     prenom: 'Meriem',     dn: '2001-08-19', lieu: 'Médéa',     disc: 'Natation',   genre: 'F', tel: '0551234054', gs: 'B-' },
+
+    // ── Vétéran (nés avant 1992) ─────────────────────────────────────────────
+    { id: 'adh-055', nom: 'BENHADDAD',  prenom: 'Mustapha',   dn: '1982-05-10', lieu: 'Alger',     disc: 'KickBoxing', genre: 'M', tel: '0551234055', gs: 'O+' },
+    { id: 'adh-056', nom: 'CHIKHI',     prenom: 'Fatima',     dn: '1985-09-23', lieu: 'Oran',      disc: 'Natation',   genre: 'F', tel: '0551234056', gs: 'A+' },
+    { id: 'adh-057', nom: 'LAOUEDJ',    prenom: 'Abdelkader', dn: '1978-03-17', lieu: 'Sétif',     disc: 'KickBoxing', genre: 'M', tel: '0551234057', gs: 'B+' },
+    { id: 'adh-058', nom: 'BOUKERZAZA', prenom: 'Nacira',     dn: '1980-12-01', lieu: 'Béjaïa',    disc: 'Natation',   genre: 'F', tel: '0551234058', gs: 'AB+' },
+    { id: 'adh-059', nom: 'HAMDI',      prenom: 'Said',       dn: '1975-06-14', lieu: 'Constantine',disc: 'KickBoxing', genre: 'M', tel: '0551234059', gs: 'O-' },
+    { id: 'adh-060', nom: 'BENALI',     prenom: 'Zohra',      dn: '1988-02-28', lieu: 'Annaba',    disc: 'KickBoxing', genre: 'F', tel: '0551234060', gs: 'A-' },
+    { id: 'adh-061', nom: 'AOUDJIT',    prenom: 'Hocine',     dn: '1970-10-05', lieu: 'Tizi Ouzou',disc: 'Natation',   genre: 'M', tel: '0551234061', gs: 'B-' },
+    { id: 'adh-062', nom: 'GUENANE',    prenom: 'Nadia',      dn: '1983-07-19', lieu: 'Blida',     disc: 'Natation',   genre: 'F', tel: '0551234062', gs: 'O+' },
+    { id: 'adh-063', nom: 'BOUSSAID',   prenom: 'Farid',      dn: '1976-04-11', lieu: 'Batna',     disc: 'KickBoxing', genre: 'M', tel: '0551234063', gs: 'A+' },
+    { id: 'adh-064', nom: 'LAZREG',     prenom: 'Malika',     dn: '1987-01-30', lieu: 'Chlef',     disc: 'KickBoxing', genre: 'F', tel: '0551234064', gs: 'AB-' },
+    { id: 'adh-065', nom: 'DJIDJIK',    prenom: 'Djillali',   dn: '1969-08-22', lieu: 'Mostaganem',disc: 'Natation',   genre: 'M', tel: '0551234065', gs: 'O+' },
+    { id: 'adh-066', nom: 'MANSOURI',   prenom: 'Houda',      dn: '1991-11-07', lieu: 'Jijel',     disc: 'Natation',   genre: 'F', tel: '0551234066', gs: 'B+' },
+
+    // ── Complément mixte pour atteindre 70 ──────────────────────────────────
+    { id: 'adh-067', nom: 'BELLOULA',   prenom: 'Fayçal',     dn: '2006-02-14', lieu: 'Alger',     disc: 'KickBoxing', genre: 'M', tel: '0551234067', gs: 'A+' },
+    { id: 'adh-068', nom: 'CHERCHALI',  prenom: 'Aya',        dn: '2015-10-03', lieu: 'Oran',      disc: 'Natation',   genre: 'F', tel: '0551234068', gs: 'O+' },
+    { id: 'adh-069', nom: 'BENMEBAREK', prenom: 'Rami',       dn: '2011-05-27', lieu: 'Sétif',     disc: 'KickBoxing', genre: 'M', tel: '0551234069', gs: 'B+' },
+    { id: 'adh-070', nom: 'DOUADI',     prenom: 'Yasmine',    dn: '1994-08-15', lieu: 'Constantine',disc: 'Natation',   genre: 'F', tel: '0551234070', gs: 'AB+' },
+  ];
+
+  const currentYear = new Date().getFullYear();
+  const activeSaisonId = `saison-${currentYear >= 9 ? currentYear : currentYear - 1}`;
+
+  for (const a of seedAdherents) {
+    try {
+      const code = buildAdherentCodeBase({
+        nom: a.nom, prenom: a.prenom,
+        dateNaissance: a.dn, lieuNaissance: a.lieu, discipline: a.disc,
+      });
+      await database.runAsync(
+        `INSERT OR IGNORE INTO adherents
+           (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille,
+            groupeSanguin, observationsMedicales, photo, discipline, genre, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?, datetime('now'), datetime('now'))`,
+        [a.id, code, a.nom, a.prenom, a.dn, a.lieu, a.tel, a.gs, a.disc, a.genre],
+      );
+
+      // Inscription à la saison active
+      const saisonRow = await database.getFirstAsync(`SELECT id FROM saisons WHERE actif = 1 LIMIT 1`);
+      const saisonId = saisonRow?.id || activeSaisonId;
+      await database.runAsync(
+        `INSERT OR IGNORE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, actif)
+         VALUES (?, ?, ?, ?, 1)`,
+        [`as-${a.id}`, a.id, saisonId, a.dn.slice(0, 4) + '-09-01'],
+      );
+    } catch (_e) {
+      // ignore seeding errors (ex: duplicates)
+    }
+  }
 }
+
 
 // ──────────────── CONFIG ────────────────
 
@@ -435,12 +570,60 @@ export async function getUserByAdherentId(adherentId) {
   return await db.getFirstAsync('SELECT * FROM users WHERE adherentId = ?', [adherentId]);
 }
 
+export async function getAdminUser() {
+  const db = await getDatabase();
+  return await db.getFirstAsync("SELECT * FROM users WHERE role = 'admin' LIMIT 1");
+}
+
+export async function getAdminCount() {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync("SELECT COUNT(*) as count FROM users WHERE role = 'admin'");
+  return row?.count || 0;
+}
+
 export async function createUser(user) {
   const db = await getDatabase();
+  let requestedRole = user.role || 'adherent';
+
+  // Single admin policy: only 1 user in the system can have role = 'admin'
+  if (requestedRole === 'admin') {
+    const existingAdmin = await db.getFirstAsync("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+    if (existingAdmin && existingAdmin.id !== user.id) {
+      requestedRole = 'adherent';
+    }
+  }
+
   await db.runAsync(
     `INSERT INTO users (id, username, password, role, adherentId, createdAt) VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-    [user.id, user.username, user.password, user.role || 'adherent', user.adherentId || null],
+    [user.id, user.username, user.password, requestedRole, user.adherentId || null],
   );
+}
+
+export async function updateAdminCredentials(newUsername, newPassword) {
+  const db = await getDatabase();
+  const admin = await getAdminUser();
+  if (!admin) {
+    throw new Error("Compte administrateur introuvable.");
+  }
+  const cleanUsername = newUsername.trim();
+  const cleanPassword = newPassword.trim();
+  if (!cleanUsername || !cleanPassword) {
+    throw new Error("L'identifiant et le mot de passe sont obligatoires.");
+  }
+
+  const existingUser = await db.getFirstAsync(
+    "SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?",
+    [cleanUsername, admin.id],
+  );
+  if (existingUser) {
+    throw new Error("Cet identifiant est déjà utilisé par un autre utilisateur.");
+  }
+
+  await db.runAsync(
+    "UPDATE users SET username = ?, password = ? WHERE id = ?",
+    [cleanUsername, cleanPassword, admin.id],
+  );
+  return await getAdminUser();
 }
 
 export async function updateUserPassword(userId, password) {
@@ -667,31 +850,57 @@ export async function getPresencesBySeance(creneauId, dateSeance) {
 export async function getEligibleAdherentsForCreneau(creneauId, saisonId) {
   const db = await getDatabase();
   const creneau = await db.getFirstAsync('SELECT * FROM creneaux WHERE id = ?', [creneauId]);
-  if (!creneau) return [];
+  const allAdherents = await db.getAllAsync('SELECT * FROM adherents ORDER BY nom, prenom');
 
-  // Adhérents inscrits pour la saison
-  const rows = await db.getAllAsync(
-    `SELECT a.* FROM adherents a
-     JOIN adherent_saisons as_rec ON as_rec.adherentId = a.id
-     WHERE as_rec.saisonId = ? AND as_rec.actif = 1
-     ORDER BY a.nom, a.prenom`,
-    [saisonId],
-  );
+  if (!allAdherents || allAdherents.length === 0) return [];
+  if (!creneau) return allAdherents;
 
   const { getCategoryByAge } = require('../utils/categories');
 
-  // Filtrer par discipline & catégorie
-  return rows.filter(a => {
-    const matchDisc = !a.discipline || a.discipline.toLowerCase() === creneau.discipline.toLowerCase();
-    const cat = getCategoryByAge(a.dateNaissance);
-    const matchCat = creneau.categorie === 'Toutes' || (cat && cat.label.toLowerCase() === creneau.categorie.toLowerCase());
-    return matchDisc && matchCat;
+  const creneauDiscip = (creneau.discipline || '').trim().toLowerCase();
+  const creneauCat = (creneau.categorie || '').trim().toLowerCase();
+
+  const scored = allAdherents.map(a => {
+    const adhDiscip = (a.discipline || '').trim().toLowerCase();
+    const matchDisc = !adhDiscip ||
+      !creneauDiscip ||
+      creneauDiscip.includes('tout') ||
+      adhDiscip.includes(creneauDiscip) ||
+      creneauDiscip.includes(adhDiscip);
+
+    const catObj = getCategoryByAge(a.dateNaissance);
+    const catLabel = (catObj?.label || '').trim().toLowerCase();
+    const matchCat = !creneauCat ||
+      creneauCat.includes('tout') ||
+      catLabel === creneauCat;
+
+    let score = 0;
+    if (matchDisc && matchCat) score = 2;
+    else if (matchDisc || matchCat) score = 1;
+
+    return { adherent: a, score };
   });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(s => s.adherent);
 }
 
 export async function savePresencesSeance(creneauId, dateSeance, saisonId, presencesList) {
   const db = await getDatabase();
+  const d = new Date();
+  const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  if (dateSeance > todayStr) {
+    throw new Error("L'enregistrement des présences est interdit pour les dates futures.");
+  }
+
   const now = new Date().toISOString();
+
+  let effectiveSaisonId = saisonId;
+  if (!effectiveSaisonId) {
+    const active = await getSaisonActive();
+    effectiveSaisonId = active?.id || 'saison-default';
+  }
 
   for (const item of presencesList) {
     const existing = await db.getFirstAsync(
@@ -709,7 +918,7 @@ export async function savePresencesSeance(creneauId, dateSeance, saisonId, prese
       await db.runAsync(
         `INSERT INTO presences (id, creneauId, adherentId, saisonId, dateSeance, statut, remarque, createdAt, updatedAt)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, creneauId, item.adherentId, saisonId, dateSeance, item.statut, item.remarque || null, now, now],
+        [id, creneauId, item.adherentId, effectiveSaisonId, dateSeance, item.statut, item.remarque || null, now, now],
       );
     }
   }
@@ -720,12 +929,12 @@ export async function getPresencesByAdherent(adherentId, saisonId) {
   const query = saisonId
     ? `SELECT p.*, c.discipline, c.categorie, c.jour, c.heureDebut, c.heureFin, c.lieu
        FROM presences p
-       JOIN creneaux c ON c.id = p.creneauId
+       LEFT JOIN creneaux c ON c.id = p.creneauId
        WHERE p.adherentId = ? AND p.saisonId = ?
        ORDER BY p.dateSeance DESC, c.heureDebut DESC`
     : `SELECT p.*, c.discipline, c.categorie, c.jour, c.heureDebut, c.heureFin, c.lieu
        FROM presences p
-       JOIN creneaux c ON c.id = p.creneauId
+       LEFT JOIN creneaux c ON c.id = p.creneauId
        WHERE p.adherentId = ?
        ORDER BY p.dateSeance DESC, c.heureDebut DESC`;
 

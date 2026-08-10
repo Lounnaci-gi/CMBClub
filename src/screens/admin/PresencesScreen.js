@@ -9,6 +9,16 @@ import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
 import { CATEGORIES } from '../../utils/categories';
 
+const getLocalDateString = (d = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+const getTodayJour = () => JOURS_FR[new Date().getDay()];
+
 export default function PresencesScreen({ route }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
@@ -22,37 +32,62 @@ export default function PresencesScreen({ route }) {
 
   // Selected state
   const [selectedCreneauId, setSelectedCreneauId] = useState(initialCreneauId);
-  const [dateSeance, setDateSeance] = useState(new Date().toISOString().split('T')[0]);
+  const [dateSeance, setDateSeance] = useState(getLocalDateString());
   const [statusFilter, setStatusFilter] = useState('tous'); // 'tous' | 'present' | 'absent' | 'retard' | 'excuse'
+  const [scopeFilter, setScopeFilter] = useState('creneau'); // 'creneau' (créneau & discipline) | 'tous' (tous les adhérents)
+  const [searchQuery, setSearchQuery] = useState('');
   const [adherents, setAdherents] = useState([]);
   const [presenceMap, setPresenceMap] = useState({}); // adherentId -> { statut, remarque }
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const selectedCreneau = useMemo(() => {
-    return creneaux.find(c => c.id === selectedCreneauId) || creneaux[0] || null;
-  }, [creneaux, selectedCreneauId]);
+  // Only show slots matching today's day of the week
+  const todayJour = useMemo(() => getTodayJour(), []);
+  const creneauxDuJour = useMemo(
+    () => creneaux.filter(c => c.jour === todayJour),
+    [creneaux, todayJour],
+  );
 
+  const selectedCreneau = useMemo(() => {
+    return creneauxDuJour.find(c => c.id === selectedCreneauId)
+      || creneauxDuJour[0]
+      || null;
+  }, [creneauxDuJour, selectedCreneauId]);
+
+  // Auto-select the first slot of today when loaded
   useEffect(() => {
-    if (!selectedCreneauId && creneaux.length > 0) {
-      setSelectedCreneauId(creneaux[0].id);
+    if (creneauxDuJour.length > 0) {
+      const already = creneauxDuJour.find(c => c.id === selectedCreneauId);
+      if (!already) setSelectedCreneauId(creneauxDuJour[0].id);
     }
-  }, [creneaux, selectedCreneauId]);
+  }, [creneauxDuJour]);
 
   const loadData = useCallback(async () => {
-    if (!selectedCreneau || !saisonActive) return;
     setLoading(true);
     try {
       await loadSaisons();
       await loadCreneaux();
-      const eligible = await getEligibleAdherents(selectedCreneau.id, saisonActive.id);
+      const currentCreneaux = useStore.getState().creneaux;
+      const currentSaison = useStore.getState().saisonActive;
+
+      const targetCreneau = currentCreneaux.find(c => c.id === selectedCreneauId) || currentCreneaux[0] || null;
+      if (!selectedCreneauId && targetCreneau) {
+        setSelectedCreneauId(targetCreneau.id);
+      }
+
+      if (!targetCreneau) {
+        setAdherents([]);
+        setPresenceMap({});
+        return;
+      }
+
+      const eligible = await getEligibleAdherents(targetCreneau.id, currentSaison?.id);
       setAdherents(eligible);
 
-      const existing = await getPresencesSeance(selectedCreneau.id, dateSeance);
+      const existing = await getPresencesSeance(targetCreneau.id, dateSeance);
       const map = {};
-      
-      // Default everyone to present if no prior record, or map existing
+
       eligible.forEach(a => {
         const found = existing.find(p => p.adherentId === a.id);
         if (found) {
@@ -63,11 +98,11 @@ export default function PresencesScreen({ route }) {
       });
       setPresenceMap(map);
     } catch (e) {
-      Alert.alert('Erreur', e.message || 'Impossible de charger les presences.');
+      Alert.alert('Erreur', e.message || 'Impossible de charger les présences.');
     } finally {
       setLoading(false);
     }
-  }, [selectedCreneau, saisonActive, dateSeance, getEligibleAdherents, getPresencesSeance, loadCreneaux, loadSaisons]);
+  }, [selectedCreneauId, dateSeance, getEligibleAdherents, getPresencesSeance, loadCreneaux, loadSaisons]);
 
   useEffect(() => {
     loadData();
@@ -77,6 +112,40 @@ export default function PresencesScreen({ route }) {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
+  };
+
+  const handlePrevDay = () => {
+    const parts = dateSeance.split('-').map(Number);
+    if (parts.length === 3) {
+      const d = new Date(parts[0], parts[1] - 1, parts[2]);
+      d.setDate(d.getDate() - 1);
+      setDateSeance(getLocalDateString(d));
+    }
+  };
+
+  const handleNextDay = () => {
+    const todayStr = getLocalDateString();
+    const parts = dateSeance.split('-').map(Number);
+    if (parts.length === 3) {
+      const d = new Date(parts[0], parts[1] - 1, parts[2]);
+      d.setDate(d.getDate() + 1);
+      const nextStr = getLocalDateString(d);
+      if (nextStr > todayStr) {
+        Alert.alert('Date future non autorisée', 'Impossible d\'enregistrer les présences pour une date future.');
+        return;
+      }
+      setDateSeance(nextStr);
+    }
+  };
+
+  const handleToday = () => {
+    setDateSeance(getLocalDateString());
+  };
+
+  const handleYesterday = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    setDateSeance(getLocalDateString(d));
   };
 
   const handleStatutChange = (adherentId, statut) => {
@@ -104,7 +173,16 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleSave = async () => {
-    if (!selectedCreneau || !saisonActive) return;
+    const todayStr = getLocalDateString();
+    if (dateSeance > todayStr) {
+      Alert.alert('Action interdite', 'L\'enregistrement des présences est strictement interdit pour les dates futures.');
+      return;
+    }
+    const targetCreneau = selectedCreneau || creneaux[0];
+    if (!targetCreneau) {
+      Alert.alert('Erreur', 'Aucun créneau sélectionné.');
+      return;
+    }
     setSaving(true);
     try {
       const list = Object.entries(presenceMap).map(([adherentId, data]) => ({
@@ -112,8 +190,16 @@ export default function PresencesScreen({ route }) {
         statut: data.statut,
         remarque: data.remarque,
       }));
-      await savePresencesSeance(selectedCreneau.id, dateSeance, saisonActive.id, list);
-      Alert.alert('Succès', 'Les présences de la séance ont été enregistrées avec succès.');
+      await savePresencesSeance(targetCreneau.id, dateSeance, saisonActive?.id, list);
+
+      const parts = dateSeance.split('-').map(Number);
+      let dateLabel = dateSeance;
+      if (parts.length === 3) {
+        const d = new Date(parts[0], parts[1] - 1, parts[2]);
+        dateLabel = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      }
+
+      Alert.alert('Présences enregistrées', `Les présences pour la séance du ${dateLabel} ont été enregistrées avec succès.`);
     } catch (e) {
       Alert.alert('Erreur', e.message || 'Impossible d’enregistrer.');
     } finally {
@@ -121,76 +207,193 @@ export default function PresencesScreen({ route }) {
     }
   };
 
+  const filteredAdherents = useMemo(() => {
+    const { getCategoryByAge } = require('../../utils/categories');
+
+    return adherents.filter(a => {
+      // Status Filter
+      const matchesStatus = statusFilter === 'tous' || (presenceMap[a.id]?.statut || 'present') === statusFilter;
+
+      // Search Query
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch = !q ||
+        a.nom.toLowerCase().includes(q) ||
+        a.prenom.toLowerCase().includes(q) ||
+        a.code.toLowerCase().includes(q);
+
+      // Scope Filter (creneau vs tous)
+      let matchesScope = true;
+      if (scopeFilter === 'creneau' && selectedCreneau) {
+        const creneauDiscip = (selectedCreneau.discipline || '').trim().toLowerCase();
+        const creneauCat = (selectedCreneau.categorie || '').trim().toLowerCase();
+
+        const adhDiscip = (a.discipline || '').trim().toLowerCase();
+        const matchDisc = !adhDiscip ||
+          !creneauDiscip ||
+          creneauDiscip.includes('tout') ||
+          adhDiscip.includes(creneauDiscip) ||
+          creneauDiscip.includes(adhDiscip);
+
+        const catObj = getCategoryByAge(a.dateNaissance);
+        const catLabel = (catObj?.label || '').trim().toLowerCase();
+        const matchCat = !creneauCat ||
+          creneauCat.includes('tout') ||
+          catLabel === creneauCat;
+
+        matchesScope = matchDisc && matchCat;
+      }
+
+      return matchesStatus && matchesSearch && matchesScope;
+    });
+  }, [adherents, presenceMap, statusFilter, searchQuery, scopeFilter, selectedCreneau]);
+
   // Quick Stats
   const statsSummary = useMemo(() => {
     let presents = 0, absents = 0, retards = 0, excuses = 0;
-    Object.values(presenceMap).forEach(p => {
+    filteredAdherents.forEach(a => {
+      const p = presenceMap[a.id] || { statut: 'present' };
       if (p.statut === 'present') presents++;
       else if (p.statut === 'absent') absents++;
       else if (p.statut === 'retard') retards++;
       else if (p.statut === 'excuse') excuses++;
     });
-    return { total: adherents.length, presents, absents, retards, excuses };
-  }, [presenceMap, adherents]);
-
-  const filteredAdherents = useMemo(() => {
-    if (statusFilter === 'tous') return adherents;
-    return adherents.filter(a => {
-      const currentStatut = presenceMap[a.id]?.statut || 'present';
-      return currentStatut === statusFilter;
-    });
-  }, [adherents, presenceMap, statusFilter]);
+    return { total: filteredAdherents.length, presents, absents, retards, excuses };
+  }, [presenceMap, filteredAdherents]);
 
   const catObj = selectedCreneau ? CATEGORIES.find(c => c.label === selectedCreneau.categorie) : null;
+
+  const todayStr = getLocalDateString();
+  const isToday = dateSeance === todayStr;
+  const isFuture = dateSeance > todayStr;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Creneaux Selector */}
+      {/* Creneaux Selector - only slots for today */}
       <View style={styles.selectorSection}>
-        <Text style={styles.sectionLabel}>Sélectionner un créneau :</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.creneauScroll}>
-          {creneaux.map(c => {
-            const isSelected = c.id === selectedCreneau?.id;
-            return (
-              <TouchableOpacity
-                key={c.id}
-                style={[styles.creneauChip, isSelected && styles.creneauChipSelected]}
-                onPress={() => setSelectedCreneauId(c.id)}
-              >
-                <Text style={[styles.creneauChipText, isSelected && styles.creneauChipTextSelected]}>
-                  {c.discipline} · {c.jour} {c.heureDebut}
-                </Text>
-                <Text style={[styles.creneauChipCat, isSelected && { color: COLORS.primary }]}>
-                  {c.categorie}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        <View style={styles.selectorHeader}>
+          <MaterialCommunityIcons name="calendar-today" size={14} color={COLORS.primary} />
+          <Text style={styles.sectionLabel}>
+            Créneaux du {todayJour} :
+          </Text>
+        </View>
+        {creneauxDuJour.length === 0 ? (
+          <View style={styles.noSlotToday}>
+            <MaterialCommunityIcons name="calendar-remove" size={20} color={COLORS.textMuted} />
+            <Text style={styles.noSlotTodayText}>Aucun créneau prévu aujourd'hui ({todayJour})</Text>
+          </View>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.creneauScroll}>
+            {creneauxDuJour.map(c => {
+              const isSelected = c.id === selectedCreneau?.id;
+              return (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.creneauChip, isSelected && styles.creneauChipSelected]}
+                  onPress={() => setSelectedCreneauId(c.id)}
+                >
+                  <Text style={[styles.creneauChipText, isSelected && styles.creneauChipTextSelected]}>
+                    {c.discipline} · {c.heureDebut}
+                  </Text>
+                  <Text style={[styles.creneauChipCat, isSelected && { color: COLORS.primary }]}>
+                    {c.categorie}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
       </View>
 
-      {/* Date & Session Bar */}
+      {/* Date & Quick Shortcuts */}
       {selectedCreneau && (
         <View style={styles.dateBar}>
-          <View style={styles.dateBox}>
-            <MaterialCommunityIcons name="calendar" size={18} color={COLORS.secondary} />
-            <TextInput
-              style={styles.dateInput}
-              value={dateSeance}
-              onChangeText={setDateSeance}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={COLORS.textMuted}
-            />
+          <View style={styles.dateControlRow}>
+            <TouchableOpacity onPress={handlePrevDay} style={styles.dateNavBtn}>
+              <MaterialCommunityIcons name="chevron-left" size={20} color={COLORS.primary} />
+            </TouchableOpacity>
+
+            <View style={styles.dateBox}>
+              <MaterialCommunityIcons name="calendar" size={16} color={COLORS.secondary} />
+              <TextInput
+                style={styles.dateInput}
+                value={dateSeance}
+                onChangeText={setDateSeance}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={COLORS.textMuted}
+              />
+            </View>
+
+            <TouchableOpacity onPress={handleNextDay} style={styles.dateNavBtn}>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.primary} />
+            </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.markAllBtn} onPress={handleMarkAllPresent}>
+          {/* Quick Date Presets */}
+          <View style={styles.dateShortcuts}>
+            <TouchableOpacity onPress={handleYesterday} style={styles.shortcutChip}>
+              <Text style={styles.shortcutText}>Hier</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleToday} style={[styles.shortcutChip, isToday && styles.shortcutChipActive]}>
+              <Text style={[styles.shortcutText, isToday && styles.shortcutTextActive]}>Auj.</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={[styles.markAllBtn, isFuture && { opacity: 0.5 }]} onPress={handleMarkAllPresent} disabled={isFuture}>
             <MaterialCommunityIcons name="check-all" size={16} color={COLORS.success} />
             <Text style={styles.markAllText}>Tout présent</Text>
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Warning Banner if Future Date */}
+      {isFuture && (
+        <View style={styles.futureWarningBox}>
+          <MaterialCommunityIcons name="alert-decagram" size={18} color={COLORS.danger} />
+          <Text style={styles.futureWarningText}>
+            Saisie interdite : La date sélectionnée ({dateSeance}) est dans le futur.
+          </Text>
+        </View>
+      )}
+
+      {/* Scope Filter & Search */}
+      <View style={styles.filterRow}>
+        <View style={styles.scopeSwitch}>
+          <TouchableOpacity
+            style={[styles.scopeBtn, scopeFilter === 'creneau' && styles.scopeBtnActive]}
+            onPress={() => setScopeFilter('creneau')}
+          >
+            <MaterialCommunityIcons name="filter" size={14} color={scopeFilter === 'creneau' ? '#FFF' : COLORS.textMuted} />
+            <Text style={[styles.scopeText, scopeFilter === 'creneau' && styles.scopeTextActive]}>Ce créneau</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.scopeBtn, scopeFilter === 'tous' && styles.scopeBtnActive]}
+            onPress={() => setScopeFilter('tous')}
+          >
+            <MaterialCommunityIcons name="account-group" size={14} color={scopeFilter === 'tous' ? '#FFF' : COLORS.textMuted} />
+            <Text style={[styles.scopeText, scopeFilter === 'tous' && styles.scopeTextActive]}>Tous les adhérents</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Rechercher un adhérent par nom ou code..."
+          placeholderTextColor={COLORS.textMuted}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery ? (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
       {/* Stats Summary & Filter Bar */}
       <View style={styles.statsBar}>
@@ -324,9 +527,15 @@ export default function PresencesScreen({ route }) {
       {/* Footer Save Button */}
       {adherents.length > 0 && (
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
-            <MaterialCommunityIcons name="content-save" size={20} color="#FFF" />
-            <Text style={styles.saveBtnText}>{saving ? 'Enregistrement...' : 'Enregistrer la séance'}</Text>
+          <TouchableOpacity
+            style={[styles.saveBtn, isFuture && { backgroundColor: COLORS.textMuted }]}
+            onPress={handleSave}
+            disabled={saving || isFuture}
+          >
+            <MaterialCommunityIcons name={isFuture ? 'cancel' : 'content-save'} size={20} color="#FFF" />
+            <Text style={styles.saveBtnText}>
+              {isFuture ? 'Date future (Saisie interdite)' : saving ? 'Enregistrement...' : 'Enregistrer la séance'}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -342,12 +551,35 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
+  selectorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    marginBottom: 6,
+  },
   sectionLabel: {
     color: COLORS.textMuted,
     fontSize: 12,
     fontWeight: '600',
+  },
+  noSlotToday: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 16,
-    marginBottom: 6,
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 4,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  noSlotTodayText: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    fontStyle: 'italic',
   },
   creneauScroll: {
     paddingHorizontal: 16,
@@ -379,22 +611,129 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
+  dateControlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dateNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.bgInput,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  todayBtn: {
+    backgroundColor: COLORS.primary + '15',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.primary + '30',
+  },
+  todayText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   dateBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     backgroundColor: COLORS.bgInput,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   dateInput: {
     color: COLORS.textPrimary,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    minWidth: 110,
+    minWidth: 95,
+  },
+  dateShortcuts: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  shortcutChip: {
+    backgroundColor: COLORS.bgInput,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  shortcutChipActive: {
+    backgroundColor: COLORS.primary + '20',
+    borderColor: COLORS.primary,
+  },
+  shortcutText: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  shortcutTextActive: {
+    color: COLORS.primary,
+    fontWeight: '800',
+  },
+  filterRow: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  scopeSwitch: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.md,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  scopeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    borderRadius: RADIUS.sm,
+  },
+  scopeBtnActive: {
+    backgroundColor: COLORS.primary,
+  },
+  scopeText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  scopeTextActive: {
+    color: '#FFF',
+    fontWeight: '700',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  searchInput: {
+    flex: 1,
+    color: COLORS.textPrimary,
+    fontSize: 13,
+    padding: 0,
   },
   markAllBtn: {
     flexDirection: 'row',
@@ -538,4 +877,24 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderRadius: RADIUS.md,
   },
   saveBtnText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
+
+  futureWarningBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: COLORS.danger + '15',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.danger + '40',
+  },
+  futureWarningText: {
+    flex: 1,
+    color: COLORS.danger,
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });

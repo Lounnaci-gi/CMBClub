@@ -16,6 +16,7 @@ export default function ConfigScreen() {
     config, updateConfig,
     remises, loadRemises, createRemise, updateRemise, deleteRemise,
     disciplines, loadDisciplines, createDiscipline, updateDiscipline, deleteDiscipline,
+    loadAdminUser, updateAdminCredentials,
     logout,
   } = useStore();
   const { colors: COLORS, RADIUS, shadows: SHADOWS, themeId, setTheme } = useTheme();
@@ -33,9 +34,20 @@ export default function ConfigScreen() {
   const [editingDisc, setEditingDisc] = useState(null);
   const [discNom, setDiscNom] = useState('');
 
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPass, setShowAdminPass] = useState(false);
+  const [adminSaved, setAdminSaved] = useState(false);
+
   useFocusEffect(useCallback(() => {
     loadRemises();
     loadDisciplines();
+    loadAdminUser().then(admin => {
+      if (admin) {
+        setAdminUsername(admin.username || '');
+        setAdminPassword(admin.password || '');
+      }
+    });
   }, []));
 
   const handleSaveConfig = async () => {
@@ -123,6 +135,20 @@ export default function ConfigScreen() {
         },
       },
     ]);
+  };
+
+  const handleSaveAdmin = async () => {
+    if (!adminUsername.trim() || !adminPassword.trim()) {
+      Alert.alert('Erreur', 'L\'identifiant et le mot de passe ne peuvent pas être vides');
+      return;
+    }
+    try {
+      await updateAdminCredentials(adminUsername, adminPassword);
+      setAdminSaved(true);
+      setTimeout(() => setAdminSaved(false), 2000);
+    } catch (e) {
+      Alert.alert('Erreur', e.message || 'Impossible de mettre à jour le compte admin');
+    }
   };
 
   const getDisciplineIcon = (nom) => {
@@ -279,6 +305,55 @@ export default function ConfigScreen() {
             </View>
           ))
         )}
+      </View>
+
+      {/* Compte Administrateur Unique */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="shield-account" size={20} color={COLORS.primary} />
+          <Text style={styles.sectionTitle}>Compte Administrateur Unique</Text>
+        </View>
+        <Text style={styles.sectionHint}>L'application autorise strictement UN SEUL compte administrateur.</Text>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Identifiant Admin</Text>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.input}
+              value={adminUsername}
+              onChangeText={setAdminUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="admin"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Mot de passe Admin</Text>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              value={adminPassword}
+              onChangeText={setAdminPassword}
+              secureTextEntry={!showAdminPass}
+              placeholder="Mot de passe"
+              placeholderTextColor={COLORS.textMuted}
+            />
+            <TouchableOpacity onPress={() => setShowAdminPass(v => !v)} style={styles.unitBadge}>
+              <MaterialCommunityIcons name={showAdminPass ? 'eye-off' : 'eye'} size={20} color={COLORS.primary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.saveBtn, adminSaved && { backgroundColor: COLORS.success }]}
+          onPress={handleSaveAdmin}
+        >
+          <MaterialCommunityIcons name={adminSaved ? 'check' : 'shield-check'} size={18} color="#fff" />
+          <Text style={styles.saveBtnText}>{adminSaved ? 'Administrateur mis à jour !' : 'Enregistrer les identifiants'}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* App info */}

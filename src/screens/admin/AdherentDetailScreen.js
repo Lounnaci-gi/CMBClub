@@ -31,9 +31,10 @@ export default function AdherentDetailScreen({ navigation, route }) {
   const { adherentId } = route.params;
   const {
     adherents, saisonActive, deleteAdherent, enrollAdherent,
-    createPaiement, config, loadConfig,
+    createPaiement, config, loadConfig, getPresencesAdherent,
   } = useStore();
   const [paiements, setPaiements] = useState([]);
+  const [presencesData, setPresencesData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [account, setAccount] = useState(null);
   const [enrolled, setEnrolled] = useState(false);
@@ -52,7 +53,9 @@ export default function AdherentDetailScreen({ navigation, route }) {
       const p = await getPaiementsByAdherent(adherent.id, saisonActive.id);
       setPaiements(p);
     }
-  }, [adherent, saisonActive, loadConfig]);
+    const pres = await getPresencesAdherent(adherent.id, saisonActive?.id);
+    setPresencesData(pres);
+  }, [adherent, saisonActive, loadConfig, getPresencesAdherent]);
 
   useFocusEffect(useCallback(() => { loadPaiements(); }, [loadPaiements]));
 
@@ -309,6 +312,37 @@ export default function AdherentDetailScreen({ navigation, route }) {
                 <Text style={[styles.balanceValue, { color: balance.solde > 0 ? COLORS.danger : COLORS.success }]}>
                   {balance.solde.toLocaleString()} DA
                 </Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        {presencesData ? (
+          <View style={styles.card}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={styles.cardTitle}>Assiduité & Présences</Text>
+              <View style={{ backgroundColor: (presencesData.tauxPresence >= 80 ? COLORS.success : presencesData.tauxPresence >= 50 ? COLORS.warning : COLORS.danger) + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.full }}>
+                <Text style={{ color: presencesData.tauxPresence >= 80 ? COLORS.success : presencesData.tauxPresence >= 50 ? COLORS.warning : COLORS.danger, fontWeight: '800', fontSize: 13 }}>
+                  {presencesData.tauxPresence}%
+                </Text>
+              </View>
+            </View>
+            <View style={styles.balanceGrid}>
+              <View style={styles.balanceItem}>
+                <Text style={styles.balanceLabel}>Présent(s)</Text>
+                <Text style={[styles.balanceValue, { color: COLORS.success }]}>{presencesData.nbPresents}</Text>
+              </View>
+              <View style={styles.balanceItem}>
+                <Text style={styles.balanceLabel}>Absent(s)</Text>
+                <Text style={[styles.balanceValue, { color: COLORS.danger }]}>{presencesData.nbAbsents}</Text>
+              </View>
+              <View style={styles.balanceItem}>
+                <Text style={styles.balanceLabel}>Retard(s)</Text>
+                <Text style={[styles.balanceValue, { color: COLORS.warning }]}>{presencesData.nbRetards}</Text>
+              </View>
+              <View style={styles.balanceItem}>
+                <Text style={styles.balanceLabel}>Excusé(s)</Text>
+                <Text style={[styles.balanceValue, { color: COLORS.secondary }]}>{presencesData.nbExcuses}</Text>
               </View>
             </View>
           </View>

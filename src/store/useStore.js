@@ -17,13 +17,30 @@ import {
   getStatsBySaison,
   refreshPaymentStatuses,
   ensureAdherentAccount,
+  getAdminUser,
+  getAdminCount,
+  updateAdminCredentials,
 } from '../database/database';
 
 const useStore = create((set, get) => ({
-  // ── Auth ──
+  // ── Auth & Admin ──
   user: null,
+  adminUser: null,
   setUser: (user) => set({ user }),
   logout: () => set({ user: null }),
+  loadAdminUser: async () => {
+    const adminUser = await getAdminUser();
+    set({ adminUser });
+    return adminUser;
+  },
+  updateAdminCredentials: async (newUsername, newPassword) => {
+    const updatedAdmin = await updateAdminCredentials(newUsername, newPassword);
+    set(state => ({
+      adminUser: updatedAdmin,
+      user: state.user?.role === 'admin' ? updatedAdmin : state.user,
+    }));
+    return updatedAdmin;
+  },
 
   // ── Config ──
   config: { fraisInscription: 2000, fraisMensuel: 1500 },
