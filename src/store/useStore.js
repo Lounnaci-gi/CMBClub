@@ -12,6 +12,8 @@ import {
   createPaiement, updatePaiement,
   getRemises, createRemise, updateRemise, deleteRemise,
   getDisciplines, createDiscipline, updateDiscipline, deleteDiscipline,
+  getCreneaux, createCreneau, updateCreneau, deleteCreneau,
+  getPresencesBySeance, getEligibleAdherentsForCreneau, savePresencesSeance, getPresencesByAdherent,
   getStatsBySaison,
   refreshPaymentStatuses,
   ensureAdherentAccount,
@@ -134,6 +136,39 @@ const useStore = create((set, get) => ({
   deleteDiscipline: async (id) => {
     await deleteDiscipline(id);
     await get().loadDisciplines();
+  },
+
+  // ── Créneaux ──
+  creneaux: [],
+  loadCreneaux: async () => {
+    const creneaux = await getCreneaux();
+    set({ creneaux });
+  },
+  createCreneau: async (creneau) => {
+    await createCreneau(creneau);
+    await get().loadCreneaux();
+  },
+  updateCreneau: async (creneau) => {
+    await updateCreneau(creneau);
+    await get().loadCreneaux();
+  },
+  deleteCreneau: async (id) => {
+    await deleteCreneau(id);
+    await get().loadCreneaux();
+  },
+
+  // ── Présences ──
+  getPresencesSeance: async (creneauId, dateSeance) => {
+    return await getPresencesBySeance(creneauId, dateSeance);
+  },
+  getEligibleAdherents: async (creneauId, saisonId) => {
+    return await getEligibleAdherentsForCreneau(creneauId, saisonId);
+  },
+  savePresencesSeance: async (creneauId, dateSeance, saisonId, presencesList) => {
+    await savePresencesSeance(creneauId, dateSeance, saisonId, presencesList);
+  },
+  getPresencesAdherent: async (adherentId, saisonId) => {
+    return await getPresencesByAdherent(adherentId, saisonId);
   },
 
   // ── Stats ──

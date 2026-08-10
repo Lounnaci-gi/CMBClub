@@ -111,6 +111,33 @@ async function initDatabase(database) {
       nom TEXT UNIQUE NOT NULL,
       createdAt TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS creneaux (
+      id TEXT PRIMARY KEY,
+      discipline TEXT NOT NULL,
+      categorie TEXT NOT NULL,
+      jour TEXT NOT NULL,
+      heureDebut TEXT NOT NULL,
+      heureFin TEXT NOT NULL,
+      lieu TEXT,
+      remarque TEXT,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS presences (
+      id TEXT PRIMARY KEY,
+      creneauId TEXT NOT NULL,
+      adherentId TEXT NOT NULL,
+      saisonId TEXT NOT NULL,
+      dateSeance TEXT NOT NULL,
+      statut TEXT NOT NULL DEFAULT 'present',
+      remarque TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (creneauId) REFERENCES creneaux(id),
+      FOREIGN KEY (adherentId) REFERENCES adherents(id),
+      FOREIGN KEY (saisonId) REFERENCES saisons(id)
+    );
   `);
 
   // Seed config defaults
@@ -154,6 +181,28 @@ async function initDatabase(database) {
       );
     } catch (_e) {
       // ignore any seeding error to avoid blocking startup
+    }
+  }
+
+  // Créneaux par défaut
+  const defaultCreneaux = [
+    { id: 'creneau-kb-cadet-1a', discipline: 'KickBoxing', categorie: 'Cadet', jour: 'Lundi', heureDebut: '09:30', heureFin: '11:00', lieu: 'Grande Salle A', remarque: 'Séance matin - Physique & Technique' },
+    { id: 'creneau-kb-cadet-1b', discipline: 'KickBoxing', categorie: 'Cadet', jour: 'Lundi', heureDebut: '17:30', heureFin: '19:00', lieu: 'Grande Salle A', remarque: 'Séance soir - Sparring & Tactique' },
+    { id: 'creneau-kb-cadet-2', discipline: 'KickBoxing', categorie: 'Cadet', jour: 'Mercredi', heureDebut: '17:30', heureFin: '19:00', lieu: 'Grande Salle A', remarque: 'Prévoir protège-tibias' },
+    { id: 'creneau-kb-senior-1', discipline: 'KickBoxing', categorie: 'Sénior', jour: 'Mardi', heureDebut: '19:00', heureFin: '20:30', lieu: 'Grande Salle A', remarque: 'Sparring guidé' },
+    { id: 'creneau-kb-senior-2', discipline: 'KickBoxing', categorie: 'Sénior', jour: 'Jeudi', heureDebut: '19:00', heureFin: '20:30', lieu: 'Grande Salle A', remarque: 'Préparation physique' },
+    { id: 'creneau-nat-poussin-1', discipline: 'Natation', categorie: 'Poussin', jour: 'Samedi', heureDebut: '09:00', heureFin: '10:15', lieu: 'Piscine B', remarque: 'Groupe 1 - Bonnet obligatoire' },
+    { id: 'creneau-nat-poussin-2', discipline: 'Natation', categorie: 'Poussin', jour: 'Samedi', heureDebut: '10:30', heureFin: '11:45', lieu: 'Piscine B', remarque: 'Groupe 2 - Bonnet obligatoire' },
+  ];
+  for (const c of defaultCreneaux) {
+    try {
+      await database.runAsync(
+        `INSERT OR IGNORE INTO creneaux (id, discipline, categorie, jour, heureDebut, heureFin, lieu, remarque, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [c.id, c.discipline, c.categorie, c.jour, c.heureDebut, c.heureFin, c.lieu, c.remarque],
+      );
+    } catch (_e) {
+      // ignore seeding error
     }
   }
 }
@@ -550,3 +599,155 @@ export async function deleteDiscipline(id) {
   }
   await db.runAsync(`DELETE FROM disciplines WHERE id = ?`, [id]);
 }
+
+// ──────────────── CRÉNEAUX ────────────────
+
+export async function getCreneaux() {
+  const db = await getDatabase();
+  return await db.getAllAsync('SELECT * FROM creneaux ORDER BY CASE jour WHEN "Lundi" THEN 1 WHEN "Mardi" THEN 2 WHEN "Mercredi" THEN 3 WHEN "Jeudi" THEN 4 WHEN "Vendredi" THEN 5 WHEN "Samedi" THEN 6 WHEN "Dimanche" THEN 7 END, heureDebut ASC');
+}
+
+export async function createCreneau(creneau) {
+  const db = await getDatabase();
+  const createdAt = creneau.createdAt || new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO creneaux (id, discipline, categorie, jour, heureDebut, heureFin, lieu, remarque, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      creneau.id,
+      creneau.discipline,
+      creneau.categorie,
+      creneau.jour,
+      creneau.heureDebut,
+      creneau.heureFin,
+      creneau.lieu || null,
+      creneau.remarque || null,
+      createdAt,
+    ],
+  );
+}
+
+export async function updateCreneau(creneau) {
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE creneaux SET discipline = ?, categorie = ?, jour = ?, heureDebut = ?, heureFin = ?, lieu = ?, remarque = ? WHERE id = ?`,
+    [
+      creneau.discipline,
+      creneau.categorie,
+      creneau.jour,
+      creneau.heureDebut,
+      creneau.heureFin,
+      creneau.lieu || null,
+      creneau.remarque || null,
+      creneau.id,
+    ],
+  );
+}
+
+export async function deleteCreneau(id) {
+  const db = await getDatabase();
+  await db.runAsync(`DELETE FROM presences WHERE creneauId = ?`, [id]);
+  await db.runAsync(`DELETE FROM creneaux WHERE id = ?`, [id]);
+}
+
+// ──────────────── PRÉSENCES & ABSENCES ────────────────
+
+export async function getPresencesBySeance(creneauId, dateSeance) {
+  const db = await getDatabase();
+  return await db.getAllAsync(
+    `SELECT p.*, a.nom, a.prenom, a.code, a.dateNaissance, a.photo
+     FROM presences p
+     JOIN adherents a ON a.id = p.adherentId
+     WHERE p.creneauId = ? AND p.dateSeance = ?
+     ORDER BY a.nom, a.prenom`,
+    [creneauId, dateSeance],
+  );
+}
+
+export async function getEligibleAdherentsForCreneau(creneauId, saisonId) {
+  const db = await getDatabase();
+  const creneau = await db.getFirstAsync('SELECT * FROM creneaux WHERE id = ?', [creneauId]);
+  if (!creneau) return [];
+
+  // Adhérents inscrits pour la saison
+  const rows = await db.getAllAsync(
+    `SELECT a.* FROM adherents a
+     JOIN adherent_saisons as_rec ON as_rec.adherentId = a.id
+     WHERE as_rec.saisonId = ? AND as_rec.actif = 1
+     ORDER BY a.nom, a.prenom`,
+    [saisonId],
+  );
+
+  const { getCategoryByAge } = require('../utils/categories');
+
+  // Filtrer par discipline & catégorie
+  return rows.filter(a => {
+    const matchDisc = !a.discipline || a.discipline.toLowerCase() === creneau.discipline.toLowerCase();
+    const cat = getCategoryByAge(a.dateNaissance);
+    const matchCat = creneau.categorie === 'Toutes' || (cat && cat.label.toLowerCase() === creneau.categorie.toLowerCase());
+    return matchDisc && matchCat;
+  });
+}
+
+export async function savePresencesSeance(creneauId, dateSeance, saisonId, presencesList) {
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+
+  for (const item of presencesList) {
+    const existing = await db.getFirstAsync(
+      `SELECT id FROM presences WHERE creneauId = ? AND adherentId = ? AND dateSeance = ?`,
+      [creneauId, item.adherentId, dateSeance],
+    );
+
+    if (existing) {
+      await db.runAsync(
+        `UPDATE presences SET statut = ?, remarque = ?, updatedAt = ? WHERE id = ?`,
+        [item.statut, item.remarque || null, now, existing.id],
+      );
+    } else {
+      const id = `pres-${creneauId}-${item.adherentId}-${dateSeance}`;
+      await db.runAsync(
+        `INSERT INTO presences (id, creneauId, adherentId, saisonId, dateSeance, statut, remarque, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, creneauId, item.adherentId, saisonId, dateSeance, item.statut, item.remarque || null, now, now],
+      );
+    }
+  }
+}
+
+export async function getPresencesByAdherent(adherentId, saisonId) {
+  const db = await getDatabase();
+  const query = saisonId
+    ? `SELECT p.*, c.discipline, c.categorie, c.jour, c.heureDebut, c.heureFin, c.lieu
+       FROM presences p
+       JOIN creneaux c ON c.id = p.creneauId
+       WHERE p.adherentId = ? AND p.saisonId = ?
+       ORDER BY p.dateSeance DESC, c.heureDebut DESC`
+    : `SELECT p.*, c.discipline, c.categorie, c.jour, c.heureDebut, c.heureFin, c.lieu
+       FROM presences p
+       JOIN creneaux c ON c.id = p.creneauId
+       WHERE p.adherentId = ?
+       ORDER BY p.dateSeance DESC, c.heureDebut DESC`;
+
+  const list = await db.getAllAsync(query, saisonId ? [adherentId, saisonId] : [adherentId]);
+
+  const total = list.length;
+  const nbPresents = list.filter(p => p.statut === 'present').length;
+  const nbAbsents = list.filter(p => p.statut === 'absent').length;
+  const nbRetards = list.filter(p => p.statut === 'retard').length;
+  const nbExcuses = list.filter(p => p.statut === 'excuse').length;
+
+  const tauxPresence = total > 0 ? Math.round(((nbPresents + nbRetards) / total) * 100) : 100;
+
+  return {
+    list,
+    total,
+    nbPresents,
+    nbAbsents,
+    nbRetards,
+    nbExcuses,
+    tauxPresence,
+  };
+}
+
+

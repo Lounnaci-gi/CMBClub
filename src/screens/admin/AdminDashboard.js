@@ -33,10 +33,10 @@ export default function AdminDashboard({ navigation }) {
 
   const quickActions = [
     { icon: 'account-plus', label: 'Nouvel adhérent', color: COLORS.primary, screen: 'AdherentForm' },
-    { icon: 'cash-plus', label: 'Saisir paiement', color: COLORS.success, screen: 'PaymentList' },
-    { icon: 'account-group', label: 'Adhérents', color: COLORS.secondary, screen: 'AdherentList' },
-    { icon: 'calendar-star', label: 'Saisons', color: COLORS.catCadet, screen: 'Seasons' },
-    { icon: 'percent', label: 'Remises', color: COLORS.catMinime, screen: 'Config' },
+    { icon: 'clipboard-check-outline', label: 'Faire l\'appel', color: COLORS.success, screen: 'Presences' },
+    { icon: 'clock-outline', label: 'Créneaux', color: COLORS.secondary, screen: 'Creneaux' },
+    { icon: 'account-group', label: 'Adhérents', color: COLORS.catCadet, screen: 'AdherentList' },
+    { icon: 'calendar-star', label: 'Saisons', color: COLORS.catMinime, screen: 'Seasons' },
     { icon: 'cog', label: 'Paramètres', color: COLORS.textSecondary, screen: 'Config' },
   ];
 
@@ -101,8 +101,9 @@ export default function AdminDashboard({ navigation }) {
         <View style={styles.menuList}>
           {[
             { icon: 'account-multiple', label: 'Liste des adhérents', sub: 'Filtrer, rechercher, voir fiches', screen: 'AdherentList', color: COLORS.primary },
-            { icon: 'credit-card-multiple', label: 'Gestion des paiements', sub: 'Mensualités, inscriptions, retards', screen: 'PaymentList', color: COLORS.success },
-            { icon: 'calendar-month', label: 'Gestion des saisons', sub: 'Créer et activer des saisons', screen: 'Seasons', color: COLORS.secondary },
+            { icon: 'clipboard-check', label: 'Gestion des présences', sub: 'Appel par créneau & suivi d\'assiduité', screen: 'Presences', color: COLORS.success },
+            { icon: 'calendar-clock', label: 'Planning & Créneaux', sub: 'Horaires par discipline et catégorie', screen: 'Creneaux', color: COLORS.secondary },
+            { icon: 'calendar-month', label: 'Gestion des saisons', sub: 'Créer et activer des saisons', screen: 'Seasons', color: COLORS.catCadet },
             { icon: 'tune', label: 'Configuration', sub: 'Tarifs, remises, paramètres', screen: 'Config', color: COLORS.catMinime },
           ].map((item) => (
             <TouchableOpacity

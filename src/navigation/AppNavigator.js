@@ -15,6 +15,8 @@ import PaymentListScreen from '../screens/admin/PaymentListScreen';
 import PaymentDetailScreen from '../screens/admin/PaymentDetailScreen';
 import SeasonScreen from '../screens/admin/SeasonScreen';
 import ConfigScreen from '../screens/admin/ConfigScreen';
+import CreneauxScreen from '../screens/admin/CreneauxScreen';
+import PresencesScreen from '../screens/admin/PresencesScreen';
 import AdherentHomeScreen from '../screens/adherent/AdherentHomeScreen';
 
 const Stack = createNativeStackNavigator();
@@ -58,6 +60,16 @@ function AdminStack({ screenOptions }) {
         name="Seasons"
         component={SeasonScreen}
         options={{ title: 'Saisons' }}
+      />
+      <Stack.Screen
+        name="Creneaux"
+        component={CreneauxScreen}
+        options={{ title: 'Planning & Créneaux' }}
+      />
+      <Stack.Screen
+        name="Presences"
+        component={PresencesScreen}
+        options={{ title: 'Appel & Présences' }}
       />
       <Stack.Screen
         name="Config"

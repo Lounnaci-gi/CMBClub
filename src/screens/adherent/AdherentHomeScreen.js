@@ -18,22 +18,26 @@ import { getAdherentById, getPaiementsByAdherent } from '../../database/database
 export default function AdherentHomeScreen() {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
-  const { user, saisonActive, loadSaisons, logout } = useStore();
+  const { user, saisonActive, creneaux, loadSaisons, loadCreneaux, getPresencesAdherent, logout } = useStore();
   const [adherent, setAdherent] = useState(null);
   const [paiements, setPaiements] = useState([]);
+  const [presencesData, setPresencesData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showAllCreneaux, setShowAllCreneaux] = useState(false);
 
   const load = useCallback(async () => {
-    await loadSaisons();
+    await Promise.all([loadSaisons(), loadCreneaux()]);
     const saison = useStore.getState().saisonActive;
     if (!user?.adherentId) return;
     const a = await getAdherentById(user.adherentId);
     setAdherent(a);
-    if (a && saison) {
-      const p = await getPaiementsByAdherent(a.id, saison.id);
+    if (a) {
+      const p = saison ? await getPaiementsByAdherent(a.id, saison.id) : [];
       setPaiements(p);
+      const pres = await getPresencesAdherent(a.id, saison?.id);
+      setPresencesData(pres);
     }
-  }, [user?.adherentId, loadSaisons]);
+  }, [user?.adherentId, loadSaisons, loadCreneaux, getPresencesAdherent]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -46,6 +50,30 @@ export default function AdherentHomeScreen() {
   const cat = adherent ? getCategoryByAge(adherent.dateNaissance) : null;
   const balance = calculateBalance(paiements);
   const retards = paiements.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD);
+
+  const myCreneaux = useMemo(() => {
+    if (!adherent) return [];
+    return creneaux.filter(c => {
+      const matchDisc = !adherent.discipline || c.discipline.toLowerCase() === adherent.discipline.toLowerCase();
+      const matchCat = !cat || c.categorie.toLowerCase() === cat.label.toLowerCase();
+      return matchDisc && matchCat;
+    });
+  }, [creneaux, adherent, cat]);
+
+  const displayedCreneaux = showAllCreneaux ? creneaux : myCreneaux;
+
+  const JOURS_ORDER = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+
+  const groupedCreneaux = useMemo(() => {
+    const map = {};
+    displayedCreneaux.forEach(c => {
+      if (!map[c.jour]) map[c.jour] = [];
+      map[c.jour].push(c);
+    });
+    return JOURS_ORDER
+      .filter(j => map[j] && map[j].length > 0)
+      .map(j => ({ jour: j, list: map[j] }));
+  }, [displayedCreneaux]);
 
   return (
     <View style={styles.container}>
@@ -106,6 +134,149 @@ export default function AdherentHomeScreen() {
                     {adherent.discipline ? ` · ${adherent.discipline}` : ''}
                   </Text>
                 </View>
+              </View>
+            )}
+
+            {/* Schedule Section */}
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitleNoMargin}>
+                {showAllCreneaux ? 'Tous les créneaux du club' : 'Mes horaires d\'entraînement'}
+              </Text>
+              <TouchableOpacity
+                style={styles.toggleBtn}
+                onPress={() => setShowAllCreneaux(!showAllCreneaux)}
+              >
+                <Text style={styles.toggleBtnText}>
+                  {showAllCreneaux ? 'Mon planning' : 'Tout voir'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.creneauxContainer}>
+              {groupedCreneaux.length === 0 ? (
+                <View style={styles.emptyCreneauxCard}>
+                  <MaterialCommunityIcons name="calendar-clock" size={32} color={COLORS.textMuted} />
+                  <Text style={styles.emptyCreneauxText}>
+                    {showAllCreneaux
+                      ? 'Aucun créneau configuré au club'
+                      : `Aucun créneau programmé pour ${adherent?.discipline || 'votre discipline'} (${cat?.label || 'votre catégorie'})`}
+                  </Text>
+                </View>
+              ) : (
+                groupedCreneaux.map((group) => (
+                  <View key={group.jour} style={styles.dayGroupCard}>
+                    <View style={styles.dayGroupHeader}>
+                      <MaterialCommunityIcons name="calendar-today" size={16} color={COLORS.primary} />
+                      <Text style={styles.dayGroupTitle}>{group.jour}</Text>
+                      <View style={styles.dayGroupCountBadge}>
+                        <Text style={styles.dayGroupCountText}>
+                          {group.list.length} créneau{group.list.length > 1 ? 'x' : ''}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.dayGroupList}>
+                      {group.list.map((c, index) => (
+                        <View key={c.id} style={styles.creneauCardItem}>
+                          <View style={styles.creneauIconBox}>
+                            <MaterialCommunityIcons name="clock-outline" size={20} color={COLORS.secondary} />
+                          </View>
+                          <View style={styles.creneauInfo}>
+                            <View style={styles.creneauTitleRow}>
+                              <Text style={styles.creneauTime}>{c.heureDebut} - {c.heureFin}</Text>
+                              {group.list.length > 1 && (
+                                <Text style={styles.seanceTag}>Séance {index + 1}</Text>
+                              )}
+                            </View>
+                            <Text style={styles.creneauMeta}>
+                              {c.discipline} · {c.categorie}
+                              {c.lieu ? ` · 📍 ${c.lieu}` : ''}
+                            </Text>
+                            {c.remarque ? (
+                              <Text style={styles.creneauRemarque}>💡 {c.remarque}</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+
+            {/* Attendance & Assiduité Section */}
+            {presencesData && (
+              <View style={styles.attendanceCard}>
+                <View style={styles.attendanceHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sectionLabel}>Mon Assiduité & Présences</Text>
+                    <Text style={styles.attendanceSub}>Relevé des séances cette saison</Text>
+                  </View>
+                  <View style={[
+                    styles.tauxBadge,
+                    { backgroundColor: (presencesData.tauxPresence >= 80 ? COLORS.success : presencesData.tauxPresence >= 50 ? COLORS.warning : COLORS.danger) + '20' }
+                  ]}>
+                    <Text style={[
+                      styles.tauxText,
+                      { color: presencesData.tauxPresence >= 80 ? COLORS.success : presencesData.tauxPresence >= 50 ? COLORS.warning : COLORS.danger }
+                    ]}>
+                      {presencesData.tauxPresence}%
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.attendanceRow}>
+                  <View style={styles.attCol}>
+                    <Text style={[styles.attAmt, { color: COLORS.success }]}>{presencesData.nbPresents}</Text>
+                    <Text style={styles.attLbl}>Présent(s)</Text>
+                  </View>
+                  <View style={styles.vDivider} />
+                  <View style={styles.attCol}>
+                    <Text style={[styles.attAmt, { color: COLORS.danger }]}>{presencesData.nbAbsents}</Text>
+                    <Text style={styles.attLbl}>Absent(s)</Text>
+                  </View>
+                  <View style={styles.vDivider} />
+                  <View style={styles.attCol}>
+                    <Text style={[styles.attAmt, { color: COLORS.warning }]}>{presencesData.nbRetards}</Text>
+                    <Text style={styles.attLbl}>Retard(s)</Text>
+                  </View>
+                  <View style={styles.vDivider} />
+                  <View style={styles.attCol}>
+                    <Text style={[styles.attAmt, { color: COLORS.secondary }]}>{presencesData.nbExcuses}</Text>
+                    <Text style={styles.attLbl}>Excusé(s)</Text>
+                  </View>
+                </View>
+
+                {/* History List */}
+                {presencesData.list.length > 0 && (
+                  <View style={styles.historyList}>
+                    <Text style={styles.historyTitle}>Dernières séances enregistrées :</Text>
+                    {presencesData.list.slice(0, 4).map(p => {
+                      const isPresent = p.statut === 'present';
+                      const isAbsent = p.statut === 'absent';
+                      const isRetard = p.statut === 'retard';
+                      const color = isPresent ? COLORS.success : isAbsent ? COLORS.danger : isRetard ? COLORS.warning : COLORS.secondary;
+                      const label = isPresent ? 'Présent' : isAbsent ? 'Absent' : isRetard ? 'Retard' : 'Excusé';
+
+                      return (
+                        <View key={p.id} style={styles.historyItem}>
+                          <View style={styles.historyLeft}>
+                            <MaterialCommunityIcons
+                              name={isPresent ? 'check-circle' : isAbsent ? 'close-circle' : isRetard ? 'clock-alert' : 'account-check'}
+                              size={18}
+                              color={color}
+                            />
+                            <Text style={styles.historyDate}>{p.dateSeance}</Text>
+                            <Text style={styles.historyJour}>({p.jour})</Text>
+                          </View>
+                          <View style={[styles.historyBadge, { backgroundColor: color + '20' }]}>
+                            <Text style={[styles.historyBadgeText, { color }]}>{label}</Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
             )}
 
@@ -262,6 +433,234 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     marginTop: 24,
     marginBottom: 12,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  sectionTitleNoMargin: {
+    color: COLORS.textPrimary,
+    fontSize: 17,
+    fontWeight: '700',
+    flex: 1,
+  },
+  toggleBtn: {
+    backgroundColor: COLORS.bgInput,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  toggleBtnText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dayGroupCard: {
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.lg,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    gap: 10,
+    ...SHADOWS.card,
+  },
+  dayGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border + '60',
+    paddingBottom: 8,
+  },
+  dayGroupTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  dayGroupCountBadge: {
+    marginLeft: 'auto',
+    backgroundColor: COLORS.primary + '15',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: RADIUS.full,
+  },
+  dayGroupCountText: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  dayGroupList: {
+    gap: 8,
+  },
+  creneauCardItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.md,
+    padding: 12,
+    gap: 10,
+  },
+  seanceTag: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: '700',
+    backgroundColor: COLORS.primary + '20',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: RADIUS.sm,
+  },
+  creneauIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.secondary + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  creneauInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  creneauTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  creneauTime: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  creneauMeta: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  creneauRemarque: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  emptyCreneauxCard: {
+    alignItems: 'center',
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.md,
+    padding: 20,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  emptyCreneauxText: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  /* Attendance styles */
+  attendanceCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.lg,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    gap: 12,
+    ...SHADOWS.card,
+  },
+  attendanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  attendanceSub: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  tauxBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: RADIUS.full,
+  },
+  tauxText: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  attendanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.md,
+  },
+  attCol: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  attAmt: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  attLbl: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  historyList: {
+    marginTop: 4,
+    gap: 6,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border + '60',
+    paddingTop: 10,
+  },
+  historyTitle: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  historyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.bgInput,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: RADIUS.sm,
+  },
+  historyLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historyDate: {
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  historyJour: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+  },
+  historyBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: RADIUS.sm,
+  },
+  historyBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
   list: { paddingHorizontal: 16, gap: 10 },
   empty: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 32, gap: 12 },
   emptyTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '700' },
