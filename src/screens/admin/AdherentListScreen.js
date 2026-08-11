@@ -34,6 +34,7 @@ export default function AdherentListScreen({ navigation }) {
   const [discFilter,  setDiscFilter]  = useState('all');
   const [payFilter,   setPayFilter]   = useState('all');
   const [genreFilter, setGenreFilter] = useState('all');
+  const [assureFilter, setAssureFilter] = useState('all');
   const [payStatusMap, setPayStatusMap] = useState({});
   const [refreshing,  setRefreshing]  = useState(false);
   const [printing,    setPrinting]    = useState(false);
@@ -81,6 +82,12 @@ export default function AdherentListScreen({ navigation }) {
     { value: 'F',   label: 'Féminin',  icon: '♀' },
   ];
 
+  const ASSURANCE_FILTERS = [
+    { value: 'all',        label: 'Tous',        icon: '👥' },
+    { value: 'assure',     label: 'Assurés 🛡️',  icon: '🛡️', color: COLORS.success },
+    { value: 'non_assure', label: 'Non assurés', icon: '❌', color: COLORS.danger },
+  ];
+
   // ── Filtering ─────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     return adherents.filter(a => {
@@ -90,14 +97,16 @@ export default function AdherentListScreen({ navigation }) {
       if (catFilter   !== 'all' && cat.label    !== catFilter)   return false;
       if (discFilter  !== 'all' && a.discipline !== discFilter)   return false;
       if (genreFilter !== 'all' && a.genre      !== genreFilter)  return false;
+      if (assureFilter === 'assure' && !a.assure) return false;
+      if (assureFilter === 'non_assure' && a.assure) return false;
       if (payFilter   !== 'all') {
         if (payStatusMap[a.id] !== payFilter) return false;
       }
       return true;
     });
-  }, [adherents, search, catFilter, discFilter, payFilter, genreFilter, payStatusMap]);
+  }, [adherents, search, catFilter, discFilter, payFilter, genreFilter, assureFilter, payStatusMap]);
 
-  const activeFiltersCount = [catFilter, discFilter, payFilter, genreFilter]
+  const activeFiltersCount = [catFilter, discFilter, payFilter, genreFilter, assureFilter]
     .filter(f => f !== 'all').length + (search ? 1 : 0);
 
   const clearAllFilters = () => {
@@ -105,6 +114,7 @@ export default function AdherentListScreen({ navigation }) {
     setDiscFilter('all');
     setPayFilter('all');
     setGenreFilter('all');
+    setAssureFilter('all');
     setSearch('');
   };
 
@@ -253,6 +263,12 @@ export default function AdherentListScreen({ navigation }) {
                 </Text>
               </View>
             ) : null}
+
+            <View style={[styles.payBadge, { backgroundColor: (item.assure ? COLORS.success : COLORS.textMuted) + '22' }]}>
+              <Text style={[styles.payBadgeText, { color: item.assure ? COLORS.success : COLORS.textMuted }]}>
+                {item.assure ? '🛡️ Assuré' : 'Non assuré'}
+              </Text>
+            </View>
           </View>
 
           {item.discipline ? (
@@ -338,6 +354,14 @@ export default function AdherentListScreen({ navigation }) {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
               {STATUS_FILTERS.map(f => renderChip(f, payFilter === f.value, () => setPayFilter(f.value)))}
             </ScrollView>
+          </View>
+
+          {/* Assurance */}
+          <View style={styles.filterGroup}>
+            <Text style={styles.filterGroupLabel}>Assurance</Text>
+            <View style={styles.chipRow}>
+              {ASSURANCE_FILTERS.map(f => renderChip(f, assureFilter === f.value, () => setAssureFilter(f.value)))}
+            </View>
           </View>
 
           {/* Clear all */}

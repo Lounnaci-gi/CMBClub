@@ -55,6 +55,7 @@ async function initDatabase(database) {
       discipline TEXT,
       genre TEXT DEFAULT 'M',
       dateInscription TEXT,
+      assure INTEGER DEFAULT 0,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
@@ -144,6 +145,13 @@ async function initDatabase(database) {
   // Migration : ajout de dateInscription si la colonne n'existe pas encore
   try {
     await database.execAsync(`ALTER TABLE adherents ADD COLUMN dateInscription TEXT`);
+  } catch (_e) {
+    // La colonne existe déjà, on ignore
+  }
+
+  // Migration : ajout de la colonne assure (0 = non assuré, 1 = assuré)
+  try {
+    await database.execAsync(`ALTER TABLE adherents ADD COLUMN assure INTEGER DEFAULT 0`);
   } catch (_e) {
     // La colonne existe déjà, on ignore
   }
@@ -321,7 +329,9 @@ async function initDatabase(database) {
   const currentYear = new Date().getFullYear();
   const activeSaisonId = `saison-${currentYear >= 9 ? currentYear : currentYear - 1}`;
 
-  for (const a of seedAdherents) {
+  for (let idx = 0; idx < seedAdherents.length; idx++) {
+    const a = seedAdherents[idx];
+    const isAssure = idx % 2 === 0 ? 1 : 0; // Alterner assuré/non assuré pour la démo
     try {
       const code = buildAdherentCodeBase({
         nom: a.nom, prenom: a.prenom, dateNaissance: a.dn,
@@ -329,9 +339,9 @@ async function initDatabase(database) {
       await database.runAsync(
         `INSERT OR IGNORE INTO adherents
            (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille,
-            groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [a.id, code, a.nom, a.prenom, a.dn, a.lieu, a.tel, a.gs, a.disc, a.genre, a.dn.slice(0, 4) + '-09-01'],
+            groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, assure, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        [a.id, code, a.nom, a.prenom, a.dn, a.lieu, a.tel, a.gs, a.disc, a.genre, a.dn.slice(0, 4) + '-09-01', isAssure],
       );
 
       // Inscription à la saison active
@@ -415,15 +425,16 @@ export async function createAdherent(adherent) {
   const now = new Date().toISOString();
   // La date d'inscription est automatiquement la date du jour si non fournie
   const dateInscription = adherent.dateInscription || now.slice(0, 10);
+  const assureVal = adherent.assure ? 1 : 0;
   await db.runAsync(
-    `INSERT INTO adherents (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille, groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO adherents (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille, groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, assure, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       adherent.id, adherent.code, adherent.nom, adherent.prenom,
       adherent.dateNaissance, adherent.lieuNaissance, adherent.telephone || null,
       adherent.taille || null, adherent.groupeSanguin || null,
       adherent.observationsMedicales || null, adherent.photo || null,
-      adherent.discipline || null, adherent.genre || 'M', dateInscription, now, now,
+      adherent.discipline || null, adherent.genre || 'M', dateInscription, assureVal, now, now,
     ],
   );
 }
@@ -431,15 +442,16 @@ export async function createAdherent(adherent) {
 export async function updateAdherent(adherent) {
   const db = await getDatabase();
   const now = new Date().toISOString();
+  const assureVal = adherent.assure ? 1 : 0;
   // Le code et la dateInscription ne sont jamais modifiés après création
   await db.runAsync(
-    `UPDATE adherents SET nom=?, prenom=?, dateNaissance=?, lieuNaissance=?, telephone=?, taille=?, groupeSanguin=?, observationsMedicales=?, photo=?, discipline=?, genre=?, updatedAt=? WHERE id=?`,
+    `UPDATE adherents SET nom=?, prenom=?, dateNaissance=?, lieuNaissance=?, telephone=?, taille=?, groupeSanguin=?, observationsMedicales=?, photo=?, discipline=?, genre=?, assure=?, updatedAt=? WHERE id=?`,
     [
       adherent.nom, adherent.prenom, adherent.dateNaissance,
       adherent.lieuNaissance, adherent.telephone || null, adherent.taille || null,
       adherent.groupeSanguin || null, adherent.observationsMedicales || null,
       adherent.photo || null, adherent.discipline || null, adherent.genre || 'M',
-      now, adherent.id,
+      assureVal, now, adherent.id,
     ],
   );
 }

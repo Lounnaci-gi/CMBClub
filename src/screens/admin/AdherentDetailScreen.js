@@ -165,11 +165,11 @@ export default function AdherentDetailScreen({ navigation, route }) {
     );
   };
 
-  const InfoRow = ({ icon, label, value }) => (
+  const InfoRow = ({ icon, label, value, valueColor }) => (
     <View style={styles.infoRow}>
       <MaterialCommunityIcons name={icon} size={16} color={COLORS.textMuted} />
       <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value || '-'}</Text>
+      <Text style={[styles.infoValue, valueColor ? { color: valueColor } : null]}>{value || '-'}</Text>
     </View>
   );
 
@@ -247,6 +247,12 @@ export default function AdherentDetailScreen({ navigation, route }) {
           <InfoRow icon="human-male-height" label="Taille" value={adherent.taille ? `${adherent.taille} cm` : '-'} />
           <InfoRow icon="water" label="Groupe sanguin" value={adherent.groupeSanguin} />
           <InfoRow icon="calendar-account" label="Date d'inscription" value={formatDate(adherent.dateInscription || adherent.createdAt?.slice(0, 10))} />
+          <InfoRow
+            icon="shield-check"
+            label="Assurance"
+            value={adherent.assure ? 'Assuré 🛡️' : 'Non assuré ❌'}
+            valueColor={adherent.assure ? COLORS.success : COLORS.danger}
+          />
         </View>
 
 

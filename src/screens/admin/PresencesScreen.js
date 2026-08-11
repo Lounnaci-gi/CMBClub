@@ -44,6 +44,18 @@ const getSlotStartDateTime = (dateStr, heureDebutStr) => {
   return new Date(parts[0], parts[1] - 1, parts[2], hours, minutes, 0);
 };
 
+const getDateForJour = (jourName, baseDate = new Date()) => {
+  const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+  const targetIdx = JOURS_FR.indexOf(jourName);
+  if (targetIdx === -1) return getLocalDateString(baseDate);
+
+  const currentIdx = baseDate.getDay();
+  let diffDays = (targetIdx - currentIdx + 7) % 7;
+  const d = new Date(baseDate);
+  d.setDate(d.getDate() + diffDays);
+  return getLocalDateString(d);
+};
+
 const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 const getTodayJour = () => JOURS_FR[new Date().getDay()];
 
@@ -87,16 +99,42 @@ export default function PresencesScreen({ route }) {
   );
 
   const selectedCreneau = useMemo(() => {
-    return creneauxDuJour.find(c => c.id === selectedCreneauId)
-      || creneauxDuJour[0]
-      || null;
-  }, [creneauxDuJour, selectedCreneauId]);
+    if (selectedCreneauId) {
+      const found = creneaux.find(c => c.id === selectedCreneauId);
+      if (found) return found;
+    }
+    return creneauxDuJour[0] || creneaux[0] || null;
+  }, [creneaux, creneauxDuJour, selectedCreneauId]);
 
-  // Calcul du temps restant jusqu'au début du créneau
-  const slotStartDateTime = useMemo(
-    () => (selectedCreneau ? getSlotStartDateTime(dateSeance, selectedCreneau.heureDebut) : null),
-    [dateSeance, selectedCreneau],
-  );
+  // Jour actif basé sur le créneau sélectionné
+  const activeJour = useMemo(() => {
+    return selectedCreneau?.jour || todayJour;
+  }, [selectedCreneau, todayJour]);
+
+  // Seuls les créneaux du jour du créneau sélectionné (ex: Mercredi uniquement)
+  const visibleSlots = useMemo(() => {
+    return creneaux.filter(c => c.jour === activeJour);
+  }, [creneaux, activeJour]);
+
+  // Synchronisation lors de la navigation depuis "Horaires & Créneaux"
+  useEffect(() => {
+    const paramId = route?.params?.creneauId;
+    if (paramId) {
+      setSelectedCreneauId(paramId);
+      const target = creneaux.find(c => c.id === paramId);
+      if (target?.jour) {
+        setDateSeance(getDateForJour(target.jour));
+      }
+    }
+  }, [route?.params?.creneauId, creneaux]);
+
+  // Calcul du temps restant jusqu'au début du créneau sélectionné
+  // On utilise directement le jour du créneau (pas dateSeance qui peut être désync)
+  const slotStartDateTime = useMemo(() => {
+    if (!selectedCreneau?.heureDebut || !selectedCreneau?.jour) return null;
+    const dateForSlot = getDateForJour(selectedCreneau.jour);
+    return getSlotStartDateTime(dateForSlot, selectedCreneau.heureDebut);
+  }, [selectedCreneau?.id, selectedCreneau?.heureDebut, selectedCreneau?.jour]);
 
   const isNotStartedYet = useMemo(() => {
     if (!slotStartDateTime) return false;
@@ -120,11 +158,12 @@ export default function PresencesScreen({ route }) {
     return { hh, mm, ss, totalSeconds };
   }, [now, slotStartDateTime, isNotStartedYet]);
 
-  // Auto-select the first slot of today when loaded
+  // Auto-select : seulement si aucun créneau n'est déjà sélectionné (ex: navigation depuis CreneauxScreen)
   useEffect(() => {
+    if (route?.params?.creneauId) return; // créneau déjà choisi par navigation
+    if (selectedCreneauId) return;        // déjà sélectionné manuellement
     if (creneauxDuJour.length > 0) {
-      const already = creneauxDuJour.find(c => c.id === selectedCreneauId);
-      if (!already) setSelectedCreneauId(creneauxDuJour[0].id);
+      setSelectedCreneauId(creneauxDuJour[0].id);
     }
   }, [creneauxDuJour]);
 
@@ -386,28 +425,33 @@ export default function PresencesScreen({ route }) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Creneaux Selector - only slots for today */}
+      {/* Creneaux Selector - filtré uniquement par le jour sélectionné */}
       <View style={styles.selectorSection}>
         <View style={styles.selectorHeader}>
-          <MaterialCommunityIcons name="calendar-today" size={14} color={COLORS.primary} />
+          <MaterialCommunityIcons name="calendar-clock" size={14} color={COLORS.primary} />
           <Text style={styles.sectionLabel}>
-            Créneaux du {todayJour} :
+            Créneaux du {activeJour} :
           </Text>
         </View>
-        {creneauxDuJour.length === 0 ? (
+        {visibleSlots.length === 0 ? (
           <View style={styles.noSlotToday}>
             <MaterialCommunityIcons name="calendar-remove" size={20} color={COLORS.textMuted} />
-            <Text style={styles.noSlotTodayText}>Aucun créneau prévu aujourd'hui ({todayJour})</Text>
+            <Text style={styles.noSlotTodayText}>Aucun créneau prévu pour le {activeJour}</Text>
           </View>
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.creneauScroll}>
-            {creneauxDuJour.map(c => {
+            {visibleSlots.map(c => {
               const isSelected = c.id === selectedCreneau?.id;
               return (
                 <TouchableOpacity
                   key={c.id}
                   style={[styles.creneauChip, isSelected && styles.creneauChipSelected]}
-                  onPress={() => setSelectedCreneauId(c.id)}
+                  onPress={() => {
+                    setSelectedCreneauId(c.id);
+                    if (c.jour) {
+                      setDateSeance(getDateForJour(c.jour));
+                    }
+                  }}
                 >
                   <Text style={[styles.creneauChipText, isSelected && styles.creneauChipTextSelected]}>
                     {c.discipline} · {c.heureDebut}
@@ -482,10 +526,15 @@ export default function PresencesScreen({ route }) {
             </View>
             <Text style={styles.countdownTitle}>Créneau non débuté</Text>
             <Text style={styles.countdownSubtitle}>
-              L'appel pour {selectedCreneau?.discipline} ({selectedCreneau?.categorie}) commencera à{' '}
+              L'appel pour le créneau{' '}
+              <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>
+                {selectedCreneau?.discipline} ({selectedCreneau?.categorie})
+              </Text>{' '}
+              du <Text style={{ fontWeight: '700', color: COLORS.secondary }}>{selectedCreneau?.jour}</Text> à{' '}
               <Text style={{ fontWeight: '800', color: COLORS.primary }}>
                 {selectedCreneau?.heureDebut}
-              </Text>
+              </Text>{' '}
+              commencera dans :
             </Text>
 
             <View style={styles.timerRow}>

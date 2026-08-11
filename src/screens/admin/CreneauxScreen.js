@@ -25,6 +25,7 @@ export default function CreneauxScreen({ navigation }) {
   const [selectedDisciplineFilter, setSelectedDisciplineFilter] = useState('Toutes');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('Toutes');
   const [selectedJourFilter, setSelectedJourFilter] = useState('Tous');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Form State
   const [discipline, setDiscipline] = useState('');
@@ -142,9 +143,18 @@ export default function CreneauxScreen({ navigation }) {
       const matchDisc = selectedDisciplineFilter === 'Toutes' || item.discipline === selectedDisciplineFilter;
       const matchCat = selectedCategoryFilter === 'Toutes' || item.categorie === selectedCategoryFilter;
       const matchJour = selectedJourFilter === 'Tous' || item.jour === selectedJourFilter;
-      return matchDisc && matchCat && matchJour;
+
+      const q = searchQuery.toLowerCase().trim();
+      const matchSearch = !q ||
+        (item.discipline || '').toLowerCase().includes(q) ||
+        (item.categorie || '').toLowerCase().includes(q) ||
+        (item.jour || '').toLowerCase().includes(q) ||
+        (item.lieu || '').toLowerCase().includes(q) ||
+        (item.remarque || '').toLowerCase().includes(q);
+
+      return matchDisc && matchCat && matchJour && matchSearch;
     });
-  }, [creneaux, selectedDisciplineFilter, selectedCategoryFilter, selectedJourFilter]);
+  }, [creneaux, selectedDisciplineFilter, selectedCategoryFilter, selectedJourFilter, searchQuery]);
 
   return (
     <View style={styles.container}>
@@ -160,49 +170,92 @@ export default function CreneauxScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Filters Bar */}
+      {/* Search Bar (Style identique à Présences) */}
+      <View style={styles.searchContainer}>
+        <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Rechercher par discipline, catégorie, jour, lieu..."
+          placeholderTextColor={COLORS.textMuted}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery ? (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {/* Selecteur par Jour (Style identique à Présences) */}
+      <View style={styles.selectorSection}>
+        <View style={styles.selectorHeader}>
+          <MaterialCommunityIcons name="calendar-today" size={14} color={COLORS.primary} />
+          <Text style={styles.sectionLabel}>Jour :</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.creneauScroll}>
+          {['Tous', ...JOURS].map(j => {
+            const isSelected = selectedJourFilter === j;
+            return (
+              <TouchableOpacity
+                key={j}
+                style={[styles.creneauChip, isSelected && styles.creneauChipSelected]}
+                onPress={() => setSelectedJourFilter(j)}
+              >
+                <Text style={[styles.creneauChipText, isSelected && styles.creneauChipTextSelected]}>
+                  {j}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Filtres par Discipline & Catégorie */}
       <View style={styles.filterSection}>
-        {/* Disciplines Filter */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-          <Text style={styles.filterLabelInline}>Discipline:</Text>
-          {['Toutes', ...disciplineList].map(d => (
-            <TouchableOpacity
-              key={d}
-              style={[styles.chip, selectedDisciplineFilter === d && styles.chipActive]}
-              onPress={() => setSelectedDisciplineFilter(d)}
-            >
-              <Text style={[styles.chipText, selectedDisciplineFilter === d && styles.chipTextActive]}>{d}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {/* Row Discipline */}
+        <View style={styles.filterRowGroup}>
+          <View style={styles.selectorHeader}>
+            <MaterialCommunityIcons name="run" size={14} color={COLORS.primary} />
+            <Text style={styles.sectionLabel}>Discipline :</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.creneauScroll}>
+            {['Toutes', ...disciplineList].map(d => {
+              const isSelected = selectedDisciplineFilter === d;
+              return (
+                <TouchableOpacity
+                  key={d}
+                  style={[styles.chip, isSelected && styles.chipActive]}
+                  onPress={() => setSelectedDisciplineFilter(d)}
+                >
+                  <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{d}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
 
-        {/* Categories Filter */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-          <Text style={styles.filterLabelInline}>Catégorie:</Text>
-          {['Toutes', ...CATEGORIES.map(c => c.label)].map(c => (
-            <TouchableOpacity
-              key={c}
-              style={[styles.chip, selectedCategoryFilter === c && styles.chipActiveSecondary]}
-              onPress={() => setSelectedCategoryFilter(c)}
-            >
-              <Text style={[styles.chipText, selectedCategoryFilter === c && styles.chipTextActiveSecondary]}>{c}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Days Filter */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-          <Text style={styles.filterLabelInline}>Jour:</Text>
-          {['Tous', ...JOURS].map(j => (
-            <TouchableOpacity
-              key={j}
-              style={[styles.chip, selectedJourFilter === j && styles.chipActiveTertiary]}
-              onPress={() => setSelectedJourFilter(j)}
-            >
-              <Text style={[styles.chipText, selectedJourFilter === j && styles.chipTextActiveTertiary]}>{j}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {/* Row Categorie */}
+        <View style={styles.filterRowGroup}>
+          <View style={styles.selectorHeader}>
+            <MaterialCommunityIcons name="shape" size={14} color={COLORS.secondary} />
+            <Text style={styles.sectionLabel}>Catégorie :</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.creneauScroll}>
+            {['Toutes', ...CATEGORIES.map(c => c.label)].map(c => {
+              const isSelected = selectedCategoryFilter === c;
+              return (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.chip, isSelected && styles.chipActiveSecondary]}
+                  onPress={() => setSelectedCategoryFilter(c)}
+                >
+                  <Text style={[styles.chipText, isSelected && styles.chipTextActiveSecondary]}>{c}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
       </View>
 
       {/* List of Time Slots */}
@@ -418,19 +471,67 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   addBtnText: { color: '#FFF', fontWeight: '700', fontSize: 13 },
   
   filterSection: {
-    paddingVertical: 8,
+    paddingVertical: 4,
     gap: 8,
   },
-  filterRow: {
-    flexDirection: 'row',
+  filterRowGroup: {
+    gap: 4,
   },
-  filterLabelInline: {
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  searchInput: {
+    flex: 1,
+    color: COLORS.textPrimary,
+    fontSize: 13,
+    padding: 0,
+  },
+  selectorSection: {
+    paddingTop: 6,
+    paddingBottom: 4,
+  },
+  selectorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    marginBottom: 6,
+  },
+  sectionLabel: {
     color: COLORS.textMuted,
     fontSize: 12,
     fontWeight: '600',
-    alignSelf: 'center',
-    marginRight: 4,
   },
+  creneauScroll: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  creneauChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  creneauChipSelected: {
+    backgroundColor: COLORS.primary + '20',
+    borderColor: COLORS.primary,
+  },
+  creneauChipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '700' },
+  creneauChipTextSelected: { color: COLORS.primary },
+
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -445,18 +546,11 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   },
   chipText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
   chipTextActive: { color: '#FFF', fontWeight: '700' },
-
   chipActiveSecondary: {
     backgroundColor: COLORS.secondary,
     borderColor: COLORS.secondary,
   },
   chipTextActiveSecondary: { color: '#FFF', fontWeight: '700' },
-
-  chipActiveTertiary: {
-    backgroundColor: COLORS.catCadet || '#00D2D3',
-    borderColor: COLORS.catCadet || '#00D2D3',
-  },
-  chipTextActiveTertiary: { color: '#FFF', fontWeight: '700' },
 
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 30, gap: 12 },

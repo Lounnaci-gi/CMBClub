@@ -86,6 +86,7 @@ export default function AdherentFormScreen({ navigation, route }) {
     photo: null,
     discipline: '',
     genre: 'M',
+    assure: true,
   });
 
   const [loading, setLoading] = useState(false);
@@ -109,7 +110,10 @@ export default function AdherentFormScreen({ navigation, route }) {
     if (!isEdit || editLoaded) return;
     const existing = adherents.find(a => a.id === adherentId);
     if (existing) {
-      setForm({ ...existing });
+      setForm({
+        ...existing,
+        assure: existing.assure === undefined ? true : Boolean(existing.assure),
+      });
       setEditLoaded(true);
     }
   }, [isEdit, editLoaded, adherentId, adherents]);
@@ -437,6 +441,32 @@ export default function AdherentFormScreen({ navigation, route }) {
               ))}
             </View>
           ) : null}
+        </View>
+
+        {/* Section Assurance */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.toggleRowBox}
+            onPress={() => setForm(prev => ({ ...prev, assure: !prev.assure }))}
+            activeOpacity={0.8}
+          >
+            <View style={styles.toggleTextGroup}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <MaterialCommunityIcons
+                  name={form.assure ? "shield-check" : "shield-outline"}
+                  size={20}
+                  color={form.assure ? COLORS.success : COLORS.textMuted}
+                />
+                <Text style={styles.toggleTitle}>Assurance de l'adhérent</Text>
+              </View>
+              <Text style={styles.toggleSub}>
+                {form.assure ? 'Adhérent assuré pour la saison active' : 'Adhérent non assuré'}
+              </Text>
+            </View>
+            <View style={[styles.switchTrack, form.assure && styles.switchTrackActive]}>
+              <View style={[styles.switchThumb, form.assure && styles.switchThumbActive]} />
+            </View>
+          </TouchableOpacity>
         </View>
 
         {!isEdit ? (
