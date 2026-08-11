@@ -33,6 +33,17 @@ const isLateBy20Min = (heureDebutStr, now = new Date()) => {
   return currentTotalMinutes > slotTotalMinutes + 20;
 };
 
+const getSlotStartDateTime = (dateStr, heureDebutStr) => {
+  if (!dateStr || !heureDebutStr) return null;
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3) return null;
+  const match = String(heureDebutStr).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  return new Date(parts[0], parts[1] - 1, parts[2], hours, minutes, 0);
+};
+
 const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 const getTodayJour = () => JOURS_FR[new Date().getDay()];
 
@@ -58,6 +69,15 @@ export default function PresencesScreen({ route }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(new Date());
+
+  // Horloge en temps réel (mise à jour chaque seconde)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Only show slots matching today's day of the week
   const todayJour = useMemo(() => getTodayJour(), []);
@@ -71,6 +91,34 @@ export default function PresencesScreen({ route }) {
       || creneauxDuJour[0]
       || null;
   }, [creneauxDuJour, selectedCreneauId]);
+
+  // Calcul du temps restant jusqu'au début du créneau
+  const slotStartDateTime = useMemo(
+    () => (selectedCreneau ? getSlotStartDateTime(dateSeance, selectedCreneau.heureDebut) : null),
+    [dateSeance, selectedCreneau],
+  );
+
+  const isNotStartedYet = useMemo(() => {
+    if (!slotStartDateTime) return false;
+    return now.getTime() < slotStartDateTime.getTime();
+  }, [now, slotStartDateTime]);
+
+  const countdownFormatted = useMemo(() => {
+    if (!slotStartDateTime || !isNotStartedYet) return null;
+    const diffMs = slotStartDateTime.getTime() - now.getTime();
+    if (diffMs <= 0) return null;
+
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    const hh = String(hours).padStart(2, '0');
+    const mm = String(minutes).padStart(2, '0');
+    const ss = String(seconds).padStart(2, '0');
+
+    return { hh, mm, ss, totalSeconds };
+  }, [now, slotStartDateTime, isNotStartedYet]);
 
   // Auto-select the first slot of today when loaded
   useEffect(() => {
@@ -166,6 +214,10 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleStatutChange = (adherentId, targetStatut) => {
+    if (isNotStartedYet) {
+      Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
+      return;
+    }
     const now = new Date();
     const timeStr = getCurrentTimeString(now);
     const startStr = selectedCreneau?.heureDebut;
@@ -213,6 +265,10 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleMarkAllPresent = () => {
+    if (isNotStartedYet) {
+      Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
+      return;
+    }
     const now = new Date();
     const timeStr = getCurrentTimeString(now);
     const startStr = selectedCreneau?.heureDebut;
@@ -230,6 +286,10 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleSave = async () => {
+    if (isNotStartedYet) {
+      Alert.alert('Action interdite', 'L\'enregistrement des présences est impossible avant le début du créneau.');
+      return;
+    }
     const todayStr = getLocalDateString();
     if (dateSeance > todayStr) {
       Alert.alert('Action interdite', 'L\'enregistrement des présences est strictement interdit pour les dates futures.');
@@ -413,179 +473,229 @@ export default function PresencesScreen({ route }) {
         </View>
       )}
 
-      {/* Scope Filter & Search */}
-      <View style={styles.filterRow}>
-        <View style={styles.scopeSwitch}>
-          <TouchableOpacity
-            style={[styles.scopeBtn, scopeFilter === 'creneau' && styles.scopeBtnActive]}
-            onPress={() => setScopeFilter('creneau')}
-          >
-            <MaterialCommunityIcons name="filter" size={14} color={scopeFilter === 'creneau' ? '#FFF' : COLORS.textMuted} />
-            <Text style={[styles.scopeText, scopeFilter === 'creneau' && styles.scopeTextActive]}>Ce créneau</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.scopeBtn, scopeFilter === 'tous' && styles.scopeBtnActive]}
-            onPress={() => setScopeFilter('tous')}
-          >
-            <MaterialCommunityIcons name="account-group" size={14} color={scopeFilter === 'tous' ? '#FFF' : COLORS.textMuted} />
-            <Text style={[styles.scopeText, scopeFilter === 'tous' && styles.scopeTextActive]}>Tous les adhérents</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Rechercher un adhérent par nom ou code..."
-          placeholderTextColor={COLORS.textMuted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery ? (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {/* Stats Summary & Filter Bar */}
-      <View style={styles.statsBar}>
-        <TouchableOpacity
-          style={[styles.statPill, statusFilter === 'tous' && styles.statPillActive]}
-          onPress={() => setStatusFilter('tous')}
-        >
-          <Text style={[styles.statVal, { color: COLORS.textPrimary }]}>{statsSummary.total}</Text>
-          <Text style={styles.statLbl}>Tous</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.statPill, { backgroundColor: COLORS.success + '15' }, statusFilter === 'present' && styles.statPillActiveSuccess]}
-          onPress={() => setStatusFilter('present')}
-        >
-          <Text style={[styles.statVal, { color: COLORS.success }, statusFilter === 'present' && { color: '#FFF' }]}>{statsSummary.presents}</Text>
-          <Text style={[styles.statLbl, statusFilter === 'present' && { color: '#FFF' }]}>Présents</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.statPill, { backgroundColor: COLORS.danger + '15' }, statusFilter === 'absent' && styles.statPillActiveDanger]}
-          onPress={() => setStatusFilter('absent')}
-        >
-          <Text style={[styles.statVal, { color: COLORS.danger }, statusFilter === 'absent' && { color: '#FFF' }]}>{statsSummary.absents}</Text>
-          <Text style={[styles.statLbl, statusFilter === 'absent' && { color: '#FFF' }]}>Absents</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.statPill, { backgroundColor: COLORS.warning + '15' }, statusFilter === 'retard' && styles.statPillActiveWarning]}
-          onPress={() => setStatusFilter('retard')}
-        >
-          <Text style={[styles.statVal, { color: COLORS.warning }, statusFilter === 'retard' && { color: '#FFF' }]}>{statsSummary.retards}</Text>
-          <Text style={[styles.statLbl, statusFilter === 'retard' && { color: '#FFF' }]}>Retards</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Main List */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
-      >
-        {filteredAdherents.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <MaterialCommunityIcons name="account-search" size={48} color={COLORS.textMuted} />
-            <Text style={styles.emptyTitle}>Aucun adhérent dans cette liste</Text>
-            <Text style={styles.emptyText}>
-              {statusFilter === 'tous'
-                ? `Aucun adhérent inscrit ne correspond à ce créneau.`
-                : `Aucun adhérent avec le statut "${statusFilter}" pour cette séance.`}
+      {/* Affichage du chrono si le créneau n'a pas encore débuté */}
+      {isNotStartedYet && countdownFormatted ? (
+        <View style={styles.countdownContainer}>
+          <View style={styles.countdownCard}>
+            <View style={styles.countdownIconBg}>
+              <MaterialCommunityIcons name="clock-start" size={40} color={COLORS.primary} />
+            </View>
+            <Text style={styles.countdownTitle}>Créneau non débuté</Text>
+            <Text style={styles.countdownSubtitle}>
+              L'appel pour {selectedCreneau?.discipline} ({selectedCreneau?.categorie}) commencera à{' '}
+              <Text style={{ fontWeight: '800', color: COLORS.primary }}>
+                {selectedCreneau?.heureDebut}
+              </Text>
             </Text>
-          </View>
-        ) : (
-          filteredAdherents.map(adherent => {
-            const current = presenceMap[adherent.id] || { statut: 'present', remarque: '' };
-            return (
-              <View key={adherent.id} style={styles.adherentCard}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.avatar}>
-                    {adherent.photo ? (
-                      <Image source={{ uri: adherent.photo }} style={styles.photo} />
-                    ) : (
-                      <View style={styles.photoPlaceholder}>
-                        <Text style={styles.photoIcon}>👤</Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.adherentInfo}>
-                    <Text style={styles.adherentName}>{adherent.prenom} {adherent.nom}</Text>
-                    <Text style={styles.adherentCode}>{adherent.code}</Text>
-                  </View>
-                  {current.statut === 'retard' && (
-                    <View style={styles.retardBadge}>
-                      <MaterialCommunityIcons name="clock-alert" size={12} color={COLORS.warning} />
-                      <Text style={styles.retardBadgeText}>Retard (&gt;20 min)</Text>
-                    </View>
-                  )}
-                </View>
 
-                {/* Status Toggle Buttons - Seuls Présent et Absent */}
-                <View style={styles.statusRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.statusBtn,
-                      current.statut === 'present' && styles.btnPresent,
-                      current.statut === 'retard' && styles.btnRetard,
-                    ]}
-                    onPress={() => handleStatutChange(adherent.id, 'present')}
-                  >
-                    <MaterialCommunityIcons
-                      name={current.statut === 'retard' ? 'clock-alert' : 'check-circle'}
-                      size={16}
-                      color={['present', 'retard'].includes(current.statut) ? '#FFF' : (current.statut === 'retard' ? COLORS.warning : COLORS.success)}
-                    />
-                    <Text style={[styles.statusBtnText, ['present', 'retard'].includes(current.statut) && styles.textActive]}>
-                      {current.statut === 'retard' ? 'Présent (Retard)' : 'Présent'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.statusBtn, current.statut === 'absent' && styles.btnAbsent]}
-                    onPress={() => handleStatutChange(adherent.id, 'absent')}
-                  >
-                    <MaterialCommunityIcons name="close-circle" size={16} color={current.statut === 'absent' ? '#FFF' : COLORS.danger} />
-                    <Text style={[styles.statusBtnText, current.statut === 'absent' && styles.textActive]}>Absent</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Optional Note input */}
-                <TextInput
-                  style={styles.remarqueInput}
-                  value={current.remarque}
-                  onChangeText={(val) => handleRemarqueChange(adherent.id, val)}
-                  placeholder="Remarque (ex: Arrivé à 18h15, Justificatif médical)"
-                  placeholderTextColor={COLORS.textMuted}
-                />
+            <View style={styles.timerRow}>
+              <View style={styles.timerBlock}>
+                <Text style={styles.timerNum}>{countdownFormatted.hh}</Text>
+                <Text style={styles.timerUnit}>HEURES</Text>
               </View>
-            );
-          })
-        )}
-      </ScrollView>
+              <Text style={styles.timerColon}>:</Text>
+              <View style={styles.timerBlock}>
+                <Text style={styles.timerNum}>{countdownFormatted.mm}</Text>
+                <Text style={styles.timerUnit}>MINUTES</Text>
+              </View>
+              <Text style={styles.timerColon}>:</Text>
+              <View style={styles.timerBlock}>
+                <Text style={styles.timerNum}>{countdownFormatted.ss}</Text>
+                <Text style={styles.timerUnit}>SECONDES</Text>
+              </View>
+            </View>
 
-      {/* Footer Save Button */}
-      {adherents.length > 0 && (
-        <View style={styles.footer}>
-          <TouchableOpacity
-            style={[styles.saveBtn, isFuture && { backgroundColor: COLORS.textMuted }]}
-            onPress={handleSave}
-            disabled={saving || isFuture}
-          >
-            <MaterialCommunityIcons name={isFuture ? 'cancel' : 'content-save'} size={20} color="#FFF" />
-            <Text style={styles.saveBtnText}>
-              {isFuture ? 'Date future (Saisie interdite)' : saving ? 'Enregistrement...' : 'Enregistrer la séance'}
-            </Text>
-          </TouchableOpacity>
+            <View style={styles.countdownNotice}>
+              <MaterialCommunityIcons name="lock-clock" size={16} color={COLORS.warning} />
+              <Text style={styles.countdownNoticeText}>
+                La saisie de l'appel se déverrouillera automatiquement dès {selectedCreneau?.heureDebut}.
+              </Text>
+            </View>
+          </View>
         </View>
+      ) : (
+        <>
+          {/* Scope Filter & Search */}
+          <View style={styles.filterRow}>
+            <View style={styles.scopeSwitch}>
+              <TouchableOpacity
+                style={[styles.scopeBtn, scopeFilter === 'creneau' && styles.scopeBtnActive]}
+                onPress={() => setScopeFilter('creneau')}
+              >
+                <MaterialCommunityIcons name="filter" size={14} color={scopeFilter === 'creneau' ? '#FFF' : COLORS.textMuted} />
+                <Text style={[styles.scopeText, scopeFilter === 'creneau' && styles.scopeTextActive]}>Ce créneau</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.scopeBtn, scopeFilter === 'tous' && styles.scopeBtnActive]}
+                onPress={() => setScopeFilter('tous')}
+              >
+                <MaterialCommunityIcons name="account-group" size={14} color={scopeFilter === 'tous' ? '#FFF' : COLORS.textMuted} />
+                <Text style={[styles.scopeText, scopeFilter === 'tous' && styles.scopeTextActive]}>Tous les adhérents</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
+            <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Rechercher un adhérent par nom ou code..."
+              placeholderTextColor={COLORS.textMuted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* Stats Summary & Filter Bar */}
+          <View style={styles.statsBar}>
+            <TouchableOpacity
+              style={[styles.statPill, statusFilter === 'tous' && styles.statPillActive]}
+              onPress={() => setStatusFilter('tous')}
+            >
+              <Text style={[styles.statVal, { color: COLORS.textPrimary }]}>{statsSummary.total}</Text>
+              <Text style={styles.statLbl}>Tous</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.statPill, { backgroundColor: COLORS.success + '15' }, statusFilter === 'present' && styles.statPillActiveSuccess]}
+              onPress={() => setStatusFilter('present')}
+            >
+              <Text style={[styles.statVal, { color: COLORS.success }, statusFilter === 'present' && { color: '#FFF' }]}>{statsSummary.presents}</Text>
+              <Text style={[styles.statLbl, statusFilter === 'present' && { color: '#FFF' }]}>Présents</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.statPill, { backgroundColor: COLORS.danger + '15' }, statusFilter === 'absent' && styles.statPillActiveDanger]}
+              onPress={() => setStatusFilter('absent')}
+            >
+              <Text style={[styles.statVal, { color: COLORS.danger }, statusFilter === 'absent' && { color: '#FFF' }]}>{statsSummary.absents}</Text>
+              <Text style={[styles.statLbl, statusFilter === 'absent' && { color: '#FFF' }]}>Absents</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.statPill, { backgroundColor: COLORS.warning + '15' }, statusFilter === 'retard' && styles.statPillActiveWarning]}
+              onPress={() => setStatusFilter('retard')}
+            >
+              <Text style={[styles.statVal, { color: COLORS.warning }, statusFilter === 'retard' && { color: '#FFF' }]}>{statsSummary.retards}</Text>
+              <Text style={[styles.statLbl, statusFilter === 'retard' && { color: '#FFF' }]}>Retards</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Main List */}
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+          >
+            {filteredAdherents.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <MaterialCommunityIcons name="account-search" size={48} color={COLORS.textMuted} />
+                <Text style={styles.emptyTitle}>Aucun adhérent dans cette liste</Text>
+                <Text style={styles.emptyText}>
+                  {statusFilter === 'tous'
+                    ? `Aucun adhérent inscrit ne correspond à ce créneau.`
+                    : `Aucun adhérent avec le statut "${statusFilter}" pour cette séance.`}
+                </Text>
+              </View>
+            ) : (
+              filteredAdherents.map(adherent => {
+                const current = presenceMap[adherent.id] || { statut: 'present', remarque: '' };
+                return (
+                  <View key={adherent.id} style={styles.adherentCard}>
+                    <View style={styles.cardHeader}>
+                      <View style={styles.avatar}>
+                        {adherent.photo ? (
+                          <Image source={{ uri: adherent.photo }} style={styles.photo} />
+                        ) : (
+                          <View style={styles.photoPlaceholder}>
+                            <Text style={styles.photoIcon}>👤</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.adherentInfo}>
+                        <Text style={styles.adherentName}>{adherent.prenom} {adherent.nom}</Text>
+                        <Text style={styles.adherentCode}>{adherent.code}</Text>
+                      </View>
+                      {current.statut === 'retard' && (
+                        <View style={styles.retardBadge}>
+                          <MaterialCommunityIcons name="clock-alert" size={12} color={COLORS.warning} />
+                          <Text style={styles.retardBadgeText}>Retard (&gt;20 min)</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Status Toggle Buttons - Seuls Présent et Absent */}
+                    <View style={styles.statusRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.statusBtn,
+                          current.statut === 'present' && styles.btnPresent,
+                          current.statut === 'retard' && styles.btnRetard,
+                        ]}
+                        onPress={() => handleStatutChange(adherent.id, 'present')}
+                      >
+                        <MaterialCommunityIcons
+                          name={current.statut === 'retard' ? 'clock-alert' : 'check-circle'}
+                          size={16}
+                          color={['present', 'retard'].includes(current.statut) ? '#FFF' : (current.statut === 'retard' ? COLORS.warning : COLORS.success)}
+                        />
+                        <Text style={[styles.statusBtnText, ['present', 'retard'].includes(current.statut) && styles.textActive]}>
+                          {current.statut === 'retard' ? 'Présent (Retard)' : 'Présent'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.statusBtn, current.statut === 'absent' && styles.btnAbsent]}
+                        onPress={() => handleStatutChange(adherent.id, 'absent')}
+                      >
+                        <MaterialCommunityIcons name="close-circle" size={16} color={current.statut === 'absent' ? '#FFF' : COLORS.danger} />
+                        <Text style={[styles.statusBtnText, current.statut === 'absent' && styles.textActive]}>Absent</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Optional Note input */}
+                    <TextInput
+                      style={styles.remarqueInput}
+                      value={current.remarque}
+                      onChangeText={(val) => handleRemarqueChange(adherent.id, val)}
+                      placeholder="Remarque (ex: Arrivé à 18h15, Justificatif médical)"
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+
+          {/* Footer Save Button */}
+          {adherents.length > 0 && (
+            <View style={styles.footer}>
+              <TouchableOpacity
+                style={[styles.saveBtn, (isFuture || isNotStartedYet) && { backgroundColor: COLORS.textMuted }]}
+                onPress={handleSave}
+                disabled={saving || isFuture || isNotStartedYet}
+              >
+                <MaterialCommunityIcons name={isFuture || isNotStartedYet ? 'cancel' : 'content-save'} size={20} color="#FFF" />
+                <Text style={styles.saveBtnText}>
+                  {isFuture
+                    ? 'Date future (Saisie interdite)'
+                    : isNotStartedYet
+                    ? 'Créneau non débuté'
+                    : saving
+                    ? 'Enregistrement...'
+                    : 'Enregistrer la séance'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
       )}
     </View>
   );
@@ -960,5 +1070,94 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: COLORS.danger,
     fontSize: 12,
     fontWeight: '700',
+  },
+  countdownContainer: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  countdownCard: {
+    width: '100%',
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.xl,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    gap: 16,
+    ...SHADOWS.card,
+  },
+  countdownIconBg: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.primary + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.primary + '30',
+  },
+  countdownTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  countdownSubtitle: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    paddingHorizontal: 10,
+  },
+  timerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginVertical: 8,
+  },
+  timerBlock: {
+    backgroundColor: COLORS.bgInput,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: RADIUS.lg,
+    alignItems: 'center',
+    minWidth: 72,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  timerNum: {
+    color: COLORS.primary,
+    fontSize: 26,
+    fontWeight: '900',
+  },
+  timerUnit: {
+    color: COLORS.textMuted,
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 2,
+    letterSpacing: 0.5,
+  },
+  timerColon: {
+    color: COLORS.primary,
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  countdownNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.warning + '15',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.warning + '30',
+  },
+  countdownNoticeText: {
+    flex: 1,
+    color: COLORS.warning,
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
