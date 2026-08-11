@@ -122,7 +122,7 @@ export default function AdherentFormScreen({ navigation, route }) {
     if (isEdit && existingCode) return existingCode;
     if (!canGenerateAdherentCode(form)) return null;
     return buildAdherentCodeBase(form);
-  }, [isEdit, existingCode, form.nom, form.prenom, form.dateNaissance, form.lieuNaissance, form.discipline]);
+  }, [isEdit, existingCode, form.nom, form.prenom, form.dateNaissance]);
 
   const category = form.dateNaissance ? getCategoryByAge(form.dateNaissance) : null;
 
@@ -165,17 +165,19 @@ export default function AdherentFormScreen({ navigation, route }) {
         navigation.goBack();
       } else {
         const code = await generateUniqueAdherentCode(form);
-        const adherent = { ...form, id: uuidv4(), code };
+        const today = new Date();
+        const dateInscription = today.toISOString().slice(0, 10);
+        const adherent = { ...form, id: uuidv4(), code, dateInscription };
         await createAdherent(adherent);
         setCreatedAdherent(adherent);
         const password = (form.dateNaissance || '').replace(/-/g, '').slice(2);
 
         if (saisonActive) {
-          const today = new Date().toISOString();
-          await enrollAdherent(adherent.id, saisonActive.id, today);
+          const todayIso = today.toISOString();
+          await enrollAdherent(adherent.id, saisonActive.id, todayIso);
 
           let initialPaymentRemaining = getInitialPaymentAmount();
-          const schedule = generatePaymentSchedule(saisonActive.annee, config, today);
+          const schedule = generatePaymentSchedule(saisonActive.annee, config, todayIso);
 
           for (const s of schedule) {
             let montantPaye = 0;
@@ -190,7 +192,7 @@ export default function AdherentFormScreen({ navigation, route }) {
               if (montantPaye >= s.montantDu) {
                 statut = PAYMENT_STATUS.PAYE;
               }
-              datePaiement = today;
+              datePaiement = todayIso;
               notes = `Réglé à l'inscription (${paymentMode}${paymentNotes ? ' - ' + paymentNotes : ''})`;
             }
 

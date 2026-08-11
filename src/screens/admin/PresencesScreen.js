@@ -16,6 +16,23 @@ const getLocalDateString = (d = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
+const getCurrentTimeString = (now = new Date()) => {
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+};
+
+const isLateBy20Min = (heureDebutStr, now = new Date()) => {
+  if (!heureDebutStr) return false;
+  const match = String(heureDebutStr).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return false;
+  const slotHours = parseInt(match[1], 10);
+  const slotMinutes = parseInt(match[2], 10);
+  const slotTotalMinutes = slotHours * 60 + slotMinutes;
+  const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
+  return currentTotalMinutes > slotTotalMinutes + 20;
+};
+
 const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 const getTodayJour = () => JOURS_FR[new Date().getDay()];
 
@@ -148,11 +165,44 @@ export default function PresencesScreen({ route }) {
     setDateSeance(getLocalDateString(d));
   };
 
-  const handleStatutChange = (adherentId, statut) => {
-    setPresenceMap(prev => ({
-      ...prev,
-      [adherentId]: { ...prev[adherentId], statut },
-    }));
+  const handleStatutChange = (adherentId, targetStatut) => {
+    const now = new Date();
+    const timeStr = getCurrentTimeString(now);
+    const startStr = selectedCreneau?.heureDebut;
+    const isLate = isLateBy20Min(startStr, now);
+
+    let finalStatut = targetStatut;
+    let autoText = '';
+
+    if (targetStatut === 'present') {
+      if (isLate) {
+        finalStatut = 'retard';
+        autoText = `Retard (${timeStr} - >20 min créneau ${startStr || ''})`;
+      } else {
+        finalStatut = 'present';
+        autoText = `Présent à ${timeStr}`;
+      }
+    } else if (targetStatut === 'absent') {
+      finalStatut = 'absent';
+      autoText = `Absent (${timeStr})`;
+    }
+
+    setPresenceMap(prev => {
+      const existingRemarque = prev[adherentId]?.remarque || '';
+      let newRemarque = autoText;
+      if (existingRemarque && !/^(Présent à|Absent \(|Retard \()/i.test(existingRemarque)) {
+        newRemarque = `${autoText} - ${existingRemarque}`;
+      }
+
+      return {
+        ...prev,
+        [adherentId]: {
+          ...prev[adherentId],
+          statut: finalStatut,
+          remarque: newRemarque,
+        },
+      };
+    });
   };
 
   const handleRemarqueChange = (adherentId, remarque) => {
@@ -163,10 +213,17 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleMarkAllPresent = () => {
+    const now = new Date();
+    const timeStr = getCurrentTimeString(now);
+    const startStr = selectedCreneau?.heureDebut;
+    const isLate = isLateBy20Min(startStr, now);
+    const finalStatut = isLate ? 'retard' : 'present';
+    const autoText = isLate ? `Retard (${timeStr} - >20 min créneau ${startStr || ''})` : `Présent à ${timeStr}`;
+
     setPresenceMap(prev => {
       const next = { ...prev };
       Object.keys(next).forEach(id => {
-        next[id] = { ...next[id], statut: 'present' };
+        next[id] = { ...next[id], statut: finalStatut, remarque: autoText };
       });
       return next;
     });
@@ -249,15 +306,14 @@ export default function PresencesScreen({ route }) {
 
   // Quick Stats
   const statsSummary = useMemo(() => {
-    let presents = 0, absents = 0, retards = 0, excuses = 0;
+    let presents = 0, absents = 0, retards = 0;
     filteredAdherents.forEach(a => {
       const p = presenceMap[a.id] || { statut: 'present' };
       if (p.statut === 'present') presents++;
       else if (p.statut === 'absent') absents++;
       else if (p.statut === 'retard') retards++;
-      else if (p.statut === 'excuse') excuses++;
     });
-    return { total: filteredAdherents.length, presents, absents, retards, excuses };
+    return { total: filteredAdherents.length, presents, absents, retards };
   }, [presenceMap, filteredAdherents]);
 
   const catObj = selectedCreneau ? CATEGORIES.find(c => c.label === selectedCreneau.categorie) : null;
@@ -428,14 +484,6 @@ export default function PresencesScreen({ route }) {
           <Text style={[styles.statVal, { color: COLORS.warning }, statusFilter === 'retard' && { color: '#FFF' }]}>{statsSummary.retards}</Text>
           <Text style={[styles.statLbl, statusFilter === 'retard' && { color: '#FFF' }]}>Retards</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.statPill, { backgroundColor: COLORS.secondary + '15' }, statusFilter === 'excuse' && styles.statPillActiveSecondary]}
-          onPress={() => setStatusFilter('excuse')}
-        >
-          <Text style={[styles.statVal, { color: COLORS.secondary }, statusFilter === 'excuse' && { color: '#FFF' }]}>{statsSummary.excuses}</Text>
-          <Text style={[styles.statLbl, statusFilter === 'excuse' && { color: '#FFF' }]}>Excusés</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Main List */}
@@ -473,16 +521,32 @@ export default function PresencesScreen({ route }) {
                     <Text style={styles.adherentName}>{adherent.prenom} {adherent.nom}</Text>
                     <Text style={styles.adherentCode}>{adherent.code}</Text>
                   </View>
+                  {current.statut === 'retard' && (
+                    <View style={styles.retardBadge}>
+                      <MaterialCommunityIcons name="clock-alert" size={12} color={COLORS.warning} />
+                      <Text style={styles.retardBadgeText}>Retard (&gt;20 min)</Text>
+                    </View>
+                  )}
                 </View>
 
-                {/* Status Toggle Buttons */}
+                {/* Status Toggle Buttons - Seuls Présent et Absent */}
                 <View style={styles.statusRow}>
                   <TouchableOpacity
-                    style={[styles.statusBtn, current.statut === 'present' && styles.btnPresent]}
+                    style={[
+                      styles.statusBtn,
+                      current.statut === 'present' && styles.btnPresent,
+                      current.statut === 'retard' && styles.btnRetard,
+                    ]}
                     onPress={() => handleStatutChange(adherent.id, 'present')}
                   >
-                    <MaterialCommunityIcons name="check-circle" size={16} color={current.statut === 'present' ? '#FFF' : COLORS.success} />
-                    <Text style={[styles.statusBtnText, current.statut === 'present' && styles.textActive]}>Présent</Text>
+                    <MaterialCommunityIcons
+                      name={current.statut === 'retard' ? 'clock-alert' : 'check-circle'}
+                      size={16}
+                      color={['present', 'retard'].includes(current.statut) ? '#FFF' : (current.statut === 'retard' ? COLORS.warning : COLORS.success)}
+                    />
+                    <Text style={[styles.statusBtnText, ['present', 'retard'].includes(current.statut) && styles.textActive]}>
+                      {current.statut === 'retard' ? 'Présent (Retard)' : 'Présent'}
+                    </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -491,22 +555,6 @@ export default function PresencesScreen({ route }) {
                   >
                     <MaterialCommunityIcons name="close-circle" size={16} color={current.statut === 'absent' ? '#FFF' : COLORS.danger} />
                     <Text style={[styles.statusBtnText, current.statut === 'absent' && styles.textActive]}>Absent</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.statusBtn, current.statut === 'retard' && styles.btnRetard]}
-                    onPress={() => handleStatutChange(adherent.id, 'retard')}
-                  >
-                    <MaterialCommunityIcons name="clock-alert" size={16} color={current.statut === 'retard' ? '#FFF' : COLORS.warning} />
-                    <Text style={[styles.statusBtnText, current.statut === 'retard' && styles.textActive]}>Retard</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.statusBtn, current.statut === 'excuse' && styles.btnExcuse]}
-                    onPress={() => handleStatutChange(adherent.id, 'excuse')}
-                  >
-                    <MaterialCommunityIcons name="account-check" size={16} color={current.statut === 'excuse' ? '#FFF' : COLORS.secondary} />
-                    <Text style={[styles.statusBtnText, current.statut === 'excuse' && styles.textActive]}>Excusé</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -826,6 +874,22 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   adherentInfo: { flex: 1 },
   adherentName: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' },
   adherentCode: { color: COLORS.primary, fontSize: 12, fontWeight: '600' },
+  retardBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.warning + '20',
+    borderColor: COLORS.warning,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: RADIUS.sm,
+  },
+  retardBadgeText: {
+    color: COLORS.warning,
+    fontSize: 10,
+    fontWeight: '800',
+  },
 
   statusRow: {
     flexDirection: 'row',

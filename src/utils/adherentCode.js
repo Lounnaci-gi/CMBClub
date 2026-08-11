@@ -16,28 +16,27 @@ function normalizePart(value, maxLen) {
 
 /**
  * Construit la base du code à partir des infos d'identité.
- * Format : NOM(3) + PRENOM(2) + AAMMJJ + LIEU(3) + DISC(3)
- * Ex. : BENKA100515ALGFOO
+ * Format : NOM(3) + PRENOM(2) + AAMMJJ(4) = 9 caractères
+ * Ex. : BENKA1005   (AAMMJJ = les 4 derniers chiffres de la date, ex: 0515 pour le 15 mai)
+ * Le code final est limité à 10 caractères max (suffixe de collision inclus).
  */
-export function buildAdherentCodeBase({ nom, prenom, dateNaissance, lieuNaissance, discipline }) {
+export function buildAdherentCodeBase({ nom, prenom, dateNaissance }) {
   const n = normalizePart(nom, 3).padEnd(3, 'X');
   const p = normalizePart(prenom, 2).padEnd(2, 'X');
   const date = (dateNaissance || '').replace(/-/g, '');
-  const yymmdd = date.length === 8 ? date.slice(2) : '000000';
-  const lieu = normalizePart(lieuNaissance, 3).padEnd(3, 'X');
-  const disc = normalizePart(discipline, 3).padEnd(3, 'X');
-  return `${n}${p}${yymmdd}${lieu}${disc}`;
+  // AAMMJJ : annee(2) + mois(2) + jour(2) -> on prend les 4 derniers chiffres MMJJ
+  const mmjj = date.length === 8 ? date.slice(4) : '0000';
+  const yy   = date.length === 8 ? date.slice(2, 4) : '00';
+  return `${n}${p}${yy}${mmjj}`; // 3+2+2+4 = 9 chars. Il reste 1 char pour la collision.
 }
 
 /**
  * Indique si les champs nécessaires au code sont renseignés
  */
-export function canGenerateAdherentCode({ nom, prenom, dateNaissance, lieuNaissance, discipline }) {
+export function canGenerateAdherentCode({ nom, prenom, dateNaissance }) {
   return Boolean(
     nom?.trim() &&
     prenom?.trim() &&
-    /^\d{4}-\d{2}-\d{2}$/.test(dateNaissance || '') &&
-    lieuNaissance?.trim() &&
-    discipline?.trim(),
+    /^\d{4}-\d{2}-\d{2}$/.test(dateNaissance || ''),
   );
 }

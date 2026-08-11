@@ -246,7 +246,9 @@ export default function AdherentDetailScreen({ navigation, route }) {
           <InfoRow icon="phone" label="Téléphone" value={adherent.telephone} />
           <InfoRow icon="human-male-height" label="Taille" value={adherent.taille ? `${adherent.taille} cm` : '-'} />
           <InfoRow icon="water" label="Groupe sanguin" value={adherent.groupeSanguin} />
+          <InfoRow icon="calendar-account" label="Date d'inscription" value={formatDate(adherent.dateInscription || adherent.createdAt?.slice(0, 10))} />
         </View>
+
 
         {adherent.observationsMedicales ? (
           <View style={[styles.card, { borderColor: COLORS.warning + '30' }]}>

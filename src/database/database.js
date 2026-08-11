@@ -54,6 +54,7 @@ async function initDatabase(database) {
       photo TEXT,
       discipline TEXT,
       genre TEXT DEFAULT 'M',
+      dateInscription TEXT,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
@@ -139,6 +140,13 @@ async function initDatabase(database) {
       FOREIGN KEY (saisonId) REFERENCES saisons(id)
     );
   `);
+
+  // Migration : ajout de dateInscription si la colonne n'existe pas encore
+  try {
+    await database.execAsync(`ALTER TABLE adherents ADD COLUMN dateInscription TEXT`);
+  } catch (_e) {
+    // La colonne existe déjà, on ignore
+  }
 
   // Seed config defaults
   await database.runAsync(
@@ -316,15 +324,14 @@ async function initDatabase(database) {
   for (const a of seedAdherents) {
     try {
       const code = buildAdherentCodeBase({
-        nom: a.nom, prenom: a.prenom,
-        dateNaissance: a.dn, lieuNaissance: a.lieu, discipline: a.disc,
+        nom: a.nom, prenom: a.prenom, dateNaissance: a.dn,
       });
       await database.runAsync(
         `INSERT OR IGNORE INTO adherents
            (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille,
-            groupeSanguin, observationsMedicales, photo, discipline, genre, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?, datetime('now'), datetime('now'))`,
-        [a.id, code, a.nom, a.prenom, a.dn, a.lieu, a.tel, a.gs, a.disc, a.genre],
+            groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?, ?, datetime('now'), datetime('now'))`,
+        [a.id, code, a.nom, a.prenom, a.dn, a.lieu, a.tel, a.gs, a.disc, a.genre, a.dn.slice(0, 4) + '-09-01'],
       );
 
       // Inscription à la saison active
@@ -406,15 +413,17 @@ export async function getAdherentByCode(code) {
 export async function createAdherent(adherent) {
   const db = await getDatabase();
   const now = new Date().toISOString();
+  // La date d'inscription est automatiquement la date du jour si non fournie
+  const dateInscription = adherent.dateInscription || now.slice(0, 10);
   await db.runAsync(
-    `INSERT INTO adherents (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille, groupeSanguin, observationsMedicales, photo, discipline, genre, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO adherents (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille, groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       adherent.id, adherent.code, adherent.nom, adherent.prenom,
       adherent.dateNaissance, adherent.lieuNaissance, adherent.telephone || null,
       adherent.taille || null, adherent.groupeSanguin || null,
       adherent.observationsMedicales || null, adherent.photo || null,
-      adherent.discipline || null, adherent.genre || 'M', now, now,
+      adherent.discipline || null, adherent.genre || 'M', dateInscription, now, now,
     ],
   );
 }
@@ -422,7 +431,7 @@ export async function createAdherent(adherent) {
 export async function updateAdherent(adherent) {
   const db = await getDatabase();
   const now = new Date().toISOString();
-  // Le code n'est jamais modifié après création
+  // Le code et la dateInscription ne sont jamais modifiés après création
   await db.runAsync(
     `UPDATE adherents SET nom=?, prenom=?, dateNaissance=?, lieuNaissance=?, telephone=?, taille=?, groupeSanguin=?, observationsMedicales=?, photo=?, discipline=?, genre=?, updatedAt=? WHERE id=?`,
     [
@@ -713,14 +722,26 @@ export async function isAdherentEnrolled(adherentId, saisonId) {
  * En cas de collision, ajoute un suffixe numérique.
  */
 export async function generateUniqueAdherentCode(data) {
-  const base = buildAdherentCodeBase(data);
-  let code = base;
-  let suffix = 2;
-  while (await getAdherentByCode(code)) {
-    code = `${base}${suffix}`;
-    suffix += 1;
+  const base = buildAdherentCodeBase(data); // 9 caractères
+  // Tentative sans suffixe
+  if (!(await getAdherentByCode(base))) return base;
+
+  // En cas de collision, on ajoute un suffixe 1 caractère : A-Z puis 0-9
+  // Code final = 9 + 1 = 10 caractères max
+  const suffixes = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  for (const s of suffixes) {
+    const code = `${base}${s}`;
+    if (!(await getAdherentByCode(code))) return code;
   }
-  return code;
+  // Cas extrême : tous les suffixes sont pris (très improbable), on tronque la base à 8 et on réessaie
+  const shortBase = base.slice(0, 8);
+  for (const s of suffixes) {
+    for (const s2 of suffixes) {
+      const code = `${shortBase}${s}${s2}`;
+      if (!(await getAdherentByCode(code))) return code;
+    }
+  }
+  throw new Error('Impossible de générer un code unique pour cet adhérent.');
 }
 
 // ──────────────── DISCIPLINES ────────────────
