@@ -14,6 +14,7 @@ import { CATEGORIES, DISCIPLINES, getCategoryByAge } from '../../utils/categorie
 import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
 import { getPaymentStatusByAdherent } from '../../database/database';
+import ValidationAssuranceModal from '../../components/ValidationAssuranceModal';
 
 export default function AdherentListScreen({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -39,6 +40,7 @@ export default function AdherentListScreen({ navigation }) {
   const [refreshing,  setRefreshing]  = useState(false);
   const [printing,    setPrinting]    = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [showAssuranceModal, setShowAssuranceModal] = useState(false);
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -380,21 +382,35 @@ export default function AdherentListScreen({ navigation }) {
           {filtered.length} adhérent{filtered.length !== 1 ? 's' : ''}
           {activeFiltersCount > 0 ? ' (filtrés)' : ''}
         </Text>
-        <TouchableOpacity
-          style={styles.printListBtn}
-          onPress={handlePrintList}
-          disabled={printing}
-          activeOpacity={0.8}
-        >
-          {printing ? (
-            <ActivityIndicator size="small" color={COLORS.primary} />
-          ) : (
-            <>
-              <MaterialCommunityIcons name="printer" size={16} color={COLORS.primary} />
-              <Text style={styles.printListText}>Imprimer</Text>
-            </>
-          )}
-        </TouchableOpacity>
+
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          {/* Bouton validation assurances */}
+          <TouchableOpacity
+            style={[styles.printListBtn, { backgroundColor: COLORS.success + '18', borderColor: COLORS.success + '50' }]}
+            onPress={() => setShowAssuranceModal(true)}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="shield-check" size={16} color={COLORS.success} />
+            <Text style={[styles.printListText, { color: COLORS.success }]}>Assurances</Text>
+          </TouchableOpacity>
+
+          {/* Bouton impression */}
+          <TouchableOpacity
+            style={styles.printListBtn}
+            onPress={handlePrintList}
+            disabled={printing}
+            activeOpacity={0.8}
+          >
+            {printing ? (
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            ) : (
+              <>
+                <MaterialCommunityIcons name="printer" size={16} color={COLORS.primary} />
+                <Text style={styles.printListText}>Imprimer</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* List */}
@@ -420,6 +436,12 @@ export default function AdherentListScreen({ navigation }) {
       >
         <MaterialCommunityIcons name="account-plus" size={24} color="#fff" />
       </TouchableOpacity>
+
+      {/* Modal Validation Assurances */}
+      <ValidationAssuranceModal
+        visible={showAssuranceModal}
+        onClose={() => setShowAssuranceModal(false)}
+      />
     </View>
   );
 }

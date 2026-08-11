@@ -6,7 +6,7 @@ import { THEME_IDS } from '../theme/themes';
 import {
   getConfig, setConfig,
   getSaisons, getSaisonActive, createSaison, activateSaison,
-  getAdherents, createAdherent, updateAdherent, deleteAdherent,
+  getAdherents, createAdherent, updateAdherent, deleteAdherent, setAdherentAssure,
   enrollAdherentInSaison,
   getPaiementsByAdherent,
   createPaiement, updatePaiement,
@@ -95,6 +95,11 @@ const useStore = create((set, get) => ({
   },
   deleteAdherent: async (id) => {
     await deleteAdherent(id);
+    await get().loadAdherents();
+  },
+  toggleAdherentAssure: async (id, currentAssure) => {
+    const nextAssure = !currentAssure;
+    await setAdherentAssure(id, nextAssure);
     await get().loadAdherents();
   },
   enrollAdherent: async (adherentId, saisonId, dateInscription) => {

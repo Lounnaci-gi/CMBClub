@@ -456,6 +456,15 @@ export async function updateAdherent(adherent) {
   );
 }
 
+export async function setAdherentAssure(id, assure) {
+  const db = await getDatabase();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `UPDATE adherents SET assure = ?, updatedAt = ? WHERE id = ?`,
+    [assure ? 1 : 0, now, id],
+  );
+}
+
 export async function deleteAdherent(id) {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM paiements WHERE adherentId = ?', [id]);
