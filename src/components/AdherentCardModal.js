@@ -272,7 +272,6 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
 
                 <div class="qr-box">
                   <img src="${qrImageUrl}" class="qr-img" alt="QR Code" />
-                  <div class="qr-sub">SCAN QR</div>
                 </div>
               </div>
             </div>
@@ -413,7 +412,6 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
                 {/* QR Code Container */}
                 <View style={styles.qrContainer}>
                   <Image source={{ uri: qrImageUrl }} style={styles.qrImage} />
-                  <Text style={styles.qrLabel}>SCAN QR</Text>
                 </View>
               </View>
             </View>
