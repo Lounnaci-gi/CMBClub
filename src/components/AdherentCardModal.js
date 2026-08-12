@@ -12,17 +12,19 @@ import useTheme from '../theme/useTheme';
 import { getCategoryByAge } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 import { getQrCodeImageUrl, buildAdherentQrData } from '../utils/qrGenerator';
+import useStore from '../store/useStore';
 
 export default function AdherentCardModal({ visible, adherent, onClose }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const [printing, setPrinting] = useState(false);
+  const { saisonActive } = useStore();
 
   if (!adherent) return null;
 
   const category = adherent.dateNaissance ? getCategoryByAge(adherent.dateNaissance) : { label: 'Inconnu', color: COLORS.primary, icon: '⚽' };
-  const qrData = buildAdherentQrData(adherent, category.label);
-  const qrImageUrl = getQrCodeImageUrl(qrData);
+  const qrText = buildAdherentQrData(adherent, category.label, saisonActive);
+  const qrImageUrl = getQrCodeImageUrl(qrText);
   const logoUri = Image.resolveAssetSource(require('../../assets/cmbclub.png')).uri;
 
   const generatePrintableHtml = (photoSrc) => {
@@ -57,7 +59,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
             }
             .card {
               width: 85.6mm;
-              height: 53.98mm;
+              min-height: 58mm;
               background: linear-gradient(135deg, #0A1520 0%, #162A3B 100%);
               border-radius: 12px;
               box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
@@ -65,7 +67,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
               padding: 12px 14px;
               box-sizing: border-box;
               position: relative;
-              overflow: hidden;
+              overflow: visible;
               border: 1px solid rgba(255, 255, 255, 0.15);
               page-break-inside: avoid;
             }
@@ -112,17 +114,21 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
             .photo-box {
               flex-shrink: 0;
               text-align: center;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              gap: 5px;
             }
             .photo-img {
               width: 62px;
-              height: 74px;
+              height: 72px;
               object-fit: cover;
               border-radius: 6px;
-              border: 1.5px solid #1DD1A1;
+              border: 2px solid #1DD1A1;
             }
             .photo-placeholder {
               width: 62px;
-              height: 74px;
+              height: 72px;
               border-radius: 6px;
               background-color: rgba(255,255,255,0.08);
               border: 1.5px dashed #1DD1A1;
@@ -132,15 +138,19 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
               font-size: 26px;
             }
             .cat-tag {
-              display: inline-block;
-              margin-top: 4px;
-              background-color: ${category.color}30;
+              display: block;
+              width: 62px;
+              text-align: center;
+              background-color: ${category.color}35;
               color: ${category.color};
-              font-size: 7.5px;
-              font-weight: 800;
-              padding: 2px 4px;
-              border-radius: 4px;
+              font-size: 7px;
+              font-weight: 900;
+              padding: 3px 4px;
+              border-radius: 5px;
               text-transform: uppercase;
+              letter-spacing: 0.3px;
+              border: 1px solid ${category.color}60;
+              box-sizing: border-box;
             }
             .info-box {
               flex: 1;
