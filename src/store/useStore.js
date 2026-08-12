@@ -76,12 +76,14 @@ const useStore = create((set, get) => ({
   activateSaison: async (saisonId) => {
     await activateSaison(saisonId);
     await get().loadSaisons();
+    await get().loadAdherents(saisonId);
   },
 
   // ── Adhérents ──
   adherents: [],
-  loadAdherents: async () => {
-    const adherents = await getAdherents();
+  loadAdherents: async (saisonId) => {
+    const targetSaisonId = saisonId || get().saisonActive?.id;
+    const adherents = await getAdherents(targetSaisonId);
     set({ adherents });
   },
   createAdherent: async (adherent) => {
@@ -97,13 +99,16 @@ const useStore = create((set, get) => ({
     await deleteAdherent(id);
     await get().loadAdherents();
   },
-  toggleAdherentAssure: async (id, currentAssure) => {
+  toggleAdherentAssure: async (id, currentAssure, saisonId) => {
+    const targetSaisonId = saisonId || get().saisonActive?.id;
     const nextAssure = !currentAssure;
-    await setAdherentAssure(id, nextAssure);
-    await get().loadAdherents();
+    await setAdherentAssure(id, nextAssure, targetSaisonId);
+    await get().loadAdherents(targetSaisonId);
   },
-  enrollAdherent: async (adherentId, saisonId, dateInscription) => {
-    await enrollAdherentInSaison(adherentId, saisonId, dateInscription);
+  enrollAdherent: async (adherentId, saisonId, dateInscription, assure = 0) => {
+    const targetSaisonId = saisonId || get().saisonActive?.id;
+    await enrollAdherentInSaison(adherentId, targetSaisonId, dateInscription, assure);
+    await get().loadAdherents(targetSaisonId);
   },
 
   // ── Paiements ──

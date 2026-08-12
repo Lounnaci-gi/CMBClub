@@ -45,9 +45,9 @@ export default function AdherentListScreen({ navigation }) {
   // ── Data loading ──────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     await loadSaisons();
-    await loadAdherents();
-    await loadDisciplines();
     const saison = useStore.getState().saisonActive;
+    await loadAdherents(saison?.id);
+    await loadDisciplines();
     if (saison) {
       const map = await getPaymentStatusByAdherent(saison.id);
       setPayStatusMap(map);
@@ -266,11 +266,19 @@ export default function AdherentListScreen({ navigation }) {
               </View>
             ) : null}
 
-            <View style={[styles.payBadge, { backgroundColor: (item.assure ? COLORS.success : COLORS.textMuted) + '22' }]}>
-              <Text style={[styles.payBadgeText, { color: item.assure ? COLORS.success : COLORS.textMuted }]}>
+            <View style={[styles.payBadge, { backgroundColor: (item.assure ? COLORS.success : COLORS.danger) + '22' }]}>
+              <Text style={[styles.payBadgeText, { color: item.assure ? COLORS.success : COLORS.danger }]}>
                 {item.assure ? '🛡️ Assuré' : 'Non assuré'}
               </Text>
             </View>
+
+            {item.isEnrolled === 0 ? (
+              <View style={[styles.payBadge, { backgroundColor: COLORS.warning + '22' }]}>
+                <Text style={[styles.payBadgeText, { color: COLORS.warning }]}>
+                  ⚠️ Non réinscrit
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           {item.discipline ? (

@@ -65,6 +65,7 @@ async function initDatabase(database) {
       adherentId TEXT NOT NULL,
       saisonId TEXT NOT NULL,
       dateInscription TEXT NOT NULL,
+      assure INTEGER DEFAULT 0,
       actif INTEGER DEFAULT 1,
       FOREIGN KEY (adherentId) REFERENCES adherents(id),
       FOREIGN KEY (saisonId) REFERENCES saisons(id)
@@ -152,6 +153,13 @@ async function initDatabase(database) {
   // Migration : ajout de la colonne assure (0 = non assuré, 1 = assuré)
   try {
     await database.execAsync(`ALTER TABLE adherents ADD COLUMN assure INTEGER DEFAULT 0`);
+  } catch (_e) {
+    // La colonne existe déjà, on ignore
+  }
+
+  // Migration : ajout de la colonne assure à adherent_saisons (0 = non assuré, 1 = assuré par saison)
+  try {
+    await database.execAsync(`ALTER TABLE adherent_saisons ADD COLUMN assure INTEGER DEFAULT 0`);
   } catch (_e) {
     // La colonne existe déjà, on ignore
   }
@@ -348,9 +356,9 @@ async function initDatabase(database) {
       const saisonRow = await database.getFirstAsync(`SELECT id FROM saisons WHERE actif = 1 LIMIT 1`);
       const saisonId = saisonRow?.id || activeSaisonId;
       await database.runAsync(
-        `INSERT OR IGNORE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, actif)
-         VALUES (?, ?, ?, ?, 1)`,
-        [`as-${a.id}`, a.id, saisonId, a.dn.slice(0, 4) + '-09-01'],
+        `INSERT OR IGNORE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif)
+         VALUES (?, ?, ?, ?, ?, 1)`,
+        [`as-${a.id}`, a.id, saisonId, a.dn.slice(0, 4) + '-09-01', isAssure],
       );
     } catch (_e) {
       // ignore seeding errors (ex: duplicates)
@@ -405,13 +413,46 @@ export async function activateSaison(saisonId) {
 
 // ──────────────── ADHÉRENTS ────────────────
 
-export async function getAdherents() {
+export async function getAdherents(saisonId) {
   const db = await getDatabase();
+  let targetSaisonId = saisonId;
+  if (!targetSaisonId) {
+    const active = await db.getFirstAsync('SELECT id FROM saisons WHERE actif = 1 LIMIT 1');
+    targetSaisonId = active?.id;
+  }
+  if (targetSaisonId) {
+    return await db.getAllAsync(`
+      SELECT a.*, 
+        COALESCE(s.assure, 0) as assure,
+        CASE WHEN s.id IS NOT NULL THEN 1 ELSE 0 END as isEnrolled,
+        s.dateInscription as dateInscriptionSaison
+      FROM adherents a
+      LEFT JOIN adherent_saisons s ON s.adherentId = a.id AND s.saisonId = ? AND s.actif = 1
+      ORDER BY a.nom, a.prenom
+    `, [targetSaisonId]);
+  }
   return await db.getAllAsync('SELECT * FROM adherents ORDER BY nom, prenom');
 }
 
-export async function getAdherentById(id) {
+export async function getAdherentById(id, saisonId) {
   const db = await getDatabase();
+  let targetSaisonId = saisonId;
+  if (!targetSaisonId) {
+    const active = await db.getFirstAsync('SELECT id FROM saisons WHERE actif = 1 LIMIT 1');
+    targetSaisonId = active?.id;
+  }
+  if (targetSaisonId) {
+    const res = await db.getFirstAsync(`
+      SELECT a.*, 
+        COALESCE(s.assure, 0) as assure,
+        CASE WHEN s.id IS NOT NULL THEN 1 ELSE 0 END as isEnrolled,
+        s.dateInscription as dateInscriptionSaison
+      FROM adherents a
+      LEFT JOIN adherent_saisons s ON s.adherentId = a.id AND s.saisonId = ? AND s.actif = 1
+      WHERE a.id = ?
+    `, [targetSaisonId, id]);
+    if (res) return res;
+  }
   return await db.getFirstAsync('SELECT * FROM adherents WHERE id = ?', [id]);
 }
 
@@ -456,12 +497,36 @@ export async function updateAdherent(adherent) {
   );
 }
 
-export async function setAdherentAssure(id, assure) {
+export async function setAdherentAssure(id, assure, saisonId) {
   const db = await getDatabase();
   const now = new Date().toISOString();
+  let targetSaisonId = saisonId;
+  if (!targetSaisonId) {
+    const active = await db.getFirstAsync('SELECT id FROM saisons WHERE actif = 1 LIMIT 1');
+    targetSaisonId = active?.id;
+  }
+  const val = assure ? 1 : 0;
+  if (targetSaisonId) {
+    const existing = await db.getFirstAsync(
+      'SELECT id FROM adherent_saisons WHERE adherentId = ? AND saisonId = ?',
+      [id, targetSaisonId]
+    );
+    if (existing) {
+      await db.runAsync(
+        'UPDATE adherent_saisons SET assure = ? WHERE adherentId = ? AND saisonId = ?',
+        [val, id, targetSaisonId]
+      );
+    } else {
+      const idSaison = `as-${id}-${targetSaisonId}`;
+      await db.runAsync(
+        'INSERT INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif) VALUES (?, ?, ?, ?, ?, 1)',
+        [idSaison, id, targetSaisonId, now.slice(0, 10), val]
+      );
+    }
+  }
   await db.runAsync(
     `UPDATE adherents SET assure = ?, updatedAt = ? WHERE id = ?`,
-    [assure ? 1 : 0, now, id],
+    [val, now, id],
   );
 }
 
@@ -475,13 +540,12 @@ export async function deleteAdherent(id) {
 
 // ──────────────── ADHÉRENT-SAISONS ────────────────
 
-
-export async function enrollAdherentInSaison(adherentId, saisonId, dateInscription) {
+export async function enrollAdherentInSaison(adherentId, saisonId, dateInscription, assure = 0) {
   const db = await getDatabase();
   const id = `as-${adherentId}-${saisonId}`;
   await db.runAsync(
-    `INSERT OR IGNORE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, actif) VALUES (?, ?, ?, ?, 1)`,
-    [id, adherentId, saisonId, dateInscription],
+    `INSERT OR REPLACE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif) VALUES (?, ?, ?, ?, ?, 1)`,
+    [id, adherentId, saisonId, dateInscription, assure ? 1 : 0],
   );
 }
 

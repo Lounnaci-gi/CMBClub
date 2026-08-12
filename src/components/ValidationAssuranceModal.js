@@ -5,19 +5,22 @@ import {
   TextInput, ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Print from 'expo-print';
 import useStore from '../store/useStore';
 import useTheme from '../theme/useTheme';
 import { getCategoryByAge } from '../utils/categories';
+import { formatDate } from '../utils/seasons';
 
 export default function ValidationAssuranceModal({ visible, onClose }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
 
-  const { adherents, toggleAdherentAssure } = useStore();
+  const { adherents, toggleAdherentAssure, saisonActive } = useStore();
 
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all'); // 'all' | 'assure' | 'non_assure'
   const [togglingId, setTogglingId] = useState(null);
+  const [printing, setPrinting] = useState(false);
 
   const stats = useMemo(() => {
     let nbAssures = 0;
@@ -48,13 +51,142 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
   }, [adherents, search, filter]);
 
   const handleToggle = async (adherent) => {
-    setTogglingId(adherent.id);
+    const isCurrentlyAssure = Boolean(adherent.assure);
+    const saisonLabel = saisonActive ? saisonActive.label : 'courante';
+
+    if (!isCurrentlyAssure) {
+      Alert.alert(
+        'Valider l\'assurance 🛡️',
+        `Valider l'assurance de ${adherent.prenom} ${adherent.nom} pour la saison ${saisonLabel} ?`,
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Valider 🛡️',
+            onPress: async () => {
+              setTogglingId(adherent.id);
+              try {
+                await toggleAdherentAssure(adherent.id, false, saisonActive?.id);
+                Alert.alert('✅ Assurance Validée', `L'assurance de ${adherent.prenom} ${adherent.nom} a été validée pour la saison ${saisonLabel}.`);
+              } catch (e) {
+                Alert.alert('Erreur', e.message || 'Impossible de valider l\'assurance.');
+              } finally {
+                setTogglingId(null);
+              }
+            },
+          },
+        ],
+      );
+    } else {
+      Alert.alert(
+        'Assurance déjà validée 🛡️',
+        `L'assurance de ${adherent.prenom} ${adherent.nom} est déjà validée pour la saison ${saisonLabel}.\n\nSouhaitez-vous annuler cette validation ?`,
+        [
+          { text: 'Conserver validée', style: 'cancel' },
+          {
+            text: 'Annuler la validation',
+            style: 'destructive',
+            onPress: async () => {
+              setTogglingId(adherent.id);
+              try {
+                await toggleAdherentAssure(adherent.id, true, saisonActive?.id);
+              } catch (e) {
+                Alert.alert('Erreur', e.message || 'Impossible de modifier le statut d\'assurance.');
+              } finally {
+                setTogglingId(null);
+              }
+            },
+          },
+        ],
+      );
+    }
+  };
+
+  const handlePrint = async () => {
+    if (filteredAdherents.length === 0) {
+      Alert.alert('Information', 'Aucun adhérent dans la liste à imprimer.');
+      return;
+    }
+    setPrinting(true);
     try {
-      await toggleAdherentAssure(adherent.id, Boolean(adherent.assure));
+      const now = new Date().toLocaleDateString('fr-FR', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      });
+      const saisonText = saisonActive ? saisonActive.label : 'N/A';
+
+      let filterLabel = 'Tous les adhérents';
+      if (filter === 'assure') filterLabel = 'Adhérents Assurés 🛡️';
+      if (filter === 'non_assure') filterLabel = 'Adhérents Non Assurés ❌';
+
+      const rowsHtml = filteredAdherents.map((item, index) => {
+        const isAssure = Boolean(item.assure);
+        const stColor = isAssure ? '#16A34A' : '#DC2626';
+        const stLabel = isAssure ? 'Assuré 🛡️' : 'Non assuré ❌';
+
+        return `
+          <tr style="border-bottom:1px solid #E2E8F0">
+            <td style="padding:8px 10px;text-align:center;color:#64748B;font-weight:600">${index + 1}</td>
+            <td style="padding:8px 10px;font-family:monospace;font-weight:700">${item.code}</td>
+            <td style="padding:8px 10px;font-weight:700">${item.nom.toUpperCase()} ${item.prenom}</td>
+            <td style="padding:8px 10px">${formatDate(item.dateNaissance)}</td>
+            <td style="padding:8px 10px">${item.lieuNaissance || '—'}</td>
+            <td style="padding:8px 10px;color:#0284C7;font-weight:600">${item.discipline || '—'}</td>
+            <td style="padding:8px 10px">${item.telephone || '—'}</td>
+            <td style="padding:8px 10px">
+              <span style="padding:3px 8px;border-radius:12px;font-size:11px;font-weight:700;color:${stColor};background:${stColor}18;border:1px solid ${stColor}40">${stLabel}</span>
+            </td>
+          </tr>`;
+      }).join('');
+
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <style>
+          @page{size:A4 landscape;margin:10mm}
+          body{font-family:Arial,sans-serif;font-size:11.5px;margin:0;padding:10px;color:#0F172A}
+          .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #16A34A;padding-bottom:12px;margin-bottom:15px}
+          h1{margin:0;font-size:20px;font-weight:900;color:#0F172A}
+          .subtitle{margin:3px 0 0 0;font-size:12px;color:#64748B}
+          .badge{display:inline-block;background:#0F172A;color:#16A34A;font-weight:700;padding:4px 12px;border-radius:12px;font-size:12px}
+          .info-bar{display:flex;gap:15px;background:#F8FAFC;border:1px solid #E2E8F0;padding:8px 14px;border-radius:8px;margin-bottom:15px;font-size:11px}
+          table{width:100%;border-collapse:collapse;margin-top:5px}
+          th{background:#0F172A;color:#fff;text-align:left;padding:9px;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+          .footer{margin-top:20px;display:flex;justify-content:space-between;font-size:10px;color:#94A3B8;border-top:1px solid #E2E8F0;padding-top:8px}
+        </style></head><body>
+        <div class="header">
+          <div>
+            <h1>🛡️ CMB CLUB — VALIDATION DES ASSURANCES</h1>
+            <p class="subtitle">Liste officielle des assurances · Saison ${saisonText}</p>
+          </div>
+          <div style="text-align:right">
+            <div class="badge">Saison ${saisonText}</div>
+            <div style="margin-top:4px;font-size:11px;color:#64748B">Imprimé le : ${now}</div>
+            <div style="font-size:11px;color:#64748B">Total : <strong>${filteredAdherents.length} adhérent(s)</strong></div>
+          </div>
+        </div>
+        <div class="info-bar">
+          <span><b>Filtre appliqué :</b> ${filterLabel}</span>
+          ${search ? `<span><b>Recherche :</b> "${search}"</span>` : ''}
+        </div>
+        <table>
+          <thead><tr>
+            <th style="width:30px;text-align:center">#</th>
+            <th style="width:100px">ID Adhérent</th>
+            <th>Nom & Prénom</th>
+            <th>Date Naissance</th>
+            <th>Lieu Naissance</th>
+            <th>Discipline</th>
+            <th>Téléphone</th>
+            <th style="width:100px">Statut Assurance</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+        <div class="footer"><div>CMBClub — Gestion des Assurances</div><div>Page 1 / 1</div></div>
+      </body></html>`;
+
+      await Print.printAsync({ html });
     } catch (e) {
-      Alert.alert('Erreur', e.message || 'Impossible de modifier le statut d\'assurance.');
+      Alert.alert("Erreur d'impression", e.message || 'Impossible d\'imprimer la liste.');
     } finally {
-      setTogglingId(null);
+      setPrinting(false);
     }
   };
 
@@ -72,14 +204,16 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.title}>Validation des Assurances</Text>
-                <Text style={styles.subtitle}>Gestion & validation du statut d'assurance des adhérents</Text>
+                <Text style={styles.subtitle}>
+                  {saisonActive ? `Saison ${saisonActive.label} · ` : ''}Validation unique par saison
+                </Text>
               </View>
               <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                 <MaterialCommunityIcons name="close" size={20} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
 
-            {/* Stats bar */}
+            {/* Stats bar & Print Button */}
             <View style={styles.statsBar}>
               <TouchableOpacity
                 style={[styles.statPill, filter === 'all' && styles.statPillActive]}
@@ -106,21 +240,38 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
               </TouchableOpacity>
             </View>
 
-            {/* Search Input */}
-            <View style={styles.searchBox}>
-              <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Rechercher par nom, code, discipline..."
-                placeholderTextColor={COLORS.textMuted}
-                value={search}
-                onChangeText={setSearch}
-              />
-              {search ? (
-                <TouchableOpacity onPress={() => setSearch('')}>
-                  <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
-                </TouchableOpacity>
-              ) : null}
+            {/* Print and Search bar */}
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              <View style={[styles.searchBox, { flex: 1 }]}>
+                <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Rechercher par nom, code, discipline..."
+                  placeholderTextColor={COLORS.textMuted}
+                  value={search}
+                  onChangeText={setSearch}
+                />
+                {search ? (
+                  <TouchableOpacity onPress={() => setSearch('')}>
+                    <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
+              <TouchableOpacity
+                style={[styles.printBtn, { backgroundColor: COLORS.primary }]}
+                onPress={handlePrint}
+                disabled={printing}
+              >
+                {printing ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <>
+                    <MaterialCommunityIcons name="printer" size={18} color="#FFF" />
+                    <Text style={styles.printBtnText}>Imprimer</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -153,9 +304,10 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
 
                       <View style={{ flex: 1, gap: 2 }}>
                         <Text style={styles.name}>{item.prenom} {item.nom}</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <Text style={styles.code}>{item.code}</Text>
                           <Text style={styles.discText}>· {item.discipline || 'Sans disc.'}</Text>
+                          {item.telephone ? <Text style={styles.telText}>· 📞 {item.telephone}</Text> : null}
                         </View>
                       </View>
 
@@ -167,16 +319,16 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
                           color={isAssure ? COLORS.success : COLORS.danger}
                         />
                         <Text style={[styles.statusTagText, { color: isAssure ? COLORS.success : COLORS.danger }]}>
-                          {isAssure ? 'Assuré' : 'Non assuré'}
+                          {isAssure ? 'Validé' : 'Non assuré'}
                         </Text>
                       </View>
                     </View>
 
-                    {/* Quick Toggle Action Button */}
+                    {/* Validation Button */}
                     <TouchableOpacity
                       style={[
                         styles.toggleBtn,
-                        isAssure ? styles.toggleBtnDanger : styles.toggleBtnSuccess,
+                        isAssure ? styles.toggleBtnSuccess : styles.toggleBtnPrimary,
                       ]}
                       onPress={() => handleToggle(item)}
                       disabled={isToggling}
@@ -187,12 +339,14 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
                       ) : (
                         <>
                           <MaterialCommunityIcons
-                            name={isAssure ? "close-circle-outline" : "shield-check-outline"}
+                            name={isAssure ? "shield-check" : "shield-plus-outline"}
                             size={16}
                             color="#FFF"
                           />
                           <Text style={styles.toggleBtnText}>
-                            {isAssure ? 'Marquer comme non assuré' : 'Valider l\'assurance 🛡️'}
+                            {isAssure
+                              ? `Assurance Validée pour ${saisonActive?.label || 'la saison'} 🛡️`
+                              : `Valider l'assurance pour ${saisonActive?.label || 'la saison'} 🛡️`}
                           </Text>
                         </>
                       )}
@@ -314,6 +468,19 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     fontSize: 13,
     padding: 0,
   },
+  printBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: RADIUS.md,
+  },
+  printBtnText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 13,
+  },
   listContent: {
     padding: 16,
     gap: 12,
@@ -375,6 +542,10 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 11,
   },
+  telText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+  },
   statusTag: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -401,14 +572,14 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 8,
+    paddingVertical: 9,
     borderRadius: RADIUS.md,
   },
-  toggleBtnSuccess: {
-    backgroundColor: COLORS.success,
+  toggleBtnPrimary: {
+    backgroundColor: COLORS.primary,
   },
-  toggleBtnDanger: {
-    backgroundColor: COLORS.textMuted + '80',
+  toggleBtnSuccess: {
+    backgroundColor: COLORS.success + 'E5',
   },
   toggleBtnText: {
     color: '#FFF',

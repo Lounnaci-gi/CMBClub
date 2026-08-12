@@ -30,7 +30,7 @@ export default function AdherentDetailScreen({ navigation, route }) {
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { adherentId } = route.params;
   const {
-    adherents, saisonActive, deleteAdherent, enrollAdherent,
+    adherents, saisonActive, deleteAdherent, enrollAdherent, toggleAdherentAssure,
     createPaiement, config, loadConfig, getPresencesAdherent,
   } = useStore();
   const [paiements, setPaiements] = useState([]);
@@ -125,14 +125,24 @@ export default function AdherentDetailScreen({ navigation, route }) {
     );
   };
 
+  const handleToggleAssure = async () => {
+    if (!saisonActive) return;
+    try {
+      await toggleAdherentAssure(adherent.id, Boolean(adherent.assure), saisonActive.id);
+      await loadPaiements();
+    } catch (e) {
+      Alert.alert('Erreur', e.message || 'Impossible de modifier le statut d\'assurance.');
+    }
+  };
+
   const handleEnrollSeason = () => {
     if (!saisonActive) {
       Alert.alert('Erreur', 'Aucune saison active');
       return;
     }
     Alert.alert(
-      'Inscrire à la saison',
-      `Inscrire ${adherent.prenom} à la saison ${saisonActive.label} et générer les paiements ?`,
+      'Réinscrire à la saison',
+      `Inscrire / réinscrire ${adherent.prenom} à la saison ${saisonActive.label} ?`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -158,7 +168,7 @@ export default function AdherentDetailScreen({ navigation, route }) {
               }
             }
             await loadPaiements();
-            Alert.alert('Inscription effectuée', `Inscrit à la saison ${saisonActive.label}`);
+            Alert.alert('Inscription effectuée', `Adhérent réinscrit avec succès pour la saison ${saisonActive.label}`);
           },
         },
       ],
@@ -239,6 +249,40 @@ export default function AdherentDetailScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
+        {!enrolled && saisonActive ? (
+          <View style={[styles.card, { borderColor: COLORS.warning, backgroundColor: COLORS.warning + '12' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <MaterialCommunityIcons name="alert-circle-outline" size={24} color={COLORS.warning} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: COLORS.textPrimary, fontWeight: '700', fontSize: 15 }}>
+                  Non inscrit pour la saison {saisonActive.label}
+                </Text>
+                <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>
+                  Cet adhérent doit être réinscrit pour démarrer la nouvelle saison.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={{
+                marginTop: 12,
+                backgroundColor: COLORS.primary,
+                borderRadius: RADIUS.md,
+                paddingVertical: 12,
+                alignItems: 'center',
+                flexDirection: 'row',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+              onPress={handleEnrollSeason}
+            >
+              <MaterialCommunityIcons name="account-plus-outline" size={18} color="#FFF" />
+              <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>
+                Réinscrire pour la saison {saisonActive.label}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Informations personnelles</Text>
           <InfoRow icon="cake" label="Date de naissance" value={formatDate(adherent.dateNaissance)} />
@@ -247,12 +291,14 @@ export default function AdherentDetailScreen({ navigation, route }) {
           <InfoRow icon="human-male-height" label="Taille" value={adherent.taille ? `${adherent.taille} cm` : '-'} />
           <InfoRow icon="water" label="Groupe sanguin" value={adherent.groupeSanguin} />
           <InfoRow icon="calendar-account" label="Date d'inscription" value={formatDate(adherent.dateInscription || adherent.createdAt?.slice(0, 10))} />
-          <InfoRow
-            icon="shield-check"
-            label="Assurance"
-            value={adherent.assure ? 'Assuré 🛡️' : 'Non assuré ❌'}
-            valueColor={adherent.assure ? COLORS.success : COLORS.danger}
-          />
+          <TouchableOpacity onPress={handleToggleAssure} activeOpacity={0.7}>
+            <InfoRow
+              icon="shield-check"
+              label={`Assurance (${saisonActive ? saisonActive.label : 'Saison'})`}
+              value={adherent.assure ? 'Assuré 🛡️' : 'Non assuré ❌'}
+              valueColor={adherent.assure ? COLORS.success : COLORS.danger}
+            />
+          </TouchableOpacity>
         </View>
 
 

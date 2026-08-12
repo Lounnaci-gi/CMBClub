@@ -51,10 +51,16 @@ export default function SeasonScreen() {
     if (saison.id === saisonActive?.id) return;
     Alert.alert(
       'Activer la saison',
-      `Activer la saison ${saison.label} comme saison courante ?`,
+      `Activer la saison ${saison.label} comme saison courante ?\n\n💡 Remarque : L'inscription et l'assurance devront être renouvelées au cas par cas pour les adhérents sur cette nouvelle saison.`,
       [
         { text: 'Annuler', style: 'cancel' },
-        { text: 'Activer', onPress: () => activateSaison(saison.id) },
+        {
+          text: 'Activer',
+          onPress: async () => {
+            await activateSaison(saison.id);
+            Alert.alert('Saison activée 🚀', `La saison ${saison.label} est désormais active.`);
+          },
+        },
       ],
     );
   };
