@@ -10,7 +10,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import CategoryBadge from '../../components/CategoryBadge';
 import useTheme from '../../theme/useTheme';
-import { CATEGORIES, DISCIPLINES, getCategoryByAge } from '../../utils/categories';
+import { CATEGORIES, DISCIPLINES, getCategoryByAge, getEffectiveCategory } from '../../utils/categories';
 import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
 import { getPaymentStatusByAdherent } from '../../database/database';
@@ -93,7 +93,7 @@ export default function AdherentListScreen({ navigation }) {
   // ── Filtering ─────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     return adherents.filter(a => {
-      const cat      = getCategoryByAge(a.dateNaissance);
+      const cat      = getEffectiveCategory(a);
       const fullName = `${a.nom} ${a.prenom} ${a.code}`.toLowerCase();
       if (search && !fullName.includes(search.toLowerCase())) return false;
       if (catFilter   !== 'all' && cat.label    !== catFilter)   return false;
@@ -135,7 +135,7 @@ export default function AdherentListScreen({ navigation }) {
       const payText    = payFilter  === 'all' ? 'Tous'   : getStatusLabel(payFilter);
 
       const rowsHtml = filtered.map((item, index) => {
-        const cat     = getCategoryByAge(item.dateNaissance);
+        const cat     = getEffectiveCategory(item);
         const st      = payStatusMap[item.id];
         const stLabel = st ? getStatusLabel(st) : '—';
         const stColor = st ? getStatusColor(st) : '#888';
@@ -224,7 +224,7 @@ export default function AdherentListScreen({ navigation }) {
 
   // ── Card ──────────────────────────────────────────────────────────────────
   const renderItem = ({ item }) => {
-    const cat       = getCategoryByAge(item.dateNaissance);
+    const cat       = getEffectiveCategory(item);
     const payStatus = payStatusMap[item.id];
     const isFemme   = item.genre === 'F';
     return (

@@ -13,7 +13,7 @@ import FilterBar from '../../components/FilterBar';
 import useTheme from '../../theme/useTheme';
 import { getAllPaiementsBySaison, refreshPaymentStatuses } from '../../database/database';
 import { PAYMENT_STATUS, getStatusLabel } from '../../utils/payments';
-import { CATEGORIES, getCategoryByAge, DISCIPLINES } from '../../utils/categories';
+import { CATEGORIES, getCategoryByAge, getEffectiveCategory, DISCIPLINES } from '../../utils/categories';
 
 export default function PaymentListScreen({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -72,7 +72,7 @@ export default function PaymentListScreen({ navigation }) {
   // Calcul dynamique de la catégorie pour chaque paiement
   const paiementsWithCategory = useMemo(() => {
     return paiements.map(p => {
-      const category = p.dateNaissance ? getCategoryByAge(p.dateNaissance) : { label: 'Non spécifié' };
+      const category = getEffectiveCategory(p);
       return {
         ...p,
         categoryLabel: category.label,

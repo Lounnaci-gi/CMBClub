@@ -11,7 +11,7 @@ import useStore from '../../store/useStore';
 import PaymentCard from '../../components/PaymentCard';
 import CategoryBadge from '../../components/CategoryBadge';
 import useTheme from '../../theme/useTheme';
-import { getCategoryByAge, calculateAge } from '../../utils/categories';
+import { getCategoryByAge, getEffectiveCategory, calculateAge } from '../../utils/categories';
 import { calculateBalance, PAYMENT_STATUS } from '../../utils/payments';
 import { getAdherentById, getPaiementsByAdherent } from '../../database/database';
 
@@ -47,7 +47,7 @@ export default function AdherentHomeScreen() {
     setRefreshing(false);
   };
 
-  const cat = adherent ? getCategoryByAge(adherent.dateNaissance) : null;
+  const cat = adherent ? getEffectiveCategory(adherent) : null;
   const balance = calculateBalance(paiements);
   const retards = paiements.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD);
 

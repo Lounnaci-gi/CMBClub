@@ -13,7 +13,7 @@ import CategoryBadge from '../../components/CategoryBadge';
 import PaymentCard from '../../components/PaymentCard';
 import AdherentCardModal from '../../components/AdherentCardModal';
 import useTheme from '../../theme/useTheme';
-import { getCategoryByAge, calculateAge } from '../../utils/categories';
+import { getCategoryByAge, getEffectiveCategory, calculateAge } from '../../utils/categories';
 import { calculateBalance, generatePaymentSchedule, PAYMENT_STATUS } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
 import {
@@ -73,7 +73,7 @@ export default function AdherentDetailScreen({ navigation, route }) {
     );
   }
 
-  const cat = getCategoryByAge(adherent.dateNaissance);
+  const cat = getEffectiveCategory(adherent);
   const age = calculateAge(adherent.dateNaissance);
   const balance = calculateBalance(paiements);
   const defaultPassword = (adherent.dateNaissance || '').replace(/-/g, '').slice(2);

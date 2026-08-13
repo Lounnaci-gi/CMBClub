@@ -364,7 +364,7 @@ export default function PresencesScreen({ route }) {
   };
 
   const filteredAdherents = useMemo(() => {
-    const { getCategoryByAge } = require('../../utils/categories');
+    const { getEffectiveCategory, CATEGORIES } = require('../../utils/categories');
 
     return adherents.filter(a => {
       // Status Filter
@@ -390,7 +390,8 @@ export default function PresencesScreen({ route }) {
           adhDiscip.includes(creneauDiscip) ||
           creneauDiscip.includes(adhDiscip);
 
-        const catObj = getCategoryByAge(a.dateNaissance);
+        // Respecter la catégorie forcée par l'admin (categorieOverride)
+        const catObj = getEffectiveCategory(a);
         const catLabel = (catObj?.label || '').trim().toLowerCase();
         const matchCat = !creneauCat ||
           creneauCat.includes('tout') ||

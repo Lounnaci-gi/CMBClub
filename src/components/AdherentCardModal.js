@@ -9,7 +9,7 @@ import { File } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import useTheme from '../theme/useTheme';
-import { getCategoryByAge } from '../utils/categories';
+import { getCategoryByAge, getEffectiveCategory } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 import { getQrCodeImageUrl, buildAdherentQrData } from '../utils/qrGenerator';
 import useStore from '../store/useStore';
@@ -22,7 +22,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
 
   if (!adherent) return null;
 
-  const category = adherent.dateNaissance ? getCategoryByAge(adherent.dateNaissance) : { label: 'Inconnu', color: COLORS.primary, icon: '⚽' };
+  const category = getEffectiveCategory(adherent);
   const qrText = buildAdherentQrData(adherent, category.label, saisonActive);
   const qrImageUrl = getQrCodeImageUrl(qrText);
   const logoUri = Image.resolveAssetSource(require('../../assets/cmbclub.png')).uri;

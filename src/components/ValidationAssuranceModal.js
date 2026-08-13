@@ -8,7 +8,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import useStore from '../store/useStore';
 import useTheme from '../theme/useTheme';
-import { getCategoryByAge } from '../utils/categories';
+import { getCategoryByAge, getEffectiveCategory } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 
 export default function ValidationAssuranceModal({ visible, onClose }) {
@@ -286,7 +286,7 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
             ) : (
               filteredAdherents.map(item => {
                 const isAssure = Boolean(item.assure);
-                const cat = getCategoryByAge(item.dateNaissance);
+                const cat = getEffectiveCategory(item);
                 const isToggling = togglingId === item.id;
 
                 return (

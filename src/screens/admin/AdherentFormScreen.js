@@ -11,7 +11,7 @@ import PhotoPicker from '../../components/PhotoPicker';
 import CategoryBadge from '../../components/CategoryBadge';
 import DateField from '../../components/DateField';
 import useTheme from '../../theme/useTheme';
-import { DISCIPLINES, BLOOD_GROUPS, getCategoryByAge } from '../../utils/categories';
+import { DISCIPLINES, BLOOD_GROUPS, CATEGORIES, getCategoryByAge, getEffectiveCategory } from '../../utils/categories';
 import { generatePaymentSchedule, PAYMENT_STATUS } from '../../utils/payments';
 import { buildAdherentCodeBase, canGenerateAdherentCode } from '../../utils/adherentCode';
 import { generateUniqueAdherentCode } from '../../database/database';
@@ -87,12 +87,14 @@ export default function AdherentFormScreen({ navigation, route }) {
     discipline: '',
     genre: 'M',
     assure: true,
+    categorieOverride: null,
   });
 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [showDiscPicker, setShowDiscPicker] = useState(false);
   const [showBloodPicker, setShowBloodPicker] = useState(false);
+  const [showCatPicker, setShowCatPicker] = useState(false);
   const [editLoaded, setEditLoaded] = useState(false);
 
   // Paiement à l'inscription
@@ -128,7 +130,7 @@ export default function AdherentFormScreen({ navigation, route }) {
     return buildAdherentCodeBase(form);
   }, [isEdit, existingCode, form.nom, form.prenom, form.dateNaissance]);
 
-  const category = form.dateNaissance ? getCategoryByAge(form.dateNaissance) : null;
+  const category = getEffectiveCategory(form);
 
   const getInitialPaymentAmount = () => {
     if (!payAtRegistration) return 0;
@@ -269,9 +271,75 @@ export default function AdherentFormScreen({ navigation, route }) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Photo de l'adhérent</Text>
           <PhotoPicker value={form.photo} onChange={v => set('photo', v)} />
-          {category ? (
-            <View style={{ alignItems: 'center', marginTop: 8 }}>
-              <CategoryBadge category={category.label} />
+          {/* Catégorie : badge + sélecteur override */}
+          {form.dateNaissance ? (
+            <View style={{ alignItems: 'center', marginTop: 8, gap: 6 }}>
+              <TouchableOpacity
+                onPress={() => setShowCatPicker(v => !v)}
+                style={[
+                  styles.catPickerBtn,
+                  form.categorieOverride && { borderColor: COLORS.warning },
+                ]}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 18 }}>{category?.icon}</Text>
+                <Text style={[styles.catPickerLabel, { color: category?.color }]}>
+                  {category?.label}
+                </Text>
+                {form.categorieOverride ? (
+                  <View style={[styles.overrideBadge, { backgroundColor: COLORS.warning + '25', borderColor: COLORS.warning }]}>
+                    <MaterialCommunityIcons name="lock" size={11} color={COLORS.warning} />
+                    <Text style={[styles.overrideBadgeText, { color: COLORS.warning }]}>Manuel</Text>
+                  </View>
+                ) : (
+                  <View style={[styles.overrideBadge, { backgroundColor: COLORS.primary + '15', borderColor: COLORS.primary + '40' }]}>
+                    <MaterialCommunityIcons name="auto-fix" size={11} color={COLORS.primary} />
+                    <Text style={[styles.overrideBadgeText, { color: COLORS.primary }]}>Auto</Text>
+                  </View>
+                )}
+                <MaterialCommunityIcons
+                  name={showCatPicker ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={COLORS.textMuted}
+                />
+              </TouchableOpacity>
+              {form.categorieOverride && (
+                <Text style={styles.catAutoHint}>
+                  Cat. calculée : {getCategoryByAge(form.dateNaissance)?.label}
+                </Text>
+              )}
+              {showCatPicker && (
+                <View style={styles.catDropdown}>
+                  <Text style={styles.catDropdownTitle}>Choisir une catégorie</Text>
+                  <View style={styles.catGrid}>
+                    {CATEGORIES.map(c => (
+                      <TouchableOpacity
+                        key={c.label}
+                        style={[
+                          styles.catChip,
+                          (form.categorieOverride === c.label) && { borderColor: c.color, backgroundColor: c.color + '20' },
+                        ]}
+                        onPress={() => {
+                          set('categorieOverride', c.label);
+                          setShowCatPicker(false);
+                        }}
+                      >
+                        <Text style={{ fontSize: 14 }}>{c.icon}</Text>
+                        <Text style={[styles.catChipText, { color: c.color }]}>{c.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {form.categorieOverride && (
+                    <TouchableOpacity
+                      style={styles.catResetBtn}
+                      onPress={() => { set('categorieOverride', null); setShowCatPicker(false); }}
+                    >
+                      <MaterialCommunityIcons name="refresh" size={14} color={COLORS.textSecondary} />
+                      <Text style={[styles.catResetText, { color: COLORS.textSecondary }]}>Réinitialiser (auto)</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
             </View>
           ) : null}
         </View>
@@ -748,12 +816,49 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   toggleRowBox: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 10,
     backgroundColor: COLORS.bgInput,
     padding: 12,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+  toggleTextGroup: {
+    flex: 1,
+    gap: 2,
+  },
+  toggleTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  toggleSub: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+  },
+  switchTrack: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: COLORS.border,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  switchTrackActive: {
+    backgroundColor: COLORS.success + '30',
+    borderColor: COLORS.success,
+    borderWidth: 1,
+  },
+  switchThumb: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: COLORS.textMuted,
+  },
+  switchThumbActive: {
+    alignSelf: 'flex-end',
+    backgroundColor: COLORS.success,
   },
   toggleRowLabel: {
     color: COLORS.textPrimary,
@@ -858,4 +963,94 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     ...SHADOWS.button,
   },
   saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+
+  // ── Catégorie override ──
+  catPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    alignSelf: 'center',
+  },
+  catPickerLabel: {
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  overrideBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+  },
+  overrideBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  catAutoHint: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  catDropdown: {
+    width: '100%',
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 12,
+    gap: 10,
+    marginTop: 4,
+  },
+  catDropdownTitle: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  catGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  catChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bgInput,
+  },
+  catChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  catResetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginTop: 4,
+  },
+  catResetText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
 });
+

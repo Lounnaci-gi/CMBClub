@@ -164,6 +164,13 @@ async function initDatabase(database) {
     // La colonne existe déjà, on ignore
   }
 
+  // Migration : catégorie forcée manuellement par l'admin (override de la catégorie calculée par l'âge)
+  try {
+    await database.execAsync(`ALTER TABLE adherents ADD COLUMN categorieOverride TEXT DEFAULT NULL`);
+  } catch (_e) {
+    // La colonne existe déjà, on ignore
+  }
+
   // Seed config defaults
   await database.runAsync(
     `INSERT OR IGNORE INTO config (key, value) VALUES ('fraisInscription', '2000')`,
@@ -468,14 +475,15 @@ export async function createAdherent(adherent) {
   const dateInscription = adherent.dateInscription || now.slice(0, 10);
   const assureVal = adherent.assure ? 1 : 0;
   await db.runAsync(
-    `INSERT INTO adherents (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille, groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, assure, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO adherents (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille, groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, assure, categorieOverride, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       adherent.id, adherent.code, adherent.nom, adherent.prenom,
       adherent.dateNaissance, adherent.lieuNaissance, adherent.telephone || null,
       adherent.taille || null, adherent.groupeSanguin || null,
       adherent.observationsMedicales || null, adherent.photo || null,
-      adherent.discipline || null, adherent.genre || 'M', dateInscription, assureVal, now, now,
+      adherent.discipline || null, adherent.genre || 'M', dateInscription, assureVal,
+      adherent.categorieOverride || null, now, now,
     ],
   );
 }
@@ -486,13 +494,13 @@ export async function updateAdherent(adherent) {
   const assureVal = adherent.assure ? 1 : 0;
   // Le code et la dateInscription ne sont jamais modifiés après création
   await db.runAsync(
-    `UPDATE adherents SET nom=?, prenom=?, dateNaissance=?, lieuNaissance=?, telephone=?, taille=?, groupeSanguin=?, observationsMedicales=?, photo=?, discipline=?, genre=?, assure=?, updatedAt=? WHERE id=?`,
+    `UPDATE adherents SET nom=?, prenom=?, dateNaissance=?, lieuNaissance=?, telephone=?, taille=?, groupeSanguin=?, observationsMedicales=?, photo=?, discipline=?, genre=?, assure=?, categorieOverride=?, updatedAt=? WHERE id=?`,
     [
       adherent.nom, adherent.prenom, adherent.dateNaissance,
       adherent.lieuNaissance, adherent.telephone || null, adherent.taille || null,
       adherent.groupeSanguin || null, adherent.observationsMedicales || null,
       adherent.photo || null, adherent.discipline || null, adherent.genre || 'M',
-      assureVal, now, adherent.id,
+      assureVal, adherent.categorieOverride || null, now, adherent.id,
     ],
   );
 }
@@ -966,6 +974,8 @@ export async function getEligibleAdherentsForCreneau(creneauId, saisonId) {
   const creneauDiscip = (creneau.discipline || '').trim().toLowerCase();
   const creneauCat = (creneau.categorie || '').trim().toLowerCase();
 
+  const { CATEGORIES } = require('../utils/categories');
+
   const scored = allAdherents.map(a => {
     const adhDiscip = (a.discipline || '').trim().toLowerCase();
     const matchDisc = !adhDiscip ||
@@ -974,7 +984,10 @@ export async function getEligibleAdherentsForCreneau(creneauId, saisonId) {
       adhDiscip.includes(creneauDiscip) ||
       creneauDiscip.includes(adhDiscip);
 
-    const catObj = getCategoryByAge(a.dateNaissance);
+    // Respecter la catégorie forcée par l'admin (categorieOverride)
+    const catObj = a.categorieOverride
+      ? (CATEGORIES.find(c => c.label === a.categorieOverride) || getCategoryByAge(a.dateNaissance))
+      : getCategoryByAge(a.dateNaissance);
     const catLabel = (catObj?.label || '').trim().toLowerCase();
     const matchCat = !creneauCat ||
       creneauCat.includes('tout') ||

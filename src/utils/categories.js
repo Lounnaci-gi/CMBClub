@@ -38,4 +38,17 @@ export function getCategoryByAge(dateNaissance) {
   return CATEGORIES.find(c => age >= c.minAge && age <= c.maxAge) || CATEGORIES[CATEGORIES.length - 1];
 }
 
+/**
+ * Retourne la catégorie effective d'un adhérent :
+ * - Si l'admin a forcé une catégorie (categorieOverride), elle est prioritaire
+ * - Sinon, la catégorie est calculée automatiquement depuis la date de naissance
+ */
+export function getEffectiveCategory(adherent) {
+  if (adherent?.categorieOverride) {
+    const found = CATEGORIES.find(c => c.label === adherent.categorieOverride);
+    if (found) return { ...found, isOverride: true };
+  }
+  return getCategoryByAge(adherent?.dateNaissance);
+}
+
 
