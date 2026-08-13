@@ -904,8 +904,40 @@ export async function getCreneaux() {
   return await db.getAllAsync('SELECT * FROM creneaux ORDER BY CASE jour WHEN "Lundi" THEN 1 WHEN "Mardi" THEN 2 WHEN "Mercredi" THEN 3 WHEN "Jeudi" THEN 4 WHEN "Vendredi" THEN 5 WHEN "Samedi" THEN 6 WHEN "Dimanche" THEN 7 END, heureDebut ASC');
 }
 
+function parseCreneauMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return NaN;
+  const parts = timeStr.trim().split(':');
+  if (parts.length !== 2) return NaN;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return NaN;
+  return h * 60 + m;
+}
+
+async function checkCreneauOverlap(db, creneau) {
+  const existing = await db.getAllAsync(
+    'SELECT * FROM creneaux WHERE jour = ? AND LOWER(discipline) = LOWER(?) AND LOWER(categorie) = LOWER(?) AND id != ?',
+    [creneau.jour, creneau.discipline, creneau.categorie, creneau.id || '']
+  );
+
+  const newStart = parseCreneauMinutes(creneau.heureDebut);
+  const newEnd = parseCreneauMinutes(creneau.heureFin);
+
+  for (const item of existing) {
+    const itemStart = parseCreneauMinutes(item.heureDebut);
+    const itemEnd = parseCreneauMinutes(item.heureFin);
+    if (!isNaN(newStart) && !isNaN(newEnd) && !isNaN(itemStart) && !isNaN(itemEnd)) {
+      if (newStart < itemEnd && itemStart < newEnd) {
+        throw new Error(`Chevauchement interdit avec le créneau existant ${item.heureDebut} - ${item.heureFin}`);
+      }
+    }
+  }
+}
+
 export async function createCreneau(creneau) {
   const db = await getDatabase();
+  await checkCreneauOverlap(db, creneau);
+
   const createdAt = creneau.createdAt || new Date().toISOString();
   await db.runAsync(
     `INSERT INTO creneaux (id, discipline, categorie, jour, heureDebut, heureFin, lieu, remarque, createdAt)
@@ -926,6 +958,8 @@ export async function createCreneau(creneau) {
 
 export async function updateCreneau(creneau) {
   const db = await getDatabase();
+  await checkCreneauOverlap(db, creneau);
+
   await db.runAsync(
     `UPDATE creneaux SET discipline = ?, categorie = ?, jour = ?, heureDebut = ?, heureFin = ?, lieu = ?, remarque = ? WHERE id = ?`,
     [

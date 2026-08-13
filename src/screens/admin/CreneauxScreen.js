@@ -78,9 +78,69 @@ export default function CreneauxScreen({ navigation }) {
     setModalVisible(true);
   };
 
+  const parseTimeToMinutes = (timeStr) => {
+    if (!timeStr || typeof timeStr !== 'string') return NaN;
+    const parts = timeStr.trim().split(':');
+    if (parts.length !== 2) return NaN;
+    const hours = parseInt(parts[0], 10);
+    const minutes = parseInt(parts[1], 10);
+    if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      return NaN;
+    }
+    return hours * 60 + minutes;
+  };
+
   const handleSave = async () => {
     if (!discipline || !categorie || !jour || !heureDebut || !heureFin) {
       Alert.alert('Champs requis', 'Veuillez remplir tous les champs obligatoires.');
+      return;
+    }
+
+    const cleanStart = heureDebut.trim();
+    const cleanEnd = heureFin.trim();
+    const startMinutes = parseTimeToMinutes(cleanStart);
+    const endMinutes = parseTimeToMinutes(cleanEnd);
+
+    if (isNaN(startMinutes) || isNaN(endMinutes)) {
+      Alert.alert('Format horaire invalide', 'Veuillez saisir les heures au format HH:MM (ex: 09:00, 10:30).');
+      return;
+    }
+
+    if (endMinutes <= startMinutes) {
+      Alert.alert('Horaire incohérent', 'L\'heure de fin doit être postérieure à l\'heure de début.');
+      return;
+    }
+
+    // Vérification de chevauchement : même jour, même discipline, même catégorie
+    const conflictingSlot = creneaux.find(item => {
+      if (editingCreneau && item.id === editingCreneau.id) {
+        return false;
+      }
+      if (item.jour !== jour) {
+        return false;
+      }
+      if ((item.discipline || '').trim().toLowerCase() !== discipline.trim().toLowerCase()) {
+        return false;
+      }
+      if ((item.categorie || '').trim().toLowerCase() !== categorie.trim().toLowerCase()) {
+        return false;
+      }
+
+      const itemStart = parseTimeToMinutes(item.heureDebut);
+      const itemEnd = parseTimeToMinutes(item.heureFin);
+      if (isNaN(itemStart) || isNaN(itemEnd)) {
+        return false;
+      }
+
+      // Chevauchement si (start1 < end2) ET (start2 < end1)
+      return startMinutes < itemEnd && itemStart < endMinutes;
+    });
+
+    if (conflictingSlot) {
+      Alert.alert(
+        'Chevauchement interdit ⚠️',
+        `Un créneau existe déjà pour ${discipline} (${categorie}) le ${jour} entre ${conflictingSlot.heureDebut} et ${conflictingSlot.heureFin}.\n\nLes créneaux d'une même catégorie et discipline ne peuvent pas se chevaucher.`
+      );
       return;
     }
 
@@ -92,8 +152,8 @@ export default function CreneauxScreen({ navigation }) {
           discipline,
           categorie,
           jour,
-          heureDebut: heureDebut.trim(),
-          heureFin: heureFin.trim(),
+          heureDebut: cleanStart,
+          heureFin: cleanEnd,
           lieu: lieu.trim() || null,
           remarque: remarque.trim() || null,
         });
@@ -103,8 +163,8 @@ export default function CreneauxScreen({ navigation }) {
           discipline,
           categorie,
           jour,
-          heureDebut: heureDebut.trim(),
-          heureFin: heureFin.trim(),
+          heureDebut: cleanStart,
+          heureFin: cleanEnd,
           lieu: lieu.trim() || null,
           remarque: remarque.trim() || null,
         });
