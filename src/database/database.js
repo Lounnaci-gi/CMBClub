@@ -2,8 +2,9 @@
 // Couche SQLite – Init, migrations, CRUD complet
 
 import * as SQLite from 'expo-sqlite';
+import { v4 as uuidv4 } from 'uuid';
 import { buildAdherentCodeBase } from '../utils/adherentCode';
-import { computePaymentStatus, PAYMENT_STATUS } from '../utils/payments';
+import { computePaymentStatus, generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../utils/payments';
 
 let db = null;
 let dbInitPromise = null;
@@ -195,12 +196,12 @@ async function initDatabase(database) {
   }
 
   // Seed saison courante
-  const yearNow = new Date().getMonth() + 1 >= 9 ? new Date().getFullYear() : new Date().getFullYear() - 1;
-  const saisonLabel = `${yearNow}-${yearNow + 1}`;
+  const yearNow = new Date().getFullYear();
+  const saisonLabel = String(yearNow);
   await database.runAsync(
     `INSERT OR IGNORE INTO saisons (id, label, annee, dateDebut, dateFin, actif, createdAt)
      VALUES ('saison-${yearNow}', ?, ?, ?, ?, 1, datetime('now'))`,
-    [saisonLabel, yearNow, `${yearNow}-09-01`, `${yearNow + 1}-06-30`],
+    [saisonLabel, yearNow, `${yearNow}-01-01`, `${yearNow}-12-31`],
   );
 
   // Seed remises par défaut
@@ -560,7 +561,117 @@ export async function enrollAdherentInSaison(adherentId, saisonId, dateInscripti
 
 // ──────────────── PAIEMENTS ────────────────
 
+export async function cleanDuplicatePaiements(saisonId) {
+  try {
+    const db = await getDatabase();
+    const saisonFilter = saisonId ? 'AND saisonId = ?' : '';
+    const params = saisonId ? [saisonId] : [];
+
+    // 1. Nettoyer les doublons de frais d'inscription
+    const duplicatesInsc = await db.getAllAsync(
+      `SELECT id, adherentId, saisonId, montantPaye, createdAt 
+       FROM paiements 
+       WHERE type = 'inscription' ${saisonFilter}
+       ORDER BY montantPaye DESC, createdAt ASC`,
+      params
+    );
+
+    const seenInsc = new Set();
+    for (const p of duplicatesInsc) {
+      const key = `${p.adherentId}_${p.saisonId}`;
+      if (seenInsc.has(key)) {
+        await db.runAsync(`DELETE FROM paiements WHERE id = ?`, [p.id]);
+      } else {
+        seenInsc.add(key);
+      }
+    }
+
+    // 2. Nettoyer les doublons de mensualités (par mois)
+    const duplicatesMois = await db.getAllAsync(
+      `SELECT id, adherentId, saisonId, mois, montantPaye, createdAt 
+       FROM paiements 
+       WHERE type = 'mensualite' AND mois IS NOT NULL ${saisonFilter}
+       ORDER BY montantPaye DESC, createdAt ASC`,
+      params
+    );
+
+    const seenMois = new Set();
+    for (const p of duplicatesMois) {
+      const key = `${p.adherentId}_${p.saisonId}_${p.mois}`;
+      if (seenMois.has(key)) {
+        await db.runAsync(`DELETE FROM paiements WHERE id = ?`, [p.id]);
+      } else {
+        seenMois.add(key);
+      }
+    }
+  } catch (e) {
+    console.error('Erreur lors du nettoyage des doublons:', e);
+  }
+}
+
+export async function ensureAdherentPaymentSchedule(adherentId, saisonId) {
+  if (!adherentId || !saisonId) return;
+  try {
+    const db = await getDatabase();
+
+    // Vérifier si l'adhérent est bien inscrit dans cette saison
+    const isEnrolled = await db.getFirstAsync(
+      `SELECT id FROM adherent_saisons WHERE adherentId = ? AND saisonId = ? AND actif = 1`,
+      [adherentId, saisonId]
+    );
+    if (!isEnrolled) return;
+
+    await cleanDuplicatePaiements(saisonId);
+
+    const existing = await db.getAllAsync(
+      `SELECT * FROM paiements WHERE adherentId = ? AND saisonId = ?`,
+      [adherentId, saisonId]
+    );
+
+    const saison = await db.getFirstAsync(`SELECT * FROM saisons WHERE id = ?`, [saisonId]);
+    if (!saison) return;
+
+    const configRows = await db.getAllAsync(`SELECT * FROM config`);
+    const configMap = {};
+    configRows.forEach(c => { configMap[c.key] = c.value; });
+    const config = {
+      fraisInscription: parseFloat(configMap.fraisInscription) || 2000,
+      fraisMensuel: parseFloat(configMap.fraisMensuel) || 1500,
+    };
+
+    const adherent = await db.getFirstAsync(`SELECT * FROM adherents WHERE id = ?`, [adherentId]);
+    const dateInsc = adherent?.dateInscription || new Date().toISOString();
+
+    const schedule = generatePaymentSchedule(saison.annee, config, dateInsc);
+    const nowIso = new Date().toISOString();
+
+    for (const s of schedule) {
+      if (s.type === 'inscription') {
+        const hasInscription = existing.some(p => p.type === 'inscription');
+        if (hasInscription) continue;
+      } else if (s.type === 'mensualite') {
+        const hasMonth = existing.some(p => p.type === 'mensualite' && Number(p.mois) === Number(s.month));
+        if (hasMonth) continue;
+      }
+
+      await db.runAsync(
+        `INSERT INTO paiements (id, adherentId, saisonId, type, label, mois, annee, montantDu, remisePct, remiseMontant, montantPaye, datePaiement, statut, notes, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, 'a_payer', NULL, ?, ?)`,
+        [
+          uuidv4(), adherentId, saisonId,
+          s.type, s.label, s.month || null, s.year || null,
+          s.montantDu, nowIso, nowIso,
+        ]
+      );
+    }
+  } catch (e) {
+    console.error('Erreur lors de la génération du planning de paiement:', e);
+  }
+}
+
 export async function getPaiementsByAdherent(adherentId, saisonId) {
+  if (!adherentId || !saisonId) return [];
+  await ensureAdherentPaymentSchedule(adherentId, saisonId);
   const db = await getDatabase();
   return await db.getAllAsync(
     `SELECT * FROM paiements WHERE adherentId = ? AND saisonId = ? ORDER BY type DESC, annee, mois`,
@@ -774,27 +885,49 @@ export async function refreshPaymentStatuses(saisonId) {
 }
 
 /**
- * Statut de paiement agrégé par adhérent pour une saison
+ * Statut de paiement agrégé par adhérent pour le mois courant d'une saison
  */
 export async function getPaymentStatusByAdherent(saisonId) {
   const db = await getDatabase();
   if (!saisonId) return {};
   await refreshPaymentStatuses(saisonId);
+
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+
   const rows = await db.getAllAsync(
-    'SELECT adherentId, statut FROM paiements WHERE saisonId = ?',
+    'SELECT * FROM paiements WHERE saisonId = ?',
     [saisonId],
   );
+
   const byAdherent = {};
   for (const r of rows) {
     if (!byAdherent[r.adherentId]) byAdherent[r.adherentId] = [];
-    byAdherent[r.adherentId].push(r.statut);
+    byAdherent[r.adherentId].push(r);
   }
+
   const result = {};
-  for (const [id, statuses] of Object.entries(byAdherent)) {
-    if (statuses.includes(PAYMENT_STATUS.EN_RETARD)) result[id] = PAYMENT_STATUS.EN_RETARD;
-    else if (statuses.every(s => s === PAYMENT_STATUS.PAYE)) result[id] = PAYMENT_STATUS.PAYE;
-    else result[id] = PAYMENT_STATUS.A_PAYER;
+  for (const [id, paiementsList] of Object.entries(byAdherent)) {
+    // Chercher la mensualité du mois courant
+    const currentMonthPayment = paiementsList.find(
+      p => p.type === PAYMENT_TYPES.MENSUALITE && Number(p.mois) === currentMonth
+    );
+
+    if (currentMonthPayment) {
+      result[id] = computePaymentStatus(currentMonthPayment);
+    } else {
+      // Si aucune mensualité pour le mois courant (ex: inscription en milieu d'année sans ce mois), fallback sur les frais d'inscription ou statut global
+      const inscription = paiementsList.find(p => p.type === PAYMENT_TYPES.INSCRIPTION);
+      if (inscription) {
+        result[id] = computePaymentStatus(inscription);
+      } else if (paiementsList.length > 0) {
+        result[id] = computePaymentStatus(paiementsList[0]);
+      } else {
+        result[id] = PAYMENT_STATUS.A_PAYER;
+      }
+    }
   }
+
   return result;
 }
 

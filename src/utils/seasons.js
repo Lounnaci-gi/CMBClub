@@ -5,34 +5,60 @@ import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
 /**
- * Génère le label d'une saison à partir d'une année de début
+ * Génère le label d'une saison à partir d'une année
  */
 export function generateSeasonLabel(year) {
-  return `${year}-${year + 1}`;
+  return String(year);
 }
 
 /**
- * Retourne la saison courante basée sur la date actuelle
- * La saison commence en septembre et se termine en juin
+ * Retourne la saison courante basée sur la date actuelle (année civile 1er Jan au 31 Déc)
  */
 export function getCurrentSeasonYear() {
-  const now = new Date();
-  const month = now.getMonth() + 1; // 1-12
-  return month >= 9 ? now.getFullYear() : now.getFullYear() - 1;
+  return new Date().getFullYear();
 }
 
 /**
- * Liste des mois d'une saison (Sep à Juin)
+ * Liste des mois d'une saison (1er Janvier au 31 Décembre)
  */
 export function getSeasonMonths(seasonYear) {
   const months = [];
-  for (let m = 9; m <= 12; m++) {
+  for (let m = 1; m <= 12; m++) {
     months.push({ year: seasonYear, month: m, label: getMonthLabel(m, seasonYear) });
   }
-  for (let m = 1; m <= 6; m++) {
-    months.push({ year: seasonYear + 1, month: m, label: getMonthLabel(m, seasonYear + 1) });
-  }
   return months;
+}
+
+/**
+ * Vérifie si la création d'une saison est autorisée
+ * - Année <= année en cours : Autorisé
+ * - Année = année en cours + 1 : Autorisé seulement à partir du 22 décembre de l'année en cours (10 jours avant la fin d'année)
+ * - Année > année en cours + 1 : Interdit
+ */
+export function canCreateSeason(targetYear) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  if (targetYear <= currentYear) {
+    return { allowed: true };
+  }
+
+  if (targetYear === currentYear + 1) {
+    const allowedStartDate = new Date(currentYear, 11, 22); // 22 Décembre
+    if (now >= allowedStartDate) {
+      return { allowed: true };
+    } else {
+      return {
+        allowed: false,
+        reason: `Impossible de créer la saison ${targetYear} car l'année ${currentYear} n'est pas encore terminée.\n\nLa création de la saison ${targetYear} est autorisée seulement 10 jours avant la fin de l'année (à partir du 22 décembre ${currentYear}).`,
+      };
+    }
+  }
+
+  return {
+    allowed: false,
+    reason: `Impossible de créer la saison ${targetYear}. L'année ${currentYear} n'est pas terminée.`,
+  };
 }
 
 export function getMonthLabel(month, year) {

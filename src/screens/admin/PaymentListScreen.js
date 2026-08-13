@@ -123,7 +123,12 @@ export default function PaymentListScreen({ navigation }) {
       const net = (p.montantDu || 0) - (p.remiseMontant || 0);
       return s + Math.max(0, net - (p.montantPaye || 0));
     }, 0);
-    return { totalDu, totalVerse, totalRemise, totalReste };
+
+    const mensualites = filtered.filter(p => p.type === 'mensualite');
+    const totalMoisCibles = mensualites.length;
+    const nbMoisPayes = mensualites.filter(p => p.statut === PAYMENT_STATUS.PAYE).length;
+
+    return { totalDu, totalVerse, totalRemise, totalReste, totalMoisCibles, nbMoisPayes };
   }, [filtered]);
 
   const activeFiltersCount = useMemo(() => {
@@ -240,12 +245,16 @@ export default function PaymentListScreen({ navigation }) {
                 <div class="stat-value">${filtered.length}</div>
               </div>
               <div class="stat-card">
-                <div class="stat-label">Total Encaissé</div>
-                <div class="stat-value" style="color: #059669;">${totalCollected.toLocaleString()} DA</div>
+                <div class="stat-label">Montant Versé</div>
+                <div class="stat-value" style="color: #059669;">${totals.totalVerse.toLocaleString()} DA</div>
               </div>
               <div class="stat-card">
-                <div class="stat-label">Total en Retard</div>
-                <div class="stat-value" style="color: #dc2626;">${totalRetard.toLocaleString()} DA</div>
+                <div class="stat-label">Reste à Verser</div>
+                <div class="stat-value" style="color: #dc2626;">${totals.totalReste.toLocaleString()} DA</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Mois Ciblés</div>
+                <div class="stat-value" style="color: #2563eb;">${totals.nbMoisPayes} / ${totals.totalMoisCibles}</div>
               </div>
             </div>
 
@@ -258,8 +267,8 @@ export default function PaymentListScreen({ navigation }) {
                   <th>Catégorie</th>
                   <th>Libellé</th>
                   <th style="text-align: right;">Montant Dû</th>
-                  <th style="text-align: right;">Versé</th>
-                  <th style="text-align: right;">Reste</th>
+                  <th style="text-align: right;">Montant Versé</th>
+                  <th style="text-align: right;">Reste à Verser</th>
                   <th style="text-align: center;">Statut</th>
                 </tr>
               </thead>
@@ -412,24 +421,35 @@ export default function PaymentListScreen({ navigation }) {
             <View style={styles.totalsFooter}>
               <View style={styles.totalsRow}>
                 <View style={styles.totalsCol}>
-                  <Text style={styles.totalsLabel}>Montant dû</Text>
+                  <Text style={styles.totalsLabel}>Total dû</Text>
                   <Text style={styles.totalsValue}>{totals.totalDu.toLocaleString()} DA</Text>
                 </View>
                 <View style={styles.totalsDivider} />
                 <View style={styles.totalsCol}>
-                  <Text style={styles.totalsLabel}>Versé</Text>
+                  <Text style={styles.totalsLabel}>Montant versé</Text>
                   <Text style={[styles.totalsValue, { color: COLORS.success }]}>
                     {totals.totalVerse.toLocaleString()} DA
                   </Text>
                 </View>
                 <View style={styles.totalsDivider} />
                 <View style={styles.totalsCol}>
-                  <Text style={styles.totalsLabel}>Reste</Text>
+                  <Text style={styles.totalsLabel}>Reste à verser</Text>
                   <Text style={[styles.totalsValue, { color: totals.totalReste > 0 ? COLORS.danger : COLORS.success }]}>
                     {totals.totalReste.toLocaleString()} DA
                   </Text>
                 </View>
               </View>
+              {totals.totalMoisCibles > 0 && (
+                <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.border + '50', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
+                  <MaterialCommunityIcons name="calendar-range" size={14} color={COLORS.primary} />
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted, fontWeight: '500' }}>
+                    Mois ciblés par les versements :
+                  </Text>
+                  <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '700' }}>
+                    {totals.nbMoisPayes} / {totals.totalMoisCibles} mois
+                  </Text>
+                </View>
+              )}
             </View>
           ) : null
         }

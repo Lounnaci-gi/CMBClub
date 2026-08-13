@@ -62,14 +62,14 @@ export default function PaymentCard({ paiement, onPress, showAdherent = false })
           </View>
         )}
         <View style={styles.amountItem}>
-          <Text style={styles.amountLabel}>Versé</Text>
+          <Text style={styles.amountLabel}>Montant versé</Text>
           <Text style={[styles.amountValue, { color: displayStatusColor }]}>
             {paidAmount.toLocaleString()} DA
           </Text>
         </View>
         {resteAmount > 0 && paidAmount > 0 ? (
           <View style={styles.amountItem}>
-            <Text style={styles.amountLabel}>Reste à payer</Text>
+            <Text style={styles.amountLabel}>Reste à verser</Text>
             <Text style={[styles.amountValue, { color: COLORS.danger }]}>
               {resteAmount.toLocaleString()} DA
             </Text>

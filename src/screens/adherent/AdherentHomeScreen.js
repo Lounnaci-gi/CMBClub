@@ -282,27 +282,39 @@ export default function AdherentHomeScreen() {
 
             {/* Balance */}
             <View style={styles.balanceCard}>
-              <Text style={styles.sectionLabel}>Solde saison</Text>
+              <Text style={styles.sectionLabel}>Bilan financier saison</Text>
               <View style={styles.balanceRow}>
                 <View style={styles.balanceCol}>
                   <Text style={styles.balanceAmt}>{balance.totalDu.toLocaleString()}</Text>
-                  <Text style={styles.balanceLbl}>Dû</Text>
+                  <Text style={styles.balanceLbl}>Total dû (DA)</Text>
                 </View>
                 <View style={styles.vDivider} />
                 <View style={styles.balanceCol}>
                   <Text style={[styles.balanceAmt, { color: COLORS.success }]}>
-                    {balance.totalPaye.toLocaleString()}
+                    {balance.montantVerse.toLocaleString()}
                   </Text>
-                  <Text style={styles.balanceLbl}>Payé</Text>
+                  <Text style={styles.balanceLbl}>Montant versé (DA)</Text>
                 </View>
                 <View style={styles.vDivider} />
                 <View style={styles.balanceCol}>
-                  <Text style={[styles.balanceAmt, { color: balance.solde > 0 ? COLORS.danger : COLORS.success }]}>
-                    {balance.solde.toLocaleString()}
+                  <Text style={[styles.balanceAmt, { color: balance.resteAVerser > 0 ? COLORS.danger : COLORS.success }]}>
+                    {balance.resteAVerser.toLocaleString()}
                   </Text>
-                  <Text style={styles.balanceLbl}>Reste</Text>
+                  <Text style={styles.balanceLbl}>Reste à verser (DA)</Text>
                 </View>
               </View>
+
+              <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: COLORS.border + '50', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 13, color: COLORS.textMuted, fontWeight: '500' }}>
+                  Mois ciblés par versement :
+                </Text>
+                <View style={{ backgroundColor: COLORS.primary + '15', paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.full }}>
+                  <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '700' }}>
+                    {balance.nbMoisPayes} / {balance.totalMoisCibles} mois
+                  </Text>
+                </View>
+              </View>
+
               {retards.length > 0 && (
                 <View style={styles.alertBox}>
                   <MaterialCommunityIcons name="alert-circle" size={16} color={COLORS.danger} />

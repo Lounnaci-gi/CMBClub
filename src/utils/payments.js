@@ -52,15 +52,27 @@ export function computePaymentStatus(paiement) {
 /**
  * Calcule le solde restant d'un adhérent pour une saison
  */
-export function calculateBalance(paiements) {
+export function calculateBalance(paiements = []) {
   const totalDu = paiements.reduce((sum, p) => sum + (p.montantDu || 0), 0);
   const totalPaye = paiements.reduce((sum, p) => sum + (p.montantPaye || 0), 0);
   const totalRemise = paiements.reduce((sum, p) => sum + (p.remiseMontant || 0), 0);
+  const resteAVerser = Math.max(0, totalDu - totalPaye - totalRemise);
+
+  const mensualites = paiements.filter(p => p.type === PAYMENT_TYPES.MENSUALITE || p.type === 'mensualite');
+  const totalMoisCibles = mensualites.length;
+  const nbMoisPayes = mensualites.filter(p => p.statut === PAYMENT_STATUS.PAYE || p.statut === 'paye').length;
+  const nbMoisCiblessVersements = mensualites.filter(p => (p.montantPaye || 0) > 0).length;
+
   return {
     totalDu,
     totalPaye,
+    montantVerse: totalPaye,
     totalRemise,
     solde: totalDu - totalPaye - totalRemise,
+    resteAVerser,
+    totalMoisCibles,
+    nbMoisPayes,
+    nbMoisCiblessVersements,
   };
 }
 
@@ -75,25 +87,30 @@ export function generatePaymentSchedule(saisonAnnee, config, dateInscription) {
   schedule.push({
     type: PAYMENT_TYPES.INSCRIPTION,
     label: 'Frais d\'inscription',
-    montantDu: config.fraisInscription,
+    montantDu: config.fraisInscription || 2000,
     month: null,
     year: null,
   });
 
-  // Mensualités à partir du mois d'inscription
+  // Mensualités à partir du mois d'inscription dans l'année de la saison
   const inscDate = dateInscription ? new Date(dateInscription) : new Date();
-  const inscMonth = inscDate.getMonth() + 1;
-  const inscYear = inscDate.getFullYear();
+  const seasonStart = new Date(saisonAnnee, 0, 1); // 1er Janvier
+  const seasonEnd = new Date(saisonAnnee, 11, 31); // 31 Décembre
+
+  // Si l'inscription a lieu hors saison (ex. avant le 1er Janvier ou après le 31 Décembre),
+  // on génère TOUS les mois de la saison. Sinon, on commence au mois d'inscription.
+  const isOutOfSeason = inscDate < seasonStart || inscDate > seasonEnd;
+  const startDate = isOutOfSeason
+    ? seasonStart
+    : new Date(inscDate.getFullYear(), inscDate.getMonth(), 1);
 
   months.forEach(({ month, year, label }) => {
-    // Inclure seulement les mois à partir du mois d'inscription
     const monthDate = new Date(year, month - 1, 1);
-    const startDate = new Date(inscYear, inscMonth - 1, 1);
     if (monthDate >= startDate) {
       schedule.push({
         type: PAYMENT_TYPES.MENSUALITE,
         label: `Mensualité – ${label}`,
-        montantDu: config.fraisMensuel,
+        montantDu: config.fraisMensuel || 1500,
         month,
         year,
       });

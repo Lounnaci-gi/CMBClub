@@ -12,7 +12,7 @@ import CategoryBadge from '../../components/CategoryBadge';
 import DateField from '../../components/DateField';
 import useTheme from '../../theme/useTheme';
 import { DISCIPLINES, BLOOD_GROUPS, CATEGORIES, getCategoryByAge, getEffectiveCategory } from '../../utils/categories';
-import { generatePaymentSchedule, PAYMENT_STATUS } from '../../utils/payments';
+import { generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../../utils/payments';
 import { buildAdherentCodeBase, canGenerateAdherentCode } from '../../utils/adherentCode';
 import { generateUniqueAdherentCode } from '../../database/database';
 
@@ -99,8 +99,10 @@ export default function AdherentFormScreen({ navigation, route }) {
 
   // Paiement à l'inscription
   const [payAtRegistration, setPayAtRegistration] = useState(true);
-  const [paymentOption, setPaymentOption] = useState('inscription'); // 'inscription' | 'inscription_mensualite' | 'custom'
-  const [customAmount, setCustomAmount] = useState('');
+  const [includeFraisInscription, setIncludeFraisInscription] = useState(true);
+  const [nbMoisAvance, setNbMoisAvance] = useState(1);
+  const [montantAvanceReg, setMontantAvanceReg] = useState('');
+  const [isCustomRegAmount, setIsCustomRegAmount] = useState(false);
   const [paymentMode, setPaymentMode] = useState('Espèces');
   const [paymentNotes, setPaymentNotes] = useState('');
 
@@ -132,12 +134,46 @@ export default function AdherentFormScreen({ navigation, route }) {
 
   const category = getEffectiveCategory(form);
 
+  const fraisInscVal = includeFraisInscription ? (config?.fraisInscription || 2000) : 0;
+  const fraisMensuelVal = config?.fraisMensuel || 1500;
+  const totalExpectedReg = fraisInscVal + (nbMoisAvance * fraisMensuelVal);
+
+  useEffect(() => {
+    if (!isCustomRegAmount && payAtRegistration) {
+      setMontantAvanceReg(String(totalExpectedReg));
+    }
+  }, [totalExpectedReg, isCustomRegAmount, payAtRegistration]);
+
+  const handleNbMoisAvanceChange = (n) => {
+    const validN = Math.max(0, Math.min(n, 12));
+    setNbMoisAvance(validN);
+    if (!isCustomRegAmount) {
+      const total = (includeFraisInscription ? (config?.fraisInscription || 2000) : 0) + (validN * (config?.fraisMensuel || 1500));
+      setMontantAvanceReg(String(total));
+    }
+  };
+
+  const handleIncludeFraisInscChange = (val) => {
+    setIncludeFraisInscription(val);
+    if (!isCustomRegAmount) {
+      const total = (val ? (config?.fraisInscription || 2000) : 0) + (nbMoisAvance * (config?.fraisMensuel || 1500));
+      setMontantAvanceReg(String(total));
+    }
+  };
+
+  const handleMontantRegTextChange = (text) => {
+    setMontantAvanceReg(text);
+    setIsCustomRegAmount(true);
+  };
+
+  const resetRegAmountToExact = () => {
+    setMontantAvanceReg(String(totalExpectedReg));
+    setIsCustomRegAmount(false);
+  };
+
   const getInitialPaymentAmount = () => {
     if (!payAtRegistration) return 0;
-    if (paymentOption === 'inscription') return config?.fraisInscription || 2000;
-    if (paymentOption === 'inscription_mensualite') return (config?.fraisInscription || 2000) + (config?.fraisMensuel || 1500);
-    if (paymentOption === 'custom') return parseFloat(customAmount) || 0;
-    return 0;
+    return parseFloat(montantAvanceReg) || 0;
   };
 
   const set = (key, val) => {
@@ -191,12 +227,17 @@ export default function AdherentFormScreen({ navigation, route }) {
             let datePaiement = null;
             let notes = null;
 
-            if (initialPaymentRemaining > 0) {
+            const isInscription = s.type === PAYMENT_TYPES.INSCRIPTION || s.type === 'inscription';
+            const shouldAllocate = !isInscription || includeFraisInscription;
+
+            if (initialPaymentRemaining > 0 && shouldAllocate) {
               const allocated = Math.min(initialPaymentRemaining, s.montantDu);
               montantPaye = allocated;
               initialPaymentRemaining -= allocated;
               if (montantPaye >= s.montantDu) {
                 statut = PAYMENT_STATUS.PAYE;
+              } else if (montantPaye > 0) {
+                statut = PAYMENT_STATUS.AVANCE;
               }
               datePaiement = todayIso;
               notes = `Réglé à l'inscription (${paymentMode}${paymentNotes ? ' - ' + paymentNotes : ''})`;
@@ -560,49 +601,83 @@ export default function AdherentFormScreen({ navigation, route }) {
             </TouchableOpacity>
 
             {payAtRegistration ? (
-              <View style={{ gap: 12, marginTop: 4 }}>
-                <Text style={styles.fieldLabel}>Montant perçu</Text>
-                <View style={styles.optionGrid}>
+              <View style={{ gap: 14, marginTop: 8 }}>
+                {/* Checkbox Frais Inscription */}
+                <TouchableOpacity
+                  style={styles.toggleRowBox}
+                  onPress={() => handleIncludeFraisInscChange(!includeFraisInscription)}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons
+                    name={includeFraisInscription ? "checkbox-marked" : "checkbox-blank-outline"}
+                    size={20}
+                    color={includeFraisInscription ? COLORS.primary : COLORS.textMuted}
+                  />
+                  <Text style={styles.toggleRowLabel}>
+                    Inclure les frais d'inscription ({config?.fraisInscription || 2000} DA)
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Counter for Months */}
+                <Text style={styles.fieldLabel}>Nombre de mois de cotisations à avancer</Text>
+                <View style={styles.counterRow}>
                   <TouchableOpacity
-                    style={[styles.optionChip, paymentOption === 'inscription' && styles.optionChipActive]}
-                    onPress={() => setPaymentOption('inscription')}
+                    style={styles.counterBtn}
+                    onPress={() => handleNbMoisAvanceChange(nbMoisAvance - 1)}
+                    disabled={nbMoisAvance <= 0}
                   >
-                    <Text style={[styles.optionChipText, paymentOption === 'inscription' && styles.optionChipTextActive]}>
-                      Frais d'inscription ({config?.fraisInscription || 2000} DA)
-                    </Text>
+                    <MaterialCommunityIcons name="minus" size={20} color={nbMoisAvance <= 0 ? COLORS.textMuted : COLORS.primary} />
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.optionChip, paymentOption === 'inscription_mensualite' && styles.optionChipActive]}
-                    onPress={() => setPaymentOption('inscription_mensualite')}
-                  >
-                    <Text style={[styles.optionChipText, paymentOption === 'inscription_mensualite' && styles.optionChipTextActive]}>
-                      Inscription + 1er mois ({(config?.fraisInscription || 2000) + (config?.fraisMensuel || 1500)} DA)
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={styles.counterDisplay}>
+                    <Text style={styles.counterText}>{nbMoisAvance}</Text>
+                    <Text style={styles.counterSubText}>mois ({nbMoisAvance * (config?.fraisMensuel || 1500)} DA)</Text>
+                  </View>
 
                   <TouchableOpacity
-                    style={[styles.optionChip, paymentOption === 'custom' && styles.optionChipActive]}
-                    onPress={() => setPaymentOption('custom')}
+                    style={styles.counterBtn}
+                    onPress={() => handleNbMoisAvanceChange(nbMoisAvance + 1)}
+                    disabled={nbMoisAvance >= 12}
                   >
-                    <Text style={[styles.optionChipText, paymentOption === 'custom' && styles.optionChipTextActive]}>
-                      Autre montant personnalisé
-                    </Text>
+                    <MaterialCommunityIcons name="plus" size={20} color={nbMoisAvance >= 12 ? COLORS.textMuted : COLORS.primary} />
                   </TouchableOpacity>
                 </View>
 
-                {paymentOption === 'custom' ? (
-                  <FormField
-                    label="Saisir le montant payé (DA)"
-                    value={customAmount}
-                    onChangeText={setCustomAmount}
-                    keyboardType="numeric"
-                    placeholder="ex: 2000"
-                    COLORS={COLORS}
-                    styles={styles}
-                  />
-                ) : null}
+                {/* Quick Chips */}
+                <View style={styles.quickChipsRow}>
+                  {[0, 1, 2, 3, 5, 10].map(n => (
+                    <TouchableOpacity
+                      key={n}
+                      style={[styles.quickChip, nbMoisAvance === n && styles.quickChipActive]}
+                      onPress={() => handleNbMoisAvanceChange(n)}
+                    >
+                      <Text style={[styles.quickChipText, nbMoisAvance === n && { color: COLORS.primary }]}>
+                        {n === 0 ? 'Aucun mois' : `${n} mois`}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
+                {/* Input Montant Avancé */}
+                <View style={styles.inputHeaderRow}>
+                  <Text style={styles.fieldLabel}>Montant avancé / versé par l'adhérent (DA)</Text>
+                  {isCustomRegAmount && (
+                    <TouchableOpacity onPress={resetRegAmountToExact} style={styles.resetAmountBtn}>
+                      <MaterialCommunityIcons name="refresh" size={14} color={COLORS.primary} />
+                      <Text style={styles.resetAmountText}>Montant exact</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <TextInput
+                  style={[styles.textInput, { fontSize: 17, fontWeight: '700', color: COLORS.primary }]}
+                  value={montantAvanceReg}
+                  onChangeText={handleMontantRegTextChange}
+                  keyboardType="numeric"
+                  placeholder="0"
+                  placeholderTextColor={COLORS.textMuted}
+                />
+
+                {/* Mode de paiement */}
                 <View style={styles.fieldGroup}>
                   <Text style={styles.fieldLabel}>Mode de paiement</Text>
                   <View style={styles.modeRow}>
@@ -633,23 +708,35 @@ export default function AdherentFormScreen({ navigation, route }) {
                 {/* Live Payment Summary Box */}
                 <View style={styles.recapBox}>
                   <View style={styles.recapRow}>
-                    <Text style={styles.recapLabel}>Montant versé :</Text>
-                    <Text style={styles.recapVerse}>{getInitialPaymentAmount().toLocaleString()} DA</Text>
+                    <Text style={styles.recapLabel}>Frais d'inscription :</Text>
+                    <Text style={styles.recapValue}>{fraisInscVal.toLocaleString()} DA</Text>
                   </View>
 
-                  {getInitialPaymentAmount() < (config?.fraisInscription || 2000) ? (
-                    <View style={styles.recapRow}>
-                      <Text style={styles.recapLabel}>Reste à payer (Inscription) :</Text>
-                      <Text style={styles.recapReste}>
-                        {((config?.fraisInscription || 2000) - getInitialPaymentAmount()).toLocaleString()} DA
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={styles.recapRow}>
-                      <Text style={styles.recapLabel}>Statut inscription :</Text>
-                      <Text style={styles.recapSuccess}>Frais d'inscription réglés (100%)</Text>
-                    </View>
-                  )}
+                  <View style={styles.recapRow}>
+                    <Text style={styles.recapLabel}>Mensualités ({nbMoisAvance} mois) :</Text>
+                    <Text style={styles.recapValue}>{(nbMoisAvance * (config?.fraisMensuel || 1500)).toLocaleString()} DA</Text>
+                  </View>
+
+                  <View style={styles.summaryDivider} />
+
+                  <View style={styles.recapRow}>
+                    <Text style={[styles.recapLabel, { color: COLORS.textPrimary, fontWeight: '700' }]}>Total attendu :</Text>
+                    <Text style={[styles.recapValue, { color: COLORS.primary, fontWeight: '800' }]}>{totalExpectedReg.toLocaleString()} DA</Text>
+                  </View>
+
+                  <View style={styles.recapRow}>
+                    <Text style={styles.recapLabel}>Montant versé par l'adhérent :</Text>
+                    <Text style={styles.recapVerse}>{(parseFloat(montantAvanceReg) || 0).toLocaleString()} DA</Text>
+                  </View>
+
+                  <View style={styles.summaryDivider} />
+
+                  <View style={styles.recapRow}>
+                    <Text style={[styles.recapLabel, { color: COLORS.textPrimary, fontWeight: '700', fontSize: 15 }]}>Reste à payer :</Text>
+                    <Text style={[styles.recapReste, { color: Math.max(0, totalExpectedReg - (parseFloat(montantAvanceReg) || 0)) > 0 ? COLORS.warning : COLORS.success, fontSize: 17, fontWeight: '900' }]}>
+                      {Math.max(0, totalExpectedReg - (parseFloat(montantAvanceReg) || 0)).toLocaleString()} DA
+                    </Text>
+                  </View>
                 </View>
               </View>
             ) : null}
@@ -939,6 +1026,89 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '700',
     fontSize: 15,
+  },
+  recapValue: {
+    color: COLORS.textPrimary,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 2,
+  },
+  counterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    backgroundColor: COLORS.bgInput,
+    padding: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  counterBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  counterDisplay: {
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  counterText: {
+    color: COLORS.primary,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  counterSubText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  quickChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginVertical: 4,
+  },
+  quickChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.bgInput,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  quickChipActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary + '15',
+  },
+  quickChipText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  inputHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  resetAmountBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  resetAmountText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: '700',
   },
   recapReste: {
     color: COLORS.warning,

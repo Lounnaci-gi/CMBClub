@@ -9,14 +9,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { v4 as uuidv4 } from 'uuid';
 import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
-import { generateSeasonLabel, getCurrentSeasonYear } from '../../utils/seasons';
+import { generateSeasonLabel, getCurrentSeasonYear, canCreateSeason } from '../../utils/seasons';
 
 export default function SeasonScreen() {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { saisons, saisonActive, loadSaisons, createSaison, activateSaison } = useStore();
   const [showModal, setShowModal] = useState(false);
-  const [annee, setAnnee] = useState(String(getCurrentSeasonYear() + 1));
+  const [annee, setAnnee] = useState(String(getCurrentSeasonYear()));
   const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(useCallback(() => { loadSaisons(); }, []));
@@ -29,8 +29,13 @@ export default function SeasonScreen() {
       Alert.alert('Erreur', 'Année invalide (entre 2020 et 2060)');
       return;
     }
+    const check = canCreateSeason(y);
+    if (!check.allowed) {
+      Alert.alert('Création impossible ⛔', check.reason);
+      return;
+    }
     const label = generateSeasonLabel(y);
-    const existing = saisons.find(s => s.label === label);
+    const existing = saisons.find(s => s.annee === y || s.label === label);
     if (existing) {
       Alert.alert('Erreur', `La saison ${label} existe déjà`);
       return;
@@ -39,12 +44,12 @@ export default function SeasonScreen() {
       id: uuidv4(),
       label,
       annee: y,
-      dateDebut: `${y}-09-01`,
-      dateFin: `${y + 1}-06-30`,
+      dateDebut: `${y}-01-01`,
+      dateFin: `${y}-12-31`,
       actif: 0,
     });
     setShowModal(false);
-    Alert.alert('✅ Saison créée', `La saison ${label} a été créée.`);
+    Alert.alert('✅ Saison créée', `La saison ${label} (01/01/${y} – 31/12/${y}) a été créée.`);
   };
 
   const handleActivate = (saison) => {
@@ -76,9 +81,9 @@ export default function SeasonScreen() {
             </Text>
           </View>
           <View>
-            <Text style={styles.saisonLabel}>{item.label}</Text>
+            <Text style={styles.saisonLabel}>Saison {item.label}</Text>
             <Text style={styles.saisonDates}>
-              Sept {item.annee} – Juin {item.annee + 1}
+              01 Jan. {item.annee} – 31 Déc. {item.annee}
             </Text>
             {isActive && (
               <View style={styles.activeBadge}>
@@ -139,7 +144,7 @@ export default function SeasonScreen() {
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>Créer une nouvelle saison</Text>
 
-            <Text style={styles.fieldLabel}>Année de début</Text>
+            <Text style={styles.fieldLabel}>Année de la saison</Text>
             <TextInput
               style={styles.input}
               value={annee}
@@ -153,7 +158,7 @@ export default function SeasonScreen() {
               <View style={styles.previewBox}>
                 <MaterialCommunityIcons name="information" size={16} color={COLORS.primary} />
                 <Text style={styles.previewText}>
-                  Saison {generateSeasonLabel(parseInt(annee))} (Sept {annee} – Juin {parseInt(annee) + 1})
+                  Saison {generateSeasonLabel(parseInt(annee))} (01 Jan {annee} – 31 Déc {annee})
                 </Text>
               </View>
             )}

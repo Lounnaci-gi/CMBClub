@@ -30,16 +30,17 @@ export default function AdherentListScreen({ navigation }) {
 
   const { adherents, loadAdherents, saisonActive, loadSaisons, disciplines, loadDisciplines } = useStore();
 
-  const [search,      setSearch]      = useState('');
-  const [catFilter,   setCatFilter]   = useState('all');
-  const [discFilter,  setDiscFilter]  = useState('all');
-  const [payFilter,   setPayFilter]   = useState('all');
-  const [genreFilter, setGenreFilter] = useState('all');
-  const [assureFilter, setAssureFilter] = useState('all');
-  const [payStatusMap, setPayStatusMap] = useState({});
-  const [refreshing,  setRefreshing]  = useState(false);
-  const [printing,    setPrinting]    = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [search,        setSearch]        = useState('');
+  const [catFilter,     setCatFilter]     = useState('all');
+  const [discFilter,    setDiscFilter]    = useState('all');
+  const [payFilter,     setPayFilter]     = useState('all');
+  const [genreFilter,   setGenreFilter]   = useState('all');
+  const [assureFilter,  setAssureFilter]  = useState('all');
+  const [enrollFilter,  setEnrollFilter]  = useState('all');
+  const [payStatusMap,  setPayStatusMap]  = useState({});
+  const [refreshing,    setRefreshing]    = useState(false);
+  const [printing,      setPrinting]      = useState(false);
+  const [filtersOpen,   setFiltersOpen]   = useState(false);
   const [showAssuranceModal, setShowAssuranceModal] = useState(false);
 
   // ── Data loading ──────────────────────────────────────────────────────────
@@ -90,6 +91,12 @@ export default function AdherentListScreen({ navigation }) {
     { value: 'non_assure', label: 'Non assurés', icon: '❌', color: COLORS.danger },
   ];
 
+  const ENROLLMENT_FILTERS = [
+    { value: 'all',          label: 'Tous',           icon: '👥' },
+    { value: 'enrolled',     label: 'Inscrits',       icon: '✅', color: COLORS.success },
+    { value: 'not_enrolled', label: 'À réinscrire ⚠️', icon: '⚠️', color: COLORS.warning },
+  ];
+
   // ── Filtering ─────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     return adherents.filter(a => {
@@ -101,14 +108,16 @@ export default function AdherentListScreen({ navigation }) {
       if (genreFilter !== 'all' && a.genre      !== genreFilter)  return false;
       if (assureFilter === 'assure' && !a.assure) return false;
       if (assureFilter === 'non_assure' && a.assure) return false;
+      if (enrollFilter === 'enrolled' && a.isEnrolled === 0) return false;
+      if (enrollFilter === 'not_enrolled' && a.isEnrolled !== 0) return false;
       if (payFilter   !== 'all') {
         if (payStatusMap[a.id] !== payFilter) return false;
       }
       return true;
     });
-  }, [adherents, search, catFilter, discFilter, payFilter, genreFilter, assureFilter, payStatusMap]);
+  }, [adherents, search, catFilter, discFilter, payFilter, genreFilter, assureFilter, enrollFilter, payStatusMap]);
 
-  const activeFiltersCount = [catFilter, discFilter, payFilter, genreFilter, assureFilter]
+  const activeFiltersCount = [catFilter, discFilter, payFilter, genreFilter, assureFilter, enrollFilter]
     .filter(f => f !== 'all').length + (search ? 1 : 0);
 
   const clearAllFilters = () => {
@@ -117,6 +126,7 @@ export default function AdherentListScreen({ navigation }) {
     setPayFilter('all');
     setGenreFilter('all');
     setAssureFilter('all');
+    setEnrollFilter('all');
     setSearch('');
   };
 
@@ -366,6 +376,14 @@ export default function AdherentListScreen({ navigation }) {
             </ScrollView>
           </View>
 
+          {/* Inscription saison */}
+          <View style={styles.filterGroup}>
+            <Text style={styles.filterGroupLabel}>Inscription {saisonActive ? `(${saisonActive.label})` : ''}</Text>
+            <View style={styles.chipRow}>
+              {ENROLLMENT_FILTERS.map(f => renderChip(f, enrollFilter === f.value, () => setEnrollFilter(f.value)))}
+            </View>
+          </View>
+
           {/* Assurance */}
           <View style={styles.filterGroup}>
             <Text style={styles.filterGroupLabel}>Assurance</Text>
@@ -428,6 +446,10 @@ export default function AdherentListScreen({ navigation }) {
         renderItem={renderItem}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        initialNumToRender={15}
+        maxToRenderPerBatch={15}
+        windowSize={10}
+        removeClippedSubviews={true}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         ListEmptyComponent={
           <View style={styles.empty}>

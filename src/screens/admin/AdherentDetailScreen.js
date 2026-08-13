@@ -150,23 +150,6 @@ export default function AdherentDetailScreen({ navigation, route }) {
           onPress: async () => {
             const today = new Date().toISOString();
             await enrollAdherent(adherent.id, saisonActive.id, today);
-            const existing = await getPaiementsByAdherent(adherent.id, saisonActive.id);
-            if (existing.length === 0) {
-              const schedule = generatePaymentSchedule(saisonActive.annee, config, today);
-              for (const s of schedule) {
-                await createPaiement({
-                  id: uuidv4(),
-                  adherentId: adherent.id,
-                  saisonId: saisonActive.id,
-                  type: s.type,
-                  label: s.label,
-                  mois: s.month,
-                  annee: s.year,
-                  montantDu: s.montantDu,
-                  statut: PAYMENT_STATUS.A_PAYER,
-                });
-              }
-            }
             await loadPaiements();
             Alert.alert('Inscription effectuée', `Adhérent réinscrit avec succès pour la saison ${saisonActive.label}`);
           },
@@ -358,16 +341,49 @@ export default function AdherentDetailScreen({ navigation, route }) {
                 <Text style={[styles.balanceValue, { color: COLORS.success }]}>-{balance.totalRemise.toLocaleString()} DA</Text>
               </View>
               <View style={styles.balanceItem}>
-                <Text style={styles.balanceLabel}>Payé</Text>
-                <Text style={[styles.balanceValue, { color: COLORS.primary }]}>{balance.totalPaye.toLocaleString()} DA</Text>
+                <Text style={styles.balanceLabel}>Montant versé</Text>
+                <Text style={[styles.balanceValue, { color: COLORS.primary }]}>{balance.montantVerse.toLocaleString()} DA</Text>
               </View>
-              <View style={[styles.balanceItem, { backgroundColor: (balance.solde > 0 ? COLORS.danger : COLORS.success) + '15', borderRadius: RADIUS.md }]}>
-                <Text style={styles.balanceLabel}>Solde</Text>
-                <Text style={[styles.balanceValue, { color: balance.solde > 0 ? COLORS.danger : COLORS.success }]}>
-                  {balance.solde.toLocaleString()} DA
+              <View style={[styles.balanceItem, { backgroundColor: (balance.resteAVerser > 0 ? COLORS.danger : COLORS.success) + '15', borderRadius: RADIUS.md }]}>
+                <Text style={styles.balanceLabel}>Reste à verser</Text>
+                <Text style={[styles.balanceValue, { color: balance.resteAVerser > 0 ? COLORS.danger : COLORS.success }]}>
+                  {balance.resteAVerser.toLocaleString()} DA
                 </Text>
               </View>
             </View>
+            <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: COLORS.border + '50', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 13, color: COLORS.textMuted, fontWeight: '500' }}>
+                Mois ciblés par les versements :
+              </Text>
+              <View style={{ backgroundColor: COLORS.primary + '15', paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.full }}>
+                <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '700' }}>
+                  {balance.nbMoisPayes} / {balance.totalMoisCibles} mois
+                </Text>
+              </View>
+            </View>
+
+            {enrolled && balance.resteAVerser > 0 ? (
+              <TouchableOpacity
+                style={{
+                  marginTop: 14,
+                  backgroundColor: COLORS.primary,
+                  borderRadius: RADIUS.md,
+                  paddingVertical: 10,
+                  paddingHorizontal: 14,
+                  alignItems: 'center',
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+                onPress={() => navigation.navigate('PaymentDetail', { adherentId: adherent.id })}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons name="cash-plus" size={18} color="#FFF" />
+                <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 13 }}>
+                  Ajouter un versement / Avancer des cotisations
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : null}
 
