@@ -83,13 +83,19 @@ export default function PresencesScreen({ route }) {
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(new Date());
 
-  // Horloge en temps réel (mise à jour chaque seconde)
+  // Horloge optimisée : 1s uniquement si un compte à rebours est en cours, 30s sinon
   useEffect(() => {
+    if (!slotStartDateTime || Date.now() >= slotStartDateTime.getTime()) {
+      const slowTimer = setInterval(() => {
+        setNow(new Date());
+      }, 30000);
+      return () => clearInterval(slowTimer);
+    }
     const timer = setInterval(() => {
       setNow(new Date());
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [slotStartDateTime]);
 
   // Only show slots matching today's day of the week
   const todayJour = useMemo(() => getTodayJour(), []);

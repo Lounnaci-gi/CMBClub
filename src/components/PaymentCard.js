@@ -6,7 +6,7 @@ import useTheme from '../theme/useTheme';
 import { getStatusColor, getStatusLabel, getStatusIcon } from '../utils/payments';
 import { formatDate } from '../utils/seasons';
 
-export default function PaymentCard({ paiement, onPress, showAdherent = false }) {
+function PaymentCard({ paiement, onPress, showAdherent = false }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const statusColor = getStatusColor(paiement.statut);
@@ -151,3 +151,5 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     fontSize: 11,
   },
 });
+
+export default React.memo(PaymentCard);

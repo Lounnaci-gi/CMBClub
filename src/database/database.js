@@ -5,6 +5,8 @@ import * as SQLite from 'expo-sqlite';
 import { v4 as uuidv4 } from 'uuid';
 import { buildAdherentCodeBase } from '../utils/adherentCode';
 import { computePaymentStatus, generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../utils/payments';
+import { isCloudflareEnabled, CloudflareAPI } from '../services/api';
+import { hashPassword, verifyPassword, encryptUsername, decryptUsername, matchesUsername } from '../utils/security';
 
 let db = null;
 let dbInitPromise = null;
@@ -25,6 +27,9 @@ export async function getDatabase() {
 async function initDatabase(database) {
   await database.execAsync(`
     PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA temp_store = MEMORY;
+    PRAGMA cache_size = -64000;
 
     CREATE TABLE IF NOT EXISTS config (
       key TEXT PRIMARY KEY,
@@ -142,6 +147,18 @@ async function initDatabase(database) {
       FOREIGN KEY (adherentId) REFERENCES adherents(id),
       FOREIGN KEY (saisonId) REFERENCES saisons(id)
     );
+
+    -- Index de performance critiques
+    CREATE INDEX IF NOT EXISTS idx_paiements_saison_adherent ON paiements(saisonId, adherentId);
+    CREATE INDEX IF NOT EXISTS idx_paiements_saison_statut ON paiements(saisonId, statut);
+    CREATE INDEX IF NOT EXISTS idx_paiements_adherent_type ON paiements(adherentId, type);
+    CREATE INDEX IF NOT EXISTS idx_adherent_saisons_saison_actif ON adherent_saisons(saisonId, actif, adherentId);
+    CREATE INDEX IF NOT EXISTS idx_adherent_saisons_adherent ON adherent_saisons(adherentId, saisonId);
+    CREATE INDEX IF NOT EXISTS idx_presences_creneau_date ON presences(creneauId, dateSeance);
+    CREATE INDEX IF NOT EXISTS idx_presences_adherent_saison ON presences(adherentId, saisonId);
+    CREATE INDEX IF NOT EXISTS idx_adherents_nom_prenom ON adherents(nom, prenom);
+    CREATE INDEX IF NOT EXISTS idx_creneaux_jour ON creneaux(jour, discipline, categorie);
+    CREATE INDEX IF NOT EXISTS idx_users_role_adherent ON users(role, adherentId);
   `);
 
   // Migration : ajout de dateInscription si la colonne n'existe pas encore
@@ -179,11 +196,37 @@ async function initDatabase(database) {
   await database.runAsync(
     `INSERT OR IGNORE INTO config (key, value) VALUES ('fraisMensuel', '1500')`,
   );
-
-  // Seed single admin user
   await database.runAsync(
-    `INSERT OR IGNORE INTO users (id, username, password, role, createdAt) VALUES ('admin-001', 'admin', 'admin123', 'admin', datetime('now'))`,
+    `INSERT OR IGNORE INTO config (key, value) VALUES ('cloudflareApiUrl', 'https://cmbclub-api.ahmedlounnaci.workers.dev')`,
   );
+
+  // Seed single admin user (identifiant chiffré & mot de passe haché)
+  const defaultAdminUser = encryptUsername('admin');
+  const defaultAdminHash = hashPassword('admin123');
+  await database.runAsync(
+    `INSERT OR IGNORE INTO users (id, username, password, role, createdAt) VALUES ('admin-001', ?, ?, 'admin', datetime('now'))`,
+    [defaultAdminUser, defaultAdminHash],
+  );
+
+  // Migration de sécurité : chiffrer les identifiants et hacher les mots de passe stockés en clair
+  try {
+    const legacyUsers = await database.getAllAsync("SELECT id, username, password FROM users");
+    for (const u of legacyUsers || []) {
+      const needsUserEnc = u.username && !u.username.startsWith('cmb_enc_u1:');
+      const needsPassHash = u.password && !u.password.startsWith('cmb_slt_v1:');
+      if (needsUserEnc || needsPassHash) {
+        const nextUser = needsUserEnc ? encryptUsername(u.username) : u.username;
+        const nextPass = needsPassHash ? hashPassword(u.password) : u.password;
+        await database.runAsync("UPDATE users SET username = ?, password = ? WHERE id = ?", [
+          nextUser,
+          nextPass,
+          u.id,
+        ]);
+      }
+    }
+  } catch (_e) {
+    // ignore
+  }
 
   // Enforce single admin policy: keep only one admin user, downgrade any extra admin users to 'adherent'
   const admins = await database.getAllAsync("SELECT id FROM users WHERE role = 'admin' ORDER BY CASE WHEN id = 'admin-001' THEN 0 ELSE 1 END, id ASC");
@@ -247,13 +290,10 @@ async function initDatabase(database) {
       // ignore seeding error
     }
   }
+  // ─── (Les adhérents de test ont été supprimés – la BDD démarre vide) ────────
+  // Pour réinitialiser les données depuis l'app : ConfigScreen → "Réinitialiser la BDD"
 
-  // ─── Seed 70 adhérents algériens ──────────────────────────────────────────
-  // Catégories : Poussin (≤7), Pupille (8-10), Minime (11-13), Cadet (14-16),
-  //              Junior (17-19), Sénior (20-34), Vétéran (≥35)
-  // Disciplines : KickBoxing, Natation
-  // Genre : M / F
-  // Toutes les dates de naissance sont relatives à 2026-08-10 (date courante du projet)
+  if (false) { // bloc désactivé – conservé pour référence
   const seedAdherents = [
     // ── Poussin (nés 2019–2026) ──────────────────────────────────────────────
     { id: 'adh-001', nom: 'BELKADI',    prenom: 'Ryane',      dn: '2021-03-14', lieu: 'Alger',     disc: 'Natation',   genre: 'M', tel: '0551234001', gs: 'A+' },
@@ -372,12 +412,37 @@ async function initDatabase(database) {
       // ignore seeding errors (ex: duplicates)
     }
   }
+  } // fin bloc désactivé
+}
+
+
+// ──────────────── RESET BDD ────────────────
+// Efface toutes les données sauf l'utilisateur admin
+
+export async function resetDatabase() {
+  const db = await getDatabase();
+  await db.withTransactionAsync(async () => {
+    // Supprimer les données transactionnelles
+    await db.runAsync('DELETE FROM presences');
+    await db.runAsync('DELETE FROM paiements');
+    await db.runAsync('DELETE FROM adherent_saisons');
+    await db.runAsync('DELETE FROM adherents');
+    // Conserver : users (admin), config, saisons, remises, disciplines, creneaux
+  });
 }
 
 
 // ──────────────── CONFIG ────────────────
 
 export async function getConfig() {
+  if (isCloudflareEnabled()) {
+    try {
+      const cfg = await CloudflareAPI.getConfig();
+      if (cfg && Object.keys(cfg).length > 0) return cfg;
+    } catch (e) {
+      console.warn('Cloudflare getConfig fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const rows = await db.getAllAsync('SELECT key, value FROM config');
   const config = {};
@@ -386,6 +451,13 @@ export async function getConfig() {
 }
 
 export async function setConfig(key, value) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.setConfig(key, value);
+    } catch (e) {
+      console.warn('Cloudflare setConfig fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await db.runAsync(
     `INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)`,
@@ -396,16 +468,37 @@ export async function setConfig(key, value) {
 // ──────────────── SAISONS ────────────────
 
 export async function getSaisons() {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getSaisons();
+    } catch (e) {
+      console.warn('Cloudflare getSaisons fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   return await db.getAllAsync('SELECT * FROM saisons ORDER BY annee DESC');
 }
 
 export async function getSaisonActive() {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getSaisonActive();
+    } catch (e) {
+      console.warn('Cloudflare getSaisonActive fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   return await db.getFirstAsync('SELECT * FROM saisons WHERE actif = 1 LIMIT 1');
 }
 
 export async function createSaison(saison) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.createSaison(saison);
+    } catch (e) {
+      console.warn('Cloudflare createSaison fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await db.runAsync(
     `INSERT INTO saisons (id, label, annee, dateDebut, dateFin, actif, createdAt) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
@@ -414,6 +507,13 @@ export async function createSaison(saison) {
 }
 
 export async function activateSaison(saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.activateSaison(saisonId);
+    } catch (e) {
+      console.warn('Cloudflare activateSaison fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await db.runAsync('UPDATE saisons SET actif = 0');
   await db.runAsync('UPDATE saisons SET actif = 1 WHERE id = ?', [saisonId]);
@@ -422,6 +522,13 @@ export async function activateSaison(saisonId) {
 // ──────────────── ADHÉRENTS ────────────────
 
 export async function getAdherents(saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getAdherents(saisonId);
+    } catch (e) {
+      console.warn('Cloudflare getAdherents fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   let targetSaisonId = saisonId;
   if (!targetSaisonId) {
@@ -443,6 +550,13 @@ export async function getAdherents(saisonId) {
 }
 
 export async function getAdherentById(id, saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getAdherentById(id);
+    } catch (e) {
+      console.warn('Cloudflare getAdherentById fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   let targetSaisonId = saisonId;
   if (!targetSaisonId) {
@@ -470,6 +584,13 @@ export async function getAdherentByCode(code) {
 }
 
 export async function createAdherent(adherent) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.createAdherent(adherent);
+    } catch (e) {
+      console.warn('Cloudflare createAdherent fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const now = new Date().toISOString();
   // La date d'inscription est automatiquement la date du jour si non fournie
@@ -490,6 +611,13 @@ export async function createAdherent(adherent) {
 }
 
 export async function updateAdherent(adherent) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.updateAdherent(adherent);
+    } catch (e) {
+      console.warn('Cloudflare updateAdherent fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const now = new Date().toISOString();
   const assureVal = adherent.assure ? 1 : 0;
@@ -507,6 +635,13 @@ export async function updateAdherent(adherent) {
 }
 
 export async function setAdherentAssure(id, assure, saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.setAdherentAssure(id, assure, saisonId);
+    } catch (e) {
+      console.warn('Cloudflare setAdherentAssure fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const now = new Date().toISOString();
   let targetSaisonId = saisonId;
@@ -540,6 +675,13 @@ export async function setAdherentAssure(id, assure, saisonId) {
 }
 
 export async function deleteAdherent(id) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.deleteAdherent(id);
+    } catch (e) {
+      console.warn('Cloudflare deleteAdherent fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await db.runAsync('DELETE FROM paiements WHERE adherentId = ?', [id]);
   await db.runAsync('DELETE FROM adherent_saisons WHERE adherentId = ?', [id]);
@@ -550,6 +692,13 @@ export async function deleteAdherent(id) {
 // ──────────────── ADHÉRENT-SAISONS ────────────────
 
 export async function enrollAdherentInSaison(adherentId, saisonId, dateInscription, assure = 0) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.enrollAdherent(adherentId, saisonId, dateInscription, assure);
+    } catch (e) {
+      console.warn('Cloudflare enrollAdherent fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const id = `as-${adherentId}-${saisonId}`;
   await db.runAsync(
@@ -670,6 +819,13 @@ export async function ensureAdherentPaymentSchedule(adherentId, saisonId) {
 }
 
 export async function getPaiementsByAdherent(adherentId, saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getPaiements(adherentId, saisonId);
+    } catch (e) {
+      console.warn('Cloudflare getPaiements fallback:', e.message);
+    }
+  }
   if (!adherentId || !saisonId) return [];
   await ensureAdherentPaymentSchedule(adherentId, saisonId);
   const db = await getDatabase();
@@ -680,6 +836,13 @@ export async function getPaiementsByAdherent(adherentId, saisonId) {
 }
 
 export async function getAllPaiementsBySaison(saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getPaiements(null, saisonId);
+    } catch (e) {
+      console.warn('Cloudflare getAllPaiementsBySaison fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   return await db.getAllAsync(
     `SELECT p.*, a.nom, a.prenom, a.code, a.discipline, a.dateNaissance FROM paiements p
@@ -690,6 +853,13 @@ export async function getAllPaiementsBySaison(saisonId) {
 }
 
 export async function createPaiement(paiement) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.createPaiement(paiement);
+    } catch (e) {
+      console.warn('Cloudflare createPaiement fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const now = new Date().toISOString();
   await db.runAsync(
@@ -706,6 +876,13 @@ export async function createPaiement(paiement) {
 }
 
 export async function updatePaiement(paiement) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.updatePaiement(paiement);
+    } catch (e) {
+      console.warn('Cloudflare updatePaiement fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const now = new Date().toISOString();
   await db.runAsync(
@@ -719,6 +896,13 @@ export async function updatePaiement(paiement) {
 }
 
 export async function getStatsBySaison(saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getStats(saisonId);
+    } catch (e) {
+      console.warn('Cloudflare getStats fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const nbAdherents = await db.getFirstAsync(
     'SELECT COUNT(*) as count FROM adherent_saisons WHERE saisonId = ? AND actif = 1',
@@ -743,11 +927,25 @@ export async function getStatsBySaison(saisonId) {
 // ──────────────── REMISES ────────────────
 
 export async function getRemises() {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getRemises();
+    } catch (e) {
+      console.warn('Cloudflare getRemises fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   return await db.getAllAsync('SELECT * FROM remises WHERE actif = 1 ORDER BY label');
 }
 
 export async function createRemise(remise) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.createRemise(remise);
+    } catch (e) {
+      console.warn('Cloudflare createRemise fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await db.runAsync(
     `INSERT INTO remises (id, label, pourcentage, actif, createdAt) VALUES (?, ?, ?, 1, datetime('now'))`,
@@ -764,6 +962,13 @@ export async function updateRemise(remise) {
 }
 
 export async function deleteRemise(id) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.deleteRemise(id);
+    } catch (e) {
+      console.warn('Cloudflare deleteRemise fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await db.runAsync('UPDATE remises SET actif = 0 WHERE id = ?', [id]);
 }
@@ -771,21 +976,91 @@ export async function deleteRemise(id) {
 // ──────────────── USERS ────────────────
 
 export async function getUserByCredentials(username, password) {
+  if (isCloudflareEnabled()) {
+    try {
+      const res = await CloudflareAPI.login(username, password);
+      if (res?.user) return res.user;
+    } catch (e) {
+      console.warn('Cloudflare login fallback to local DB:', e.message);
+    }
+  }
   const db = await getDatabase();
-  return await db.getFirstAsync(
-    'SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND password = ?',
-    [username, password],
+  const cleanUser = String(username || '').trim();
+  const cleanPass = String(password || '').trim();
+  const encUser = encryptUsername(cleanUser);
+
+  // 1. Recherche par nom d'utilisateur chiffré ou en clair
+  let user = await db.getFirstAsync(
+    'SELECT * FROM users WHERE username = ? OR LOWER(username) = LOWER(?)',
+    [encUser, cleanUser],
   );
+
+  if (!user) {
+    const allUsers = await db.getAllAsync('SELECT * FROM users');
+    user = allUsers.find(u => matchesUsername(cleanUser, u.username));
+  }
+
+  // 2. Recherche alternative pour les adhérents (par code d'adhérent ou nom)
+  if (!user) {
+    const adherent = await db.getFirstAsync(
+      'SELECT id, code, nom FROM adherents WHERE LOWER(code) = LOWER(?) OR LOWER(nom) = LOWER(?)',
+      [cleanUser, cleanUser],
+    );
+    if (adherent) {
+      user = await db.getFirstAsync(
+        'SELECT * FROM users WHERE adherentId = ?',
+        [adherent.id],
+      );
+    }
+  }
+
+  if (user && verifyPassword(cleanPass, user.password)) {
+    // Migration silencieuse si nécessaire
+    const nextUser = user.username?.startsWith('cmb_enc_u1:') ? user.username : encryptUsername(cleanUser);
+    const nextPass = user.password?.startsWith('cmb_slt_v1:') ? user.password : hashPassword(cleanPass);
+    if (nextUser !== user.username || nextPass !== user.password) {
+      await db.runAsync('UPDATE users SET username = ?, password = ? WHERE id = ?', [
+        nextUser,
+        nextPass,
+        user.id,
+      ]);
+    }
+    const { password: _, ...safeUser } = user;
+    return {
+      ...safeUser,
+      username: decryptUsername(safeUser.username),
+    };
+  }
+
+  return null;
 }
 
 export async function getUserByAdherentId(adherentId) {
   const db = await getDatabase();
-  return await db.getFirstAsync('SELECT * FROM users WHERE adherentId = ?', [adherentId]);
+  const user = await db.getFirstAsync('SELECT * FROM users WHERE adherentId = ?', [adherentId]);
+  if (!user) return null;
+  return {
+    ...user,
+    username: decryptUsername(user.username),
+  };
 }
 
 export async function getAdminUser() {
+  if (isCloudflareEnabled()) {
+    try {
+      const admin = await CloudflareAPI.getAdminUser();
+      if (admin) return { ...admin, username: decryptUsername(admin.username) };
+    } catch (e) {
+      console.warn('Cloudflare getAdminUser fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
-  return await db.getFirstAsync("SELECT * FROM users WHERE role = 'admin' LIMIT 1");
+  const admin = await db.getFirstAsync("SELECT id, username, role, createdAt FROM users WHERE role = 'admin' LIMIT 1");
+  if (!admin) return null;
+  return {
+    ...admin,
+    username: decryptUsername(admin.username),
+  };
 }
 
 export async function getAdminCount() {
@@ -806,13 +1081,28 @@ export async function createUser(user) {
     }
   }
 
+  const encryptedUsername = user.username?.startsWith('cmb_enc_u1:')
+    ? user.username
+    : encryptUsername(user.username || '');
+
+  const hashedPassword = user.password?.startsWith('cmb_slt_v1:')
+    ? user.password
+    : hashPassword(user.password || '');
+
   await db.runAsync(
     `INSERT INTO users (id, username, password, role, adherentId, createdAt) VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-    [user.id, user.username, user.password, requestedRole, user.adherentId || null],
+    [user.id, encryptedUsername, hashedPassword, requestedRole, user.adherentId || null],
   );
 }
 
 export async function updateAdminCredentials(newUsername, newPassword) {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.updateAdminCredentials(newUsername, newPassword);
+    } catch (e) {
+      console.warn('Cloudflare updateAdminCredentials fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const admin = await getAdminUser();
   if (!admin) {
@@ -824,63 +1114,89 @@ export async function updateAdminCredentials(newUsername, newPassword) {
     throw new Error("L'identifiant et le mot de passe sont obligatoires.");
   }
 
-  const existingUser = await db.getFirstAsync(
-    "SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?",
-    [cleanUsername, admin.id],
-  );
-  if (existingUser) {
+  const allUsers = await db.getAllAsync("SELECT id, username FROM users WHERE id != ?", [admin.id]);
+  const duplicate = allUsers.some(u => matchesUsername(cleanUsername, u.username));
+  if (duplicate) {
     throw new Error("Cet identifiant est déjà utilisé par un autre utilisateur.");
   }
 
+  const encryptedUsername = encryptUsername(cleanUsername);
+  const hashedPassword = hashPassword(cleanPassword);
   await db.runAsync(
     "UPDATE users SET username = ?, password = ? WHERE id = ?",
-    [cleanUsername, cleanPassword, admin.id],
+    [encryptedUsername, hashedPassword, admin.id],
   );
   return await getAdminUser();
 }
 
 export async function updateUserPassword(userId, password) {
   const db = await getDatabase();
-  await db.runAsync('UPDATE users SET password = ? WHERE id = ?', [password, userId]);
+  const hashedPassword = hashPassword(password);
+  await db.runAsync('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
 }
 
 /**
- * Crée un compte adhérent (username = code, mot de passe = date AAMMJJ)
+ * Crée un compte adhérent (username = code, mot de passe = date AAMMJJ) avec identifiant chiffré & mot de passe haché
  */
 export async function ensureAdherentAccount(adherent) {
   const existing = await getUserByAdherentId(adherent.id);
-  if (existing) return { user: existing, created: false, password: null };
+  if (existing) {
+    return {
+      user: { ...existing, username: decryptUsername(existing.username) },
+      created: false,
+      password: null,
+    };
+  }
 
-  const password = (adherent.dateNaissance || '').replace(/-/g, '').slice(2) || '000000';
+  const plainPassword = (adherent.dateNaissance || '').replace(/-/g, '').slice(2) || '000000';
   const user = {
     id: `user-${adherent.id}`,
-    username: adherent.code,
-    password,
+    username: encryptUsername(adherent.code),
+    password: hashPassword(plainPassword),
     role: 'adherent',
     adherentId: adherent.id,
   };
   await createUser(user);
-  return { user, created: true, password };
+  return {
+    user: { ...user, username: adherent.code },
+    created: true,
+    password: plainPassword,
+  };
 }
 
 /**
- * Recalcule et met à jour les statuts (retards) des paiements d'une saison
+ * Recalcule et met à jour les statuts (retards) des paiements d'une saison de façon optimisée
  */
 export async function refreshPaymentStatuses(saisonId) {
   const db = await getDatabase();
   const paiements = saisonId
-    ? await db.getAllAsync('SELECT * FROM paiements WHERE saisonId = ?', [saisonId])
-    : await db.getAllAsync('SELECT * FROM paiements');
+    ? await db.getAllAsync(
+        'SELECT id, montantDu, remiseMontant, montantPaye, datePaiement, statut, mois, annee, type FROM paiements WHERE saisonId = ? AND statut != ?',
+        [saisonId, PAYMENT_STATUS.PAYE],
+      )
+    : await db.getAllAsync(
+        'SELECT id, montantDu, remiseMontant, montantPaye, datePaiement, statut, mois, annee, type FROM paiements WHERE statut != ?',
+        [PAYMENT_STATUS.PAYE],
+      );
 
+  const updates = [];
+  const now = new Date().toISOString();
   for (const p of paiements) {
-    if (p.statut === PAYMENT_STATUS.PAYE) continue;
     const next = computePaymentStatus(p);
     if (next !== p.statut) {
-      await db.runAsync(
-        'UPDATE paiements SET statut = ?, updatedAt = ? WHERE id = ?',
-        [next, new Date().toISOString(), p.id],
-      );
+      updates.push({ id: p.id, next });
     }
+  }
+
+  if (updates.length > 0) {
+    await db.withTransactionAsync(async () => {
+      for (const u of updates) {
+        await db.runAsync(
+          'UPDATE paiements SET statut = ?, updatedAt = ? WHERE id = ?',
+          [u.next, now, u.id],
+        );
+      }
+    });
   }
 }
 
@@ -896,7 +1212,7 @@ export async function getPaymentStatusByAdherent(saisonId) {
   const currentMonth = now.getMonth() + 1;
 
   const rows = await db.getAllAsync(
-    'SELECT * FROM paiements WHERE saisonId = ?',
+    'SELECT id, adherentId, type, mois, annee, montantDu, remiseMontant, montantPaye, statut FROM paiements WHERE saisonId = ?',
     [saisonId],
   );
 
@@ -914,14 +1230,14 @@ export async function getPaymentStatusByAdherent(saisonId) {
     );
 
     if (currentMonthPayment) {
-      result[id] = computePaymentStatus(currentMonthPayment);
+      result[id] = currentMonthPayment.statut || computePaymentStatus(currentMonthPayment);
     } else {
-      // Si aucune mensualité pour le mois courant (ex: inscription en milieu d'année sans ce mois), fallback sur les frais d'inscription ou statut global
+      // Si aucune mensualité pour le mois courant, fallback sur les frais d'inscription ou statut global
       const inscription = paiementsList.find(p => p.type === PAYMENT_TYPES.INSCRIPTION);
       if (inscription) {
-        result[id] = computePaymentStatus(inscription);
+        result[id] = inscription.statut || computePaymentStatus(inscription);
       } else if (paiementsList.length > 0) {
-        result[id] = computePaymentStatus(paiementsList[0]);
+        result[id] = paiementsList[0].statut || computePaymentStatus(paiementsList[0]);
       } else {
         result[id] = PAYMENT_STATUS.A_PAYER;
       }
@@ -973,11 +1289,25 @@ export async function generateUniqueAdherentCode(data) {
 // ──────────────── DISCIPLINES ────────────────
 
 export async function getDisciplines() {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getDisciplines();
+    } catch (e) {
+      console.warn('Cloudflare getDisciplines fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   return await db.getAllAsync('SELECT * FROM disciplines ORDER BY nom ASC');
 }
 
 export async function createDiscipline(discipline) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.createDiscipline(discipline);
+    } catch (e) {
+      console.warn('Cloudflare createDiscipline fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const createdAt = discipline.createdAt || new Date().toISOString();
   try {
@@ -1016,6 +1346,13 @@ export async function updateDiscipline(discipline, oldNom) {
 }
 
 export async function deleteDiscipline(id) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.deleteDiscipline(id);
+    } catch (e) {
+      console.warn('Cloudflare deleteDiscipline fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const disc = await db.getFirstAsync('SELECT nom FROM disciplines WHERE id = ?', [id]);
   if (disc) {
@@ -1033,6 +1370,13 @@ export async function deleteDiscipline(id) {
 // ──────────────── CRÉNEAUX ────────────────
 
 export async function getCreneaux() {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getCreneaux();
+    } catch (e) {
+      console.warn('Cloudflare getCreneaux fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   return await db.getAllAsync('SELECT * FROM creneaux ORDER BY CASE jour WHEN "Lundi" THEN 1 WHEN "Mardi" THEN 2 WHEN "Mercredi" THEN 3 WHEN "Jeudi" THEN 4 WHEN "Vendredi" THEN 5 WHEN "Samedi" THEN 6 WHEN "Dimanche" THEN 7 END, heureDebut ASC');
 }
@@ -1068,6 +1412,13 @@ async function checkCreneauOverlap(db, creneau) {
 }
 
 export async function createCreneau(creneau) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.createCreneau(creneau);
+    } catch (e) {
+      console.warn('Cloudflare createCreneau fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await checkCreneauOverlap(db, creneau);
 
@@ -1090,6 +1441,13 @@ export async function createCreneau(creneau) {
 }
 
 export async function updateCreneau(creneau) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.updateCreneau(creneau);
+    } catch (e) {
+      console.warn('Cloudflare updateCreneau fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await checkCreneauOverlap(db, creneau);
 
@@ -1109,6 +1467,13 @@ export async function updateCreneau(creneau) {
 }
 
 export async function deleteCreneau(id) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.deleteCreneau(id);
+    } catch (e) {
+      console.warn('Cloudflare deleteCreneau fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   await db.runAsync(`DELETE FROM presences WHERE creneauId = ?`, [id]);
   await db.runAsync(`DELETE FROM creneaux WHERE id = ?`, [id]);
@@ -1117,6 +1482,13 @@ export async function deleteCreneau(id) {
 // ──────────────── PRÉSENCES & ABSENCES ────────────────
 
 export async function getPresencesBySeance(creneauId, dateSeance) {
+  if (isCloudflareEnabled()) {
+    try {
+      return await CloudflareAPI.getPresencesBySeance(creneauId, dateSeance);
+    } catch (e) {
+      console.warn('Cloudflare getPresencesBySeance fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   return await db.getAllAsync(
     `SELECT p.*, a.nom, a.prenom, a.code, a.dateNaissance, a.photo
@@ -1172,6 +1544,13 @@ export async function getEligibleAdherentsForCreneau(creneauId, saisonId) {
 }
 
 export async function savePresencesSeance(creneauId, dateSeance, saisonId, presencesList) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.savePresencesSeance(creneauId, dateSeance, saisonId, presencesList);
+    } catch (e) {
+      console.warn('Cloudflare savePresencesSeance fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const d = new Date();
   const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1211,6 +1590,22 @@ export async function savePresencesSeance(creneauId, dateSeance, saisonId, prese
 }
 
 export async function getPresencesByAdherent(adherentId, saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      const res = await CloudflareAPI.getPresencesByAdherent(adherentId, saisonId);
+      if (res && res.length !== undefined) {
+        const total = res.length;
+        const nbPresents = res.filter(p => p.statut === 'present').length;
+        const nbAbsents = res.filter(p => p.statut === 'absent').length;
+        const nbRetards = res.filter(p => p.statut === 'retard').length;
+        const nbExcuses = res.filter(p => p.statut === 'excuse').length;
+        const tauxPresence = total > 0 ? Math.round(((nbPresents + nbRetards) / total) * 100) : 100;
+        return { list: res, total, nbPresents, nbAbsents, nbRetards, nbExcuses, tauxPresence };
+      }
+    } catch (e) {
+      console.warn('Cloudflare getPresencesByAdherent fallback:', e.message);
+    }
+  }
   const db = await getDatabase();
   const query = saisonId
     ? `SELECT p.*, c.discipline, c.categorie, c.jour, c.heureDebut, c.heureFin, c.lieu

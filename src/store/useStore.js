@@ -22,10 +22,13 @@ import {
   updateAdminCredentials,
 } from '../database/database';
 
+import { setApiUrl, isCloudflareEnabled } from '../services/api';
+
 const useStore = create((set, get) => ({
   // ── Auth & Admin ──
   user: null,
   adminUser: null,
+  isCloudflare: false,
   setUser: (user) => set({ user }),
   logout: () => set({ user: null }),
   loadAdminUser: async () => {
@@ -43,18 +46,37 @@ const useStore = create((set, get) => ({
   },
 
   // ── Config ──
-  config: { fraisInscription: 2000, fraisMensuel: 1500 },
+  config: { fraisInscription: 2000, fraisMensuel: 1500, cloudflareApiUrl: 'https://cmbclub-api.ahmedlounnaci.workers.dev' },
   themeId: THEME_IDS.DARK,
   loadConfig: async () => {
     const config = await getConfig();
+    if (config.cloudflareApiUrl) {
+      setApiUrl(config.cloudflareApiUrl);
+    }
     const themeId = config.theme && Object.values(THEME_IDS).includes(config.theme)
       ? config.theme
       : THEME_IDS.DARK;
-    set({ config, themeId });
+    set({ config, themeId, isCloudflare: isCloudflareEnabled() });
   },
   updateConfig: async (key, value) => {
     await setConfig(key, value);
-    set(state => ({ config: { ...state.config, [key]: parseFloat(value) || value } }));
+    if (key === 'cloudflareApiUrl') {
+      setApiUrl(value);
+      set(state => ({
+        config: { ...state.config, [key]: value },
+        isCloudflare: isCloudflareEnabled(),
+      }));
+    } else {
+      set(state => ({ config: { ...state.config, [key]: parseFloat(value) || value } }));
+    }
+  },
+  setCloudflareUrl: async (url) => {
+    setApiUrl(url);
+    await setConfig('cloudflareApiUrl', url || '');
+    set(state => ({
+      config: { ...state.config, cloudflareApiUrl: url || '' },
+      isCloudflare: isCloudflareEnabled(),
+    }));
   },
   setTheme: async (themeId) => {
     await setConfig('theme', themeId);

@@ -1,0 +1,168 @@
+-- ==========================================================
+-- Schéma Cloudflare D1 pour CMBClub
+-- ==========================================================
+
+-- 1. Configuration globale
+CREATE TABLE IF NOT EXISTS config (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- 2. Saisons
+CREATE TABLE IF NOT EXISTS saisons (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  annee INTEGER NOT NULL,
+  dateDebut TEXT NOT NULL,
+  dateFin TEXT NOT NULL,
+  actif INTEGER DEFAULT 0,
+  createdAt TEXT NOT NULL
+);
+
+-- 3. Adhérents
+CREATE TABLE IF NOT EXISTS adherents (
+  id TEXT PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  nom TEXT NOT NULL,
+  prenom TEXT NOT NULL,
+  dateNaissance TEXT NOT NULL,
+  lieuNaissance TEXT NOT NULL,
+  telephone TEXT,
+  taille TEXT,
+  groupeSanguin TEXT,
+  observationsMedicales TEXT,
+  photo TEXT,
+  discipline TEXT,
+  genre TEXT DEFAULT 'M',
+  dateInscription TEXT,
+  assure INTEGER DEFAULT 0,
+  categorieOverride TEXT DEFAULT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+
+-- 4. Adhérents par saison
+CREATE TABLE IF NOT EXISTS adherent_saisons (
+  id TEXT PRIMARY KEY,
+  adherentId TEXT NOT NULL,
+  saisonId TEXT NOT NULL,
+  dateInscription TEXT NOT NULL,
+  assure INTEGER DEFAULT 0,
+  actif INTEGER DEFAULT 1,
+  FOREIGN KEY (adherentId) REFERENCES adherents(id) ON DELETE CASCADE,
+  FOREIGN KEY (saisonId) REFERENCES saisons(id) ON DELETE CASCADE
+);
+
+-- 5. Paiements & Cotisations
+CREATE TABLE IF NOT EXISTS paiements (
+  id TEXT PRIMARY KEY,
+  adherentId TEXT NOT NULL,
+  saisonId TEXT NOT NULL,
+  type TEXT NOT NULL,
+  label TEXT NOT NULL,
+  mois INTEGER,
+  annee INTEGER,
+  montantDu REAL NOT NULL,
+  remisePct REAL DEFAULT 0,
+  remiseMontant REAL DEFAULT 0,
+  montantPaye REAL DEFAULT 0,
+  datePaiement TEXT,
+  statut TEXT NOT NULL DEFAULT 'a_payer',
+  notes TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY (adherentId) REFERENCES adherents(id) ON DELETE CASCADE,
+  FOREIGN KEY (saisonId) REFERENCES saisons(id) ON DELETE CASCADE
+);
+
+-- 6. Remises
+CREATE TABLE IF NOT EXISTS remises (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  pourcentage REAL NOT NULL,
+  actif INTEGER DEFAULT 1,
+  createdAt TEXT NOT NULL
+);
+
+-- 7. Utilisateurs (Authentification Admin & Adhérents)
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'adherent',
+  adherentId TEXT,
+  createdAt TEXT NOT NULL
+);
+
+-- 8. Disciplines
+CREATE TABLE IF NOT EXISTS disciplines (
+  id TEXT PRIMARY KEY,
+  nom TEXT UNIQUE NOT NULL,
+  createdAt TEXT NOT NULL
+);
+
+-- 9. Créneaux d'entraînement
+CREATE TABLE IF NOT EXISTS creneaux (
+  id TEXT PRIMARY KEY,
+  discipline TEXT NOT NULL,
+  categorie TEXT NOT NULL,
+  jour TEXT NOT NULL,
+  heureDebut TEXT NOT NULL,
+  heureFin TEXT NOT NULL,
+  lieu TEXT,
+  remarque TEXT,
+  createdAt TEXT NOT NULL
+);
+
+-- 10. Présences
+CREATE TABLE IF NOT EXISTS presences (
+  id TEXT PRIMARY KEY,
+  creneauId TEXT NOT NULL,
+  adherentId TEXT NOT NULL,
+  saisonId TEXT NOT NULL,
+  dateSeance TEXT NOT NULL,
+  statut TEXT NOT NULL DEFAULT 'present',
+  remarque TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY (creneauId) REFERENCES creneaux(id) ON DELETE CASCADE,
+  FOREIGN KEY (adherentId) REFERENCES adherents(id) ON DELETE CASCADE,
+  FOREIGN KEY (saisonId) REFERENCES saisons(id) ON DELETE CASCADE
+);
+
+-- ==========================================================
+-- Données initiales (Seeds)
+-- ==========================================================
+
+-- Configuration par défaut
+INSERT OR IGNORE INTO config (key, value) VALUES ('fraisInscription', '2000');
+INSERT OR IGNORE INTO config (key, value) VALUES ('fraisMensuel', '1500');
+
+-- Administrateur par défaut
+INSERT OR IGNORE INTO users (id, username, password, role, createdAt) 
+VALUES ('admin-001', 'admin', 'admin123', 'admin', datetime('now'));
+
+-- Remises par défaut
+INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) 
+VALUES ('remise-famille', 'Remise Famille', 10, 1, datetime('now'));
+
+INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) 
+VALUES ('remise-fidelite', 'Remise Fidélité', 5, 1, datetime('now'));
+
+-- Disciplines par défaut
+INSERT OR IGNORE INTO disciplines (id, nom, createdAt) 
+VALUES ('disc-kickboxing', 'KickBoxing', datetime('now'));
+
+INSERT OR IGNORE INTO disciplines (id, nom, createdAt) 
+VALUES ('disc-natation', 'Natation', datetime('now'));
+
+-- Créneaux par défaut
+INSERT OR IGNORE INTO creneaux (id, discipline, categorie, jour, heureDebut, heureFin, lieu, remarque, createdAt)
+VALUES 
+  ('creneau-kb-cadet-1a', 'KickBoxing', 'Cadet', 'Lundi', '09:30', '11:00', 'Grande Salle A', 'Séance matin - Physique & Technique', datetime('now')),
+  ('creneau-kb-cadet-1b', 'KickBoxing', 'Cadet', 'Lundi', '17:30', '19:00', 'Grande Salle A', 'Séance soir - Sparring & Tactique', datetime('now')),
+  ('creneau-kb-cadet-2', 'KickBoxing', 'Cadet', 'Mercredi', '17:30', '19:00', 'Grande Salle A', 'Prévoir protège-tibias', datetime('now')),
+  ('creneau-kb-senior-1', 'KickBoxing', 'Sénior', 'Mardi', '19:00', '20:30', 'Grande Salle A', 'Sparring guidé', datetime('now')),
+  ('creneau-kb-senior-2', 'KickBoxing', 'Sénior', 'Jeudi', '19:00', '20:30', 'Grande Salle A', 'Préparation physique', datetime('now')),
+  ('creneau-nat-poussin-1', 'Natation', 'Poussin', 'Samedi', '09:00', '10:15', 'Piscine B', 'Groupe 1 - Bonnet obligatoire', datetime('now')),
+  ('creneau-nat-poussin-2', 'Natation', 'Poussin', 'Samedi', '10:30', '11:45', 'Piscine B', 'Groupe 2 - Bonnet obligatoire', datetime('now'));

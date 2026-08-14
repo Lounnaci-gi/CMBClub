@@ -32,7 +32,7 @@ export default function PhotoPicker({ value, onChange }) {
       return ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [3, 4],
-        quality: 0.8,
+        quality: 0.6,
       });
     });
 
@@ -43,7 +43,7 @@ export default function PhotoPicker({ value, onChange }) {
         mediaTypes: ImagePicker.MediaType?.images || ['images'],
         allowsEditing: true,
         aspect: [3, 4],
-        quality: 0.8,
+        quality: 0.6,
       });
     });
 

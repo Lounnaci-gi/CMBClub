@@ -1,0 +1,10 @@
+name = "cmbclub-api"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+compatibility_flags = [ "nodejs_compat" ]
+
+# Configuration de la base de données Cloudflare D1
+[[d1_databases]]
+binding = "DB" # Ne pas changer, utilisé dans le code du Worker (c.env.DB)
+database_name = "cmbclub-db"
+database_id = "7366f95a-3e02-4a9e-919e-a5f34d514fc1" # À remplacer par l'ID obtenu lors de: npx wrangler d1 create cmbclub-db

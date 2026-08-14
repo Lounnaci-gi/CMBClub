@@ -233,73 +233,18 @@ export default function AdherentListScreen({ navigation }) {
   );
 
   // ── Card ──────────────────────────────────────────────────────────────────
-  const renderItem = ({ item }) => {
-    const cat       = getEffectiveCategory(item);
+  const renderItem = useCallback(({ item }) => {
     const payStatus = payStatusMap[item.id];
-    const isFemme   = item.genre === 'F';
     return (
-      <TouchableOpacity
-        style={styles.card}
+      <AdherentCardItem
+        item={item}
+        payStatus={payStatus}
+        COLORS={COLORS}
+        styles={styles}
         onPress={() => navigation.navigate('AdherentDetail', { adherentId: item.id })}
-        activeOpacity={0.8}
-      >
-        <View style={styles.avatar}>
-          {item.photo ? (
-            <Image source={{ uri: item.photo }} style={styles.photo} />
-          ) : (
-            <View style={[styles.photoPlaceholder, { backgroundColor: cat.color + '22' }]}>
-              <Text style={{ fontSize: 22 }}>{cat.icon}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.info}>
-          <View style={styles.nameRow}>
-            <Text style={styles.name} numberOfLines={1}>{item.prenom} {item.nom}</Text>
-            <Text style={styles.code} numberOfLines={1}>{item.code}</Text>
-          </View>
-
-          <View style={styles.badges}>
-            <CategoryBadge category={cat.label} size="sm" />
-
-            <View style={[styles.genreBadge, { backgroundColor: isFemme ? '#FF6B9D22' : COLORS.primary + '22' }]}>
-              <Text style={[styles.genreBadgeText, { color: isFemme ? '#FF6B9D' : COLORS.primary }]}>
-                {isFemme ? '♀ Féminin' : '♂ Masculin'}
-              </Text>
-            </View>
-
-            {payStatus ? (
-              <View style={[styles.payBadge, { backgroundColor: getStatusColor(payStatus) + '22' }]}>
-                <Text style={[styles.payBadgeText, { color: getStatusColor(payStatus) }]}>
-                  {getStatusLabel(payStatus)}
-                </Text>
-              </View>
-            ) : null}
-
-            <View style={[styles.payBadge, { backgroundColor: (item.assure ? COLORS.success : COLORS.danger) + '22' }]}>
-              <Text style={[styles.payBadgeText, { color: item.assure ? COLORS.success : COLORS.danger }]}>
-                {item.assure ? '🛡️ Assuré' : 'Non assuré'}
-              </Text>
-            </View>
-
-            {item.isEnrolled === 0 ? (
-              <View style={[styles.payBadge, { backgroundColor: COLORS.warning + '22' }]}>
-                <Text style={[styles.payBadgeText, { color: COLORS.warning }]}>
-                  ⚠️ Non réinscrit
-                </Text>
-              </View>
-            ) : null}
-          </View>
-
-          {item.discipline ? (
-            <Text style={styles.discipline}>🥊 {item.discipline}</Text>
-          ) : null}
-        </View>
-
-        <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textMuted} />
-      </TouchableOpacity>
+      />
     );
-  };
+  }, [payStatusMap, COLORS, styles, navigation]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -446,9 +391,9 @@ export default function AdherentListScreen({ navigation }) {
         renderItem={renderItem}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={15}
-        maxToRenderPerBatch={15}
-        windowSize={10}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
         removeClippedSubviews={true}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         ListEmptyComponent={
@@ -475,6 +420,75 @@ export default function AdherentListScreen({ navigation }) {
     </View>
   );
 }
+
+// ── Composant Carte Adhérent mémoïsé pour des performances maximales ───────────
+const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus, COLORS, styles, onPress }) {
+  const cat = getEffectiveCategory(item);
+  const isFemme = item.genre === 'F';
+
+  return (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <View style={styles.avatar}>
+        {item.photo ? (
+          <Image source={{ uri: item.photo }} style={styles.photo} />
+        ) : (
+          <View style={[styles.photoPlaceholder, { backgroundColor: cat.color + '22' }]}>
+            <Text style={{ fontSize: 22 }}>{cat.icon}</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.info}>
+        <View style={styles.nameRow}>
+          <Text style={styles.name} numberOfLines={1}>{item.prenom} {item.nom}</Text>
+          <Text style={styles.code} numberOfLines={1}>{item.code}</Text>
+        </View>
+
+        <View style={styles.badges}>
+          <CategoryBadge category={cat.label} size="sm" />
+
+          <View style={[styles.genreBadge, { backgroundColor: isFemme ? '#FF6B9D22' : COLORS.primary + '22' }]}>
+            <Text style={[styles.genreBadgeText, { color: isFemme ? '#FF6B9D' : COLORS.primary }]}>
+              {isFemme ? '♀ Féminin' : '♂ Masculin'}
+            </Text>
+          </View>
+
+          {payStatus ? (
+            <View style={[styles.payBadge, { backgroundColor: getStatusColor(payStatus) + '22' }]}>
+              <Text style={[styles.payBadgeText, { color: getStatusColor(payStatus) }]}>
+                {getStatusLabel(payStatus)}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={[styles.payBadge, { backgroundColor: (item.assure ? COLORS.success : COLORS.danger) + '22' }]}>
+            <Text style={[styles.payBadgeText, { color: item.assure ? COLORS.success : COLORS.danger }]}>
+              {item.assure ? '🛡️ Assuré' : 'Non assuré'}
+            </Text>
+          </View>
+
+          {item.isEnrolled === 0 ? (
+            <View style={[styles.payBadge, { backgroundColor: COLORS.warning + '22' }]}>
+              <Text style={[styles.payBadgeText, { color: COLORS.warning }]}>
+                ⚠️ Non réinscrit
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        {item.discipline ? (
+          <Text style={styles.discipline}>🥊 {item.discipline}</Text>
+        ) : null}
+      </View>
+
+      <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textMuted} />
+    </TouchableOpacity>
+  );
+});
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({

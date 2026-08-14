@@ -403,18 +403,24 @@ export default function PaymentListScreen({ navigation }) {
     </View>
   );
 
+  const renderPaymentItem = useCallback(({ item }) => (
+    <PaymentCard
+      paiement={item}
+      showAdherent
+      onPress={() => navigation.navigate('PaymentDetail', { adherentId: item.adherentId })}
+    />
+  ), [navigation]);
+
   return (
     <View style={styles.container}>
       <FlatList
         data={filtered}
         keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <PaymentCard
-            paiement={item}
-            showAdherent
-            onPress={() => navigation.navigate('PaymentDetail', { adherentId: item.adherentId })}
-          />
-        )}
+        renderItem={renderPaymentItem}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={true}
         ListHeaderComponent={renderHeader}
         ListFooterComponent={
           filtered.length > 0 ? (

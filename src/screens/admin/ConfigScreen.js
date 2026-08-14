@@ -10,10 +10,12 @@ import { v4 as uuidv4 } from 'uuid';
 import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
 import { THEME_OPTIONS } from '../../theme/themes';
+import { CloudflareAPI } from '../../services/api';
+import { resetDatabase } from '../../database/database';
 
 export default function ConfigScreen() {
   const {
-    config, updateConfig,
+    config, updateConfig, setCloudflareUrl, isCloudflare,
     remises, loadRemises, createRemise, updateRemise, deleteRemise,
     disciplines, loadDisciplines, createDiscipline, updateDiscipline, deleteDiscipline,
     loadAdminUser, updateAdminCredentials,
@@ -24,6 +26,12 @@ export default function ConfigScreen() {
 
   const [fraisInscription, setFraisInscription] = useState(String(config.fraisInscription || 2000));
   const [fraisMensuel, setFraisMensuel] = useState(String(config.fraisMensuel || 1500));
+  const [cloudflareUrl, setCloudflareUrlInput] = useState(config.cloudflareApiUrl || '');
+  const [cloudflareTesting, setCloudflareTesting] = useState(false);
+  const [cloudflareStatus, setCloudflareStatus] = useState(null); // { success: boolean, msg: string }
+  const [resetLoading, setResetLoading] = useState(false);
+  const [cloudflareSaved, setCloudflareSaved] = useState(false);
+
   const [showRemiseModal, setShowRemiseModal] = useState(false);
   const [editingRemise, setEditingRemise] = useState(null);
   const [remiseLabel, setRemiseLabel] = useState('');
@@ -45,7 +53,7 @@ export default function ConfigScreen() {
     loadAdminUser().then(admin => {
       if (admin) {
         setAdminUsername(admin.username || '');
-        setAdminPassword(admin.password || '');
+        setAdminPassword('');
       }
     });
   }, []));
@@ -137,14 +145,52 @@ export default function ConfigScreen() {
     ]);
   };
 
+  const handleTestCloudflare = async () => {
+    if (!cloudflareUrl.trim()) {
+      Alert.alert('Erreur', 'Veuillez saisir l\'URL de votre API Cloudflare Worker');
+      return;
+    }
+    setCloudflareTesting(true);
+    setCloudflareStatus(null);
+    try {
+      const data = await CloudflareAPI.checkHealth(cloudflareUrl.trim());
+      if (data?.status === 'healthy') {
+        setCloudflareStatus({ success: true, msg: 'Connexion à Cloudflare D1 réussie !' });
+      } else {
+        setCloudflareStatus({ success: false, msg: 'Réponse reçue mais statut anormal.' });
+      }
+    } catch (e) {
+      setCloudflareStatus({ success: false, msg: 'Échec de connexion : ' + e.message });
+    } finally {
+      setCloudflareTesting(false);
+    }
+  };
+
+  const handleSaveCloudflare = async () => {
+    try {
+      await setCloudflareUrl(cloudflareUrl.trim());
+      setCloudflareSaved(true);
+      setTimeout(() => setCloudflareSaved(false), 2500);
+      Alert.alert(
+        'Succès',
+        cloudflareUrl.trim()
+          ? 'URL Cloudflare enregistrée. L\'application synchronisera désormais les données avec Cloudflare D1.'
+          : 'Mode Cloud désactivé (utilisation de la base locale SQLite).'
+      );
+    } catch (e) {
+      Alert.alert('Erreur', e.message || 'Impossible d\'enregistrer la configuration');
+    }
+  };
+
   const handleSaveAdmin = async () => {
     if (!adminUsername.trim() || !adminPassword.trim()) {
-      Alert.alert('Erreur', 'L\'identifiant et le mot de passe ne peuvent pas être vides');
+      Alert.alert('Erreur', 'Veuillez saisir un nom d\'utilisateur et un nouveau mot de passe');
       return;
     }
     try {
       await updateAdminCredentials(adminUsername, adminPassword);
       setAdminSaved(true);
+      setAdminPassword('');
       setTimeout(() => setAdminSaved(false), 2000);
     } catch (e) {
       Alert.alert('Erreur', e.message || 'Impossible de mettre à jour le compte admin');
@@ -307,6 +353,107 @@ export default function ConfigScreen() {
         )}
       </View>
 
+      {/* Base de données Cloudflare D1 */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="cloud-sync" size={20} color="#F38020" />
+          <Text style={styles.sectionTitle}>Base de données Cloudflare (D1)</Text>
+        </View>
+        <Text style={styles.sectionHint}>
+          Synchronisez les données en direct entre administrateurs et adhérents via Cloudflare D1.
+        </Text>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>URL de l'API Cloudflare Worker</Text>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={[styles.input, { fontSize: 14, fontWeight: '500' }]}
+              value={cloudflareUrl}
+              onChangeText={setCloudflareUrlInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="https://cmbclub-api.votre-compte.workers.dev"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+        </View>
+
+        {cloudflareStatus ? (
+          <View style={[styles.statusBox, { backgroundColor: cloudflareStatus.success ? COLORS.success + '15' : COLORS.danger + '15', borderColor: cloudflareStatus.success ? COLORS.success + '30' : COLORS.danger + '30' }]}>
+            <MaterialCommunityIcons
+              name={cloudflareStatus.success ? 'check-circle' : 'alert-circle'}
+              size={18}
+              color={cloudflareStatus.success ? COLORS.success : COLORS.danger}
+            />
+            <Text style={[styles.statusText, { color: cloudflareStatus.success ? COLORS.success : COLORS.danger }]}>
+              {cloudflareStatus.msg}
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <TouchableOpacity
+            style={styles.testBtn}
+            onPress={handleTestCloudflare}
+            disabled={cloudflareTesting}
+          >
+            <MaterialCommunityIcons name="wifi-check" size={18} color={COLORS.primary} />
+            <Text style={styles.testBtnText}>{cloudflareTesting ? 'Test en cours...' : 'Tester connexion'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.saveBtn, { flex: 1 }, cloudflareSaved && { backgroundColor: COLORS.success }]}
+            onPress={handleSaveCloudflare}
+          >
+            <MaterialCommunityIcons name={cloudflareSaved ? 'check' : 'content-save'} size={18} color="#fff" />
+            <Text style={styles.saveBtnText}>{cloudflareSaved ? 'Enregistré !' : 'Enregistrer'}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* ── Danger Zone ─────────────────────────────────────────────────────── */}
+      <View style={[styles.section, { borderColor: COLORS.danger + '40', borderWidth: 1 }]}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="delete-sweep" size={20} color={COLORS.danger} />
+          <Text style={[styles.sectionTitle, { color: COLORS.danger }]}>Réinitialisation de la base de données</Text>
+        </View>
+        <Text style={styles.sectionHint}>
+          Supprime tous les adhérents, paiements et présences enregistrés.{`\n`}
+          Le compte administrateur et la configuration sont conservés.
+        </Text>
+        <TouchableOpacity
+          style={[styles.saveBtn, { backgroundColor: resetLoading ? COLORS.textMuted : COLORS.danger, marginTop: 12 }]}
+          onPress={() => {
+            Alert.alert(
+              '⚠️ Réinitialisation',
+              'Cette action supprimera TOUS les adhérents, paiements et présences de façon irréversible.\n\nÊtes-vous certain ?',
+              [
+                { text: 'Annuler', style: 'cancel' },
+                {
+                  text: 'Oui, tout effacer',
+                  style: 'destructive',
+                  onPress: async () => {
+                    setResetLoading(true);
+                    try {
+                      await resetDatabase();
+                      Alert.alert('✅ Terminé', 'La base de données a été réinitialisée. Seul le compte administrateur est conservé.');
+                    } catch (e) {
+                      Alert.alert('Erreur', e.message);
+                    } finally {
+                      setResetLoading(false);
+                    }
+                  },
+                },
+              ],
+            );
+          }}
+          disabled={resetLoading}
+        >
+          <MaterialCommunityIcons name={resetLoading ? 'loading' : 'delete-forever'} size={18} color="#fff" />
+          <Text style={styles.saveBtnText}>{resetLoading ? 'Suppression...' : 'Réinitialiser la BDD'}</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Compte Administrateur Unique */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -362,7 +509,11 @@ export default function ConfigScreen() {
           <MaterialCommunityIcons name="information" size={20} color={COLORS.textMuted} />
           <Text style={styles.sectionTitle}>À propos</Text>
         </View>
-        <Text style={styles.aboutText}>CMBClub v1.0.0{'\n'}Gestion des adhésions sportives{'\n'}Mode hors ligne (SQLite local)</Text>
+        <Text style={styles.aboutText}>
+          CMBClub v1.0.0{'\n'}
+          Gestion des adhésions sportives{'\n'}
+          Mode : {isCloudflare ? '☁️ Cloudflare D1 Distribué' : '📱 SQLite Local'}
+        </Text>
       </View>
 
       <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
@@ -658,4 +809,35 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderRadius: RADIUS.md,
     paddingVertical: 14,
   },
+  statusBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: RADIUS.md,
+    padding: 12,
+    borderWidth: 1,
+  },
+  statusText: {
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  testBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary + '15',
+    borderRadius: RADIUS.md,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: COLORS.primary + '35',
+  },
+  testBtnText: {
+    color: COLORS.primary,
+    fontWeight: '700',
+    fontSize: 14,
+  },
 });
+

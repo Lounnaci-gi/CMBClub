@@ -1,8 +1,10 @@
 // src/utils/seasons.js
-// Helpers pour la gestion des saisons
+// Helpers pour la gestion des saisons (Ultra-léger & sans dépendance externe)
 
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
+const MOIS_FR = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+];
 
 /**
  * Génère le label d'une saison à partir d'une année
@@ -62,14 +64,19 @@ export function canCreateSeason(targetYear) {
 }
 
 export function getMonthLabel(month, year) {
-  const date = new Date(year, month - 1, 1);
-  return format(date, 'MMMM yyyy', { locale: fr });
+  const monthName = MOIS_FR[(month - 1) % 12] || '';
+  return `${monthName} ${year}`;
 }
 
 export function formatDate(dateStr) {
   if (!dateStr) return '-';
   try {
-    return format(new Date(dateStr), 'dd/MM/yyyy');
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
   } catch {
     return dateStr;
   }
@@ -78,7 +85,14 @@ export function formatDate(dateStr) {
 export function formatDateTime(dateStr) {
   if (!dateStr) return '-';
   try {
-    return format(new Date(dateStr), "dd/MM/yyyy HH'h'mm");
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}h${mins}`;
   } catch {
     return dateStr;
   }

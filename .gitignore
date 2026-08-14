@@ -40,4 +40,10 @@ yarn-error.*
 /ios
 /android
 
+# IDE & build tools
+.gradle/
+.idea/
+.claude/
+
 dist-check/
+
