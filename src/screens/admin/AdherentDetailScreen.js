@@ -149,7 +149,7 @@ export default function AdherentDetailScreen({ navigation, route }) {
           text: 'Inscrire',
           onPress: async () => {
             const today = new Date().toISOString();
-            await enrollAdherent(adherent.id, saisonActive.id, today);
+            await enrollAdherent(adherent.id, saisonActive.id, today, adherent.assure ? 1 : 0);
             await loadPaiements();
             Alert.alert('Inscription effectuée', `Adhérent réinscrit avec succès pour la saison ${saisonActive.label}`);
           },

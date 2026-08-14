@@ -5,7 +5,7 @@ import { create } from 'zustand';
 import { THEME_IDS } from '../theme/themes';
 import {
   getConfig, setConfig,
-  getSaisons, getSaisonActive, createSaison, activateSaison,
+  getSaisons, getSaisonActive, createSaison, activateSaison, updateSaison, deleteSaison, closeSaison,
   getAdherents, createAdherent, updateAdherent, deleteAdherent, setAdherentAssure,
   enrollAdherentInSaison,
   getPaiementsByAdherent,
@@ -99,6 +99,18 @@ const useStore = create((set, get) => ({
     await activateSaison(saisonId);
     await get().loadSaisons();
     await get().loadAdherents(saisonId);
+  },
+  updateSaison: async (saisonId, updates) => {
+    await updateSaison(saisonId, updates);
+    await get().loadSaisons();
+  },
+  deleteSaison: async (saisonId) => {
+    await deleteSaison(saisonId);
+    await get().loadSaisons();
+  },
+  closeSaison: async (saisonId) => {
+    await closeSaison(saisonId);
+    await get().loadSaisons();
   },
 
   // ── Adhérents ──

@@ -38,21 +38,36 @@ async function request(endpoint, options = {}) {
     },
   });
 
-  const json = await response.json();
-  if (!response.ok || json.success === false) {
-    throw new Error(json.error || `Erreur HTTP ${response.status}`);
+  const rawText = await response.text();
+  let json = null;
+  try {
+    json = JSON.parse(rawText);
+  } catch (_e) {
+    if (!response.ok) {
+      throw new Error(`Erreur HTTP ${response.status}: ${rawText.slice(0, 100) || response.statusText}`);
+    }
+    return rawText;
   }
 
-  return json.data;
+  if (!response.ok || json?.success === false) {
+    throw new Error(json?.error || `Erreur HTTP ${response.status}`);
+  }
+
+  return json?.data !== undefined ? json.data : json;
 }
 
 export const CloudflareAPI = {
   // ── Health ──
   checkHealth: async (baseUrl) => {
     const url = (baseUrl || currentApiUrl).trim().replace(/\/+$/, '');
-    const res = await fetch(`${url}/api/health`);
-    const json = await res.json();
-    return json.success ? json.data : null;
+    try {
+      const res = await fetch(`${url}/api/health`);
+      const rawText = await res.text();
+      const json = JSON.parse(rawText);
+      return json.success ? json.data : null;
+    } catch {
+      return null;
+    }
   },
 
   // ── Auth ──
@@ -87,35 +102,48 @@ export const CloudflareAPI = {
       body: JSON.stringify(saison),
     }),
   activateSaison: (saisonId) =>
-    request(`/api/saisons/${saisonId}/activate`, {
+    request(`/api/saisons/${encodeURIComponent(saisonId)}/activate`, {
       method: 'PUT',
+    }),
+  updateSaison: (saisonId, { dateDebut, dateFin }) =>
+    request(`/api/saisons/${encodeURIComponent(saisonId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ dateDebut, dateFin }),
+    }),
+  closeSaison: (saisonId) =>
+    request(`/api/saisons/${encodeURIComponent(saisonId)}/close`, {
+      method: 'PUT',
+    }),
+  deleteSaison: (saisonId) =>
+    request(`/api/saisons/${encodeURIComponent(saisonId)}`, {
+      method: 'DELETE',
     }),
 
   // ── Adhérents ──
   getAdherents: (saisonId) =>
     request(`/api/adherents${saisonId ? `?saisonId=${encodeURIComponent(saisonId)}` : ''}`),
-  getAdherentById: (id) => request(`/api/adherents/${id}`),
+  getAdherentById: (id) => request(`/api/adherents/${encodeURIComponent(id)}`),
   createAdherent: (adherent) =>
     request('/api/adherents', {
       method: 'POST',
       body: JSON.stringify(adherent),
     }),
   updateAdherent: (adherent) =>
-    request(`/api/adherents/${adherent.id}`, {
+    request(`/api/adherents/${encodeURIComponent(adherent.id)}`, {
       method: 'PUT',
       body: JSON.stringify(adherent),
     }),
   deleteAdherent: (id) =>
-    request(`/api/adherents/${id}`, {
+    request(`/api/adherents/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
   setAdherentAssure: (id, assure, saisonId) =>
-    request(`/api/adherents/${id}/assure`, {
+    request(`/api/adherents/${encodeURIComponent(id)}/assure`, {
       method: 'PUT',
       body: JSON.stringify({ assure, saisonId }),
     }),
   enrollAdherent: (adherentId, saisonId, dateInscription, assure) =>
-    request(`/api/adherents/${adherentId}/enroll`, {
+    request(`/api/adherents/${encodeURIComponent(adherentId)}/enroll`, {
       method: 'POST',
       body: JSON.stringify({ saisonId, dateInscription, assure }),
     }),
@@ -133,7 +161,7 @@ export const CloudflareAPI = {
       body: JSON.stringify(paiement),
     }),
   updatePaiement: (paiement) =>
-    request(`/api/paiements/${paiement.id}`, {
+    request(`/api/paiements/${encodeURIComponent(paiement.id)}`, {
       method: 'PUT',
       body: JSON.stringify(paiement),
     }),
@@ -146,7 +174,7 @@ export const CloudflareAPI = {
       body: JSON.stringify(remise),
     }),
   deleteRemise: (id) =>
-    request(`/api/remises/${id}`, {
+    request(`/api/remises/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
 
@@ -158,7 +186,7 @@ export const CloudflareAPI = {
       body: JSON.stringify(discipline),
     }),
   deleteDiscipline: (id) =>
-    request(`/api/disciplines/${id}`, {
+    request(`/api/disciplines/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
 
@@ -170,12 +198,12 @@ export const CloudflareAPI = {
       body: JSON.stringify(creneau),
     }),
   updateCreneau: (creneau) =>
-    request(`/api/creneaux/${creneau.id}`, {
+    request(`/api/creneaux/${encodeURIComponent(creneau.id)}`, {
       method: 'PUT',
       body: JSON.stringify(creneau),
     }),
   deleteCreneau: (id) =>
-    request(`/api/creneaux/${id}`, {
+    request(`/api/creneaux/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
 

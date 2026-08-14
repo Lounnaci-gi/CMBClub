@@ -14,8 +14,9 @@ CREATE TABLE IF NOT EXISTS saisons (
   label TEXT NOT NULL,
   annee INTEGER NOT NULL,
   dateDebut TEXT NOT NULL,
-  dateFin TEXT NOT NULL,
+  dateFin TEXT,
   actif INTEGER DEFAULT 0,
+  statut TEXT DEFAULT 'ouvert',
   createdAt TEXT NOT NULL
 );
 

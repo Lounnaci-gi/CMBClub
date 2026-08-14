@@ -3,12 +3,120 @@ import { cors } from 'hono/cors';
 
 const app = new Hono();
 
-// Middleware CORS pour autoriser l'app mobile React Native
+// ── CORS : restreindre aux origines autorisées ──
+const ALLOWED_ORIGINS = [
+  'http://localhost:8081',
+  'http://localhost:19000',
+  'http://localhost:19006',
+  'exp://',
+];
+
 app.use('*', cors({
-  origin: '*',
+  origin: (origin) => {
+    if (!origin) return 'http://localhost:8081'; // app mobile native (pas d'origine HTTP)
+    if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return origin;
+    return null; // bloque les origines non autorisées
+  },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400,
 }));
+
+// ── Headers de sécurité HTTP ──
+app.use('*', async (c, next) => {
+  await next();
+  c.res.headers.set('X-Content-Type-Options', 'nosniff');
+  c.res.headers.set('X-Frame-Options', 'DENY');
+  c.res.headers.set('Referrer-Policy', 'no-referrer');
+  c.res.headers.set('X-XSS-Protection', '1; mode=block');
+  c.res.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  c.res.headers.set('Cache-Control', 'no-store');
+});
+
+// ── Limite de taille des requêtes (Anti-Payload Bombing) ──
+const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 Mo
+app.use('*', async (c, next) => {
+  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
+  if (contentLength > MAX_BODY_SIZE) {
+    return c.json({ success: false, error: 'Requête trop volumineuse.' }, 413);
+  }
+  return next();
+});
+
+// ── Sanitisation des entrées (Anti-XSS) ──
+function sanitizeStr(str, maxLen = 255) {
+  if (!str && str !== 0) return '';
+  return String(str)
+    .replace(/[<>]/g, '')
+    .replace(/javascript:/gi, '')
+    .replace(/on\w+\s*=/gi, '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .trim()
+    .slice(0, maxLen);
+}
+
+function sanitizeCredential(str, maxLen = 128) {
+  if (!str) return '';
+  return String(str).replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, maxLen);
+}
+
+// ── Rate Limiting anti-brute force (en mémoire Worker, par IP) ──
+const loginAttempts = new Map(); // Map<ip, { count, firstAttempt, lockedUntil }>
+
+const RATE_LIMIT = {
+  MAX_ATTEMPTS: 5,
+  WINDOW_MS: 15 * 60 * 1000,   // 15 minutes
+  LOCKOUT_MS: 15 * 60 * 1000,  // 15 minutes de verrouillage
+};
+
+function getClientIp(c) {
+  return (
+    c.req.header('cf-connecting-ip') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    c.req.header('x-real-ip') ||
+    'unknown'
+  );
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const state = loginAttempts.get(ip) || { count: 0, firstAttempt: now, lockedUntil: null };
+
+  // Déverrouillage automatique après la période
+  if (state.lockedUntil && now >= state.lockedUntil) {
+    loginAttempts.delete(ip);
+    return { allowed: true, remaining: RATE_LIMIT.MAX_ATTEMPTS };
+  }
+
+  // Encore verrouillé
+  if (state.lockedUntil && now < state.lockedUntil) {
+    const retryAfter = Math.ceil((state.lockedUntil - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+
+  // Réinitialiser la fenêtre si expirée
+  if (now - state.firstAttempt > RATE_LIMIT.WINDOW_MS) {
+    loginAttempts.delete(ip);
+    return { allowed: true, remaining: RATE_LIMIT.MAX_ATTEMPTS };
+  }
+
+  const remaining = RATE_LIMIT.MAX_ATTEMPTS - state.count;
+  return { allowed: remaining > 0, remaining, state };
+}
+
+function recordFailedAttempt(ip) {
+  const now = Date.now();
+  const state = loginAttempts.get(ip) || { count: 0, firstAttempt: now, lockedUntil: null };
+  state.count += 1;
+  if (state.count >= RATE_LIMIT.MAX_ATTEMPTS) {
+    state.lockedUntil = now + RATE_LIMIT.LOCKOUT_MS;
+  }
+  loginAttempts.set(ip, state);
+}
+
+function resetAttempts(ip) {
+  loginAttempts.delete(ip);
+}
 
 // Helper pour formater les réponses JSON
 const ok = (c, data) => c.json({ success: true, data });
@@ -104,14 +212,31 @@ async function verifyPassword(inputPassword, storedHash) {
 // ── Auth & Users ──
 app.post('/api/auth/login', async (c) => {
   try {
-    const { username, password } = await c.req.json();
-    if (!username || !password) return err(c, 'Identifiant et mot de passe requis');
+    // ── Rate Limiting : anti brute force ──
+    const ip = getClientIp(c);
+    const rateCheck = checkRateLimit(ip);
+    if (!rateCheck.allowed) {
+      c.res.headers.set('Retry-After', String(rateCheck.retryAfter));
+      return c.json(
+        { success: false, error: `Trop de tentatives. Réessayez dans ${Math.ceil(rateCheck.retryAfter / 60)} minute(s).` },
+        429
+      );
+    }
 
-    const cleanUser = username.trim();
-    const cleanPass = password.trim();
+    const body = await c.req.json();
+    const rawUser = sanitizeCredential(body.username, 64);
+    const rawPass = sanitizeCredential(body.password, 128);
+    if (!rawUser || !rawPass) return err(c, 'Identifiant et mot de passe requis');
+    if (rawUser.length < 2 || rawPass.length < 4) {
+      recordFailedAttempt(ip);
+      return err(c, 'Identifiant ou mot de passe incorrect', 401);
+    }
+
+    const cleanUser = rawUser;
+    const cleanPass = rawPass;
     const encUser = encryptUsername(cleanUser);
 
-    // 1. Chercher un admin
+    // 1. Chercher un utilisateur
     let user = await c.env.DB.prepare(
       'SELECT id, username, password, role, adherentId FROM users WHERE username = ? OR LOWER(username) = LOWER(?)'
     ).bind(encUser, cleanUser).first();
@@ -122,6 +247,7 @@ app.post('/api/auth/login', async (c) => {
     }
 
     if (user && (await verifyPassword(cleanPass, user.password))) {
+      resetAttempts(ip);
       const needsUserEnc = user.username && !user.username.startsWith(ENC_PREFIX);
       const needsPassHash = user.password && !user.password.startsWith(SALT_PREFIX);
       if (needsUserEnc || needsPassHash) {
@@ -144,7 +270,6 @@ app.post('/api/auth/login', async (c) => {
       ).bind(adherent.id).first();
 
       if (!adherentUser) {
-        // Auto-création de l'accès adhérent chiffré/haché
         const newId = `user-${adherent.id}`;
         const encCode = encryptUsername(adherent.code);
         const hashedPass = await hashPassword(adherent.code);
@@ -152,11 +277,11 @@ app.post('/api/auth/login', async (c) => {
           `INSERT INTO users (id, username, password, role, adherentId, createdAt)
            VALUES (?, ?, ?, 'adherent', ?, datetime('now'))`
         ).bind(newId, encCode, hashedPass, adherent.id).run();
-
         adherentUser = { id: newId, username: encCode, role: 'adherent', adherentId: adherent.id };
       }
 
       if ((await verifyPassword(cleanPass, adherentUser.password)) || cleanPass === adherent.code) {
+        resetAttempts(ip);
         const needsUserEnc = adherentUser.username && !adherentUser.username.startsWith(ENC_PREFIX);
         const needsPassHash = adherentUser.password && !adherentUser.password.startsWith(SALT_PREFIX);
         if (needsUserEnc || needsPassHash) {
@@ -168,6 +293,15 @@ app.post('/api/auth/login', async (c) => {
       }
     }
 
+    // Identifiants incorrects → enregistrer la tentative
+    recordFailedAttempt(ip);
+    const newCheck = checkRateLimit(ip);
+    if (!newCheck.allowed) {
+      return c.json(
+        { success: false, error: `Trop de tentatives. Compte verrouillé pendant ${Math.ceil(RATE_LIMIT.LOCKOUT_MS / 60000)} minutes.` },
+        429
+      );
+    }
     return err(c, 'Identifiant ou mot de passe incorrect', 401);
   } catch (e) {
     return err(c, e.message, 500);
@@ -188,13 +322,17 @@ app.get('/api/auth/admin', async (c) => {
 
 app.put('/api/auth/admin-credentials', async (c) => {
   try {
-    const { username, password } = await c.req.json();
-    if (!username || !password) return err(c, 'Champs obligatoires');
+    const body = await c.req.json();
+    const cleanUsername = sanitizeCredential(body.username, 64);
+    const cleanPassword = sanitizeCredential(body.password, 128);
+    if (!cleanUsername || !cleanPassword) return err(c, 'Champs obligatoires');
+    if (cleanUsername.length < 2) return err(c, "L'identifiant doit contenir au moins 2 caractères.");
+    if (cleanPassword.length < 4) return err(c, 'Le mot de passe doit contenir au moins 4 caractères.');
 
     const admin = await c.env.DB.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").first();
     const adminId = admin ? admin.id : 'admin-001';
-    const encUsername = encryptUsername(username.trim());
-    const hashedPassword = await hashPassword(password.trim());
+    const encUsername = encryptUsername(cleanUsername);
+    const hashedPassword = await hashPassword(cleanPassword);
 
     await c.env.DB.prepare(
       `INSERT INTO users (id, username, password, role, createdAt)
@@ -263,14 +401,14 @@ app.post('/api/saisons', async (c) => {
   try {
     const s = await c.req.json();
     await c.env.DB.prepare(
-      `INSERT INTO saisons (id, label, annee, dateDebut, dateFin, actif, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(s.id, s.label, s.annee, s.dateDebut, s.dateFin, s.actif ? 1 : 0, s.createdAt || new Date().toISOString()).run();
+      `INSERT INTO saisons (id, label, annee, dateDebut, dateFin, actif, statut, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(s.id, s.label, s.annee, s.dateDebut, s.dateFin || null, s.actif ? 1 : 0, 'ouvert', s.createdAt || new Date().toISOString()).run();
 
     if (s.actif) {
       await c.env.DB.prepare('UPDATE saisons SET actif = 0 WHERE id != ?').bind(s.id).run();
     }
-    return ok(c, s);
+    return ok(c, { ...s, statut: 'ouvert' });
   } catch (e) {
     return err(c, e.message, 500);
   }
@@ -284,6 +422,82 @@ app.put('/api/saisons/:id/activate', async (c) => {
       c.env.DB.prepare('UPDATE saisons SET actif = 1 WHERE id = ?').bind(id),
     ]);
     return ok(c, { id, actif: 1 });
+  } catch (e) {
+    return err(c, e.message, 500);
+  }
+});
+
+app.put('/api/saisons/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { dateDebut, dateFin } = await c.req.json();
+
+    if (!dateDebut || !dateFin) {
+      return err(c, 'dateDebut et dateFin sont requis', 400);
+    }
+
+    // Valider que dateDebut < dateFin
+    if (new Date(dateDebut) >= new Date(dateFin)) {
+      return err(c, 'La date de début doit être avant la date de fin', 400);
+    }
+
+    await c.env.DB.prepare(
+      'UPDATE saisons SET dateDebut = ?, dateFin = ? WHERE id = ?'
+    ).bind(dateDebut, dateFin, id).run();
+
+    const updated = await c.env.DB.prepare('SELECT * FROM saisons WHERE id = ?').bind(id).first();
+    return ok(c, updated);
+  } catch (e) {
+    return err(c, e.message, 500);
+  }
+});
+
+app.delete('/api/saisons/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+
+    // Vérifier que la saison n'est pas active
+    const saison = await c.env.DB.prepare('SELECT * FROM saisons WHERE id = ?').bind(id).first();
+    if (!saison) {
+      return err(c, 'Saison non trouvée', 404);
+    }
+
+    if (saison.actif) {
+      return err(c, 'Impossible de supprimer une saison active', 400);
+    }
+
+    // Supprimer en cascade les données associées à la saison
+    await c.env.DB.batch([
+      c.env.DB.prepare('DELETE FROM presences WHERE saisonId = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM paiements WHERE saisonId = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM adherent_saisons WHERE saisonId = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM saisons WHERE id = ?').bind(id),
+    ]);
+
+    return ok(c, { success: true, id });
+  } catch (e) {
+    return err(c, e.message, 500);
+  }
+});
+
+app.put('/api/saisons/:id/close', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const saison = await c.env.DB.prepare('SELECT * FROM saisons WHERE id = ?').bind(id).first();
+    
+    if (!saison) {
+      return err(c, 'Saison non trouvée', 404);
+    }
+
+    const newStatut = saison.statut === 'ouvert' ? 'fermé' : 'ouvert';
+    const dateClose = newStatut === 'fermé' ? new Date().toISOString() : null;
+    
+    await c.env.DB.prepare(
+      'UPDATE saisons SET statut = ?, dateFin = CASE WHEN ? THEN ? ELSE dateFin END WHERE id = ?'
+    ).bind(newStatut, newStatut === 'fermé', dateClose, id).run();
+
+    const updated = await c.env.DB.prepare('SELECT * FROM saisons WHERE id = ?').bind(id).first();
+    return ok(c, updated);
   } catch (e) {
     return err(c, e.message, 500);
   }
@@ -331,8 +545,26 @@ app.get('/api/adherents/:id', async (c) => {
 
 app.post('/api/adherents', async (c) => {
   try {
-    const a = await c.req.json();
+    // Vérifier qu'il y a une saison active
+    const activeSaison = await c.env.DB.prepare('SELECT id FROM saisons WHERE actif = 1 LIMIT 1').first();
+    if (!activeSaison) {
+      return err(c, 'Impossible de créer un adhérent sans saison active. Veuillez d\'abord créer et activer une saison.', 400);
+    }
+
+    const raw = await c.req.json();
     const now = new Date().toISOString();
+    // Sanitisation anti-XSS de tous les champs texte
+    const a = {
+      ...raw,
+      nom: sanitizeStr(raw.nom, 100),
+      prenom: sanitizeStr(raw.prenom, 100),
+      lieuNaissance: sanitizeStr(raw.lieuNaissance, 150),
+      telephone: sanitizeStr(raw.telephone, 20),
+      groupeSanguin: sanitizeStr(raw.groupeSanguin, 10),
+      observationsMedicales: sanitizeStr(raw.observationsMedicales, 1000),
+      discipline: sanitizeStr(raw.discipline, 100),
+    };
+    if (!a.nom || !a.prenom) return err(c, 'Le nom et le prénom sont obligatoires.');
     await c.env.DB.prepare(
       `INSERT INTO adherents (
         id, code, nom, prenom, dateNaissance, lieuNaissance,
@@ -347,7 +579,6 @@ app.post('/api/adherents', async (c) => {
       a.assure ? 1 : 0, a.categorieOverride || null,
       a.createdAt || now, a.updatedAt || now
     ).run();
-
     return ok(c, a);
   } catch (e) {
     return err(c, e.message, 500);
@@ -357,8 +588,20 @@ app.post('/api/adherents', async (c) => {
 app.put('/api/adherents/:id', async (c) => {
   try {
     const id = c.req.param('id');
-    const a = await c.req.json();
+    const raw = await c.req.json();
     const now = new Date().toISOString();
+    // Sanitisation anti-XSS de tous les champs texte
+    const a = {
+      ...raw,
+      nom: sanitizeStr(raw.nom, 100),
+      prenom: sanitizeStr(raw.prenom, 100),
+      lieuNaissance: sanitizeStr(raw.lieuNaissance, 150),
+      telephone: sanitizeStr(raw.telephone, 20),
+      groupeSanguin: sanitizeStr(raw.groupeSanguin, 10),
+      observationsMedicales: sanitizeStr(raw.observationsMedicales, 1000),
+      discipline: sanitizeStr(raw.discipline, 100),
+    };
+    if (!a.nom || !a.prenom) return err(c, 'Le nom et le prénom sont obligatoires.');
     await c.env.DB.prepare(
       `UPDATE adherents SET
         nom = ?, prenom = ?, dateNaissance = ?, lieuNaissance = ?,
@@ -372,7 +615,6 @@ app.put('/api/adherents/:id', async (c) => {
       a.photo || null, a.discipline || '', a.genre || 'M', a.dateInscription || '',
       a.assure ? 1 : 0, a.categorieOverride || null, now, id
     ).run();
-
     return ok(c, { id, ...a, updatedAt: now });
   } catch (e) {
     return err(c, e.message, 500);

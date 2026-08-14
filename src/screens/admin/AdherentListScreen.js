@@ -9,7 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import CategoryBadge from '../../components/CategoryBadge';
-import useTheme from '../../theme/useTheme';
+import useTheme, { useResponsive } from '../../theme/useTheme';
 import { CATEGORIES, DISCIPLINES, getCategoryByAge, getEffectiveCategory } from '../../utils/categories';
 import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
@@ -18,7 +18,12 @@ import ValidationAssuranceModal from '../../components/ValidationAssuranceModal'
 
 export default function AdherentListScreen({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
-  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const { isSmall, isTablet, isDesktop, horizontalPadding } = useResponsive();
+  const isLarge = isTablet || isDesktop;
+  const styles = useMemo(
+    () => createStyles(COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding),
+    [COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding],
+  );
 
   const STATUS_FILTERS = useMemo(() => [
     { value: 'all',                       label: 'Tous',       icon: '👥' },
@@ -249,6 +254,7 @@ export default function AdherentListScreen({ navigation }) {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
+      <View style={styles.innerWrapper}>
 
       {/* Top bar: search + filter toggle */}
       <View style={styles.topBar}>
@@ -405,9 +411,20 @@ export default function AdherentListScreen({ navigation }) {
       />
 
       <TouchableOpacity
-        style={styles.fab}
-        onPress={() => navigation.navigate('AdherentForm')}
-        activeOpacity={0.85}
+        style={[styles.fab, !saisonActive && styles.fabDisabled]}
+        onPress={() => {
+          if (!saisonActive) {
+            Alert.alert(
+              '⛔ Impossible de créer un adhérent',
+              'Veuillez d\'abord créer et activer une saison sportive avant d\'ajouter des adhérents.',
+              [{ text: 'OK', style: 'default' }]
+            );
+            return;
+          }
+          navigation.navigate('AdherentForm');
+        }}
+        activeOpacity={saisonActive ? 0.85 : 0.5}
+        disabled={!saisonActive}
       >
         <MaterialCommunityIcons name="account-plus" size={24} color="#fff" />
       </TouchableOpacity>
@@ -417,6 +434,7 @@ export default function AdherentListScreen({ navigation }) {
         visible={showAssuranceModal}
         onClose={() => setShowAssuranceModal(false)}
       />
+      </View>
     </View>
   );
 }
@@ -436,46 +454,44 @@ const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus,
         {item.photo ? (
           <Image source={{ uri: item.photo }} style={styles.photo} />
         ) : (
-          <View style={[styles.photoPlaceholder, { backgroundColor: cat.color + '22' }]}>
-            <Text style={{ fontSize: 22 }}>{cat.icon}</Text>
+          <View style={[styles.photoPlaceholder, { backgroundColor: (cat?.color || COLORS.primary) + '20' }]}>
+            <Text style={{ fontSize: 20 }}>{cat?.icon || '👤'}</Text>
           </View>
         )}
       </View>
 
       <View style={styles.info}>
         <View style={styles.nameRow}>
-          <Text style={styles.name} numberOfLines={1}>{item.prenom} {item.nom}</Text>
-          <Text style={styles.code} numberOfLines={1}>{item.code}</Text>
+          <Text style={styles.name}>{item.nom} {item.prenom}</Text>
+          {cat && <CategoryBadge category={cat.label} />}
         </View>
 
-        <View style={styles.badges}>
-          <CategoryBadge category={cat.label} size="sm" />
-
-          <View style={[styles.genreBadge, { backgroundColor: isFemme ? '#FF6B9D22' : COLORS.primary + '22' }]}>
-            <Text style={[styles.genreBadgeText, { color: isFemme ? '#FF6B9D' : COLORS.primary }]}>
-              {isFemme ? '♀ Féminin' : '♂ Masculin'}
-            </Text>
-          </View>
-
+        <View style={styles.codeRow}>
+          <Text style={styles.code}>{item.code}</Text>
+          {isFemme ? (
+            <View style={[styles.genreBadge, { backgroundColor: '#FF69B420' }]}>
+              <Text style={{ color: '#FF69B4', fontSize: 10, fontWeight: '700' }}>♀ F</Text>
+            </View>
+          ) : (
+            <View style={[styles.genreBadge, { backgroundColor: COLORS.primary + '20' }]}>
+              <Text style={{ color: COLORS.primary, fontSize: 10, fontWeight: '700' }}>♂ M</Text>
+            </View>
+          )}
           {payStatus ? (
-            <View style={[styles.payBadge, { backgroundColor: getStatusColor(payStatus) + '22' }]}>
-              <Text style={[styles.payBadgeText, { color: getStatusColor(payStatus) }]}>
+            <View style={[styles.statusPill, { backgroundColor: getStatusColor(payStatus, COLORS) + '20' }]}>
+              <Text style={[styles.statusText, { color: getStatusColor(payStatus, COLORS) }]}>
                 {getStatusLabel(payStatus)}
               </Text>
             </View>
           ) : null}
-
-          <View style={[styles.payBadge, { backgroundColor: (item.assure ? COLORS.success : COLORS.danger) + '22' }]}>
-            <Text style={[styles.payBadgeText, { color: item.assure ? COLORS.success : COLORS.danger }]}>
-              {item.assure ? '🛡️ Assuré' : 'Non assuré'}
-            </Text>
-          </View>
-
+          {item.assure ? (
+            <View style={[styles.statusPill, { backgroundColor: COLORS.success + '20' }]}>
+              <Text style={[styles.statusText, { color: COLORS.success }]}>🛡️ Assuré</Text>
+            </View>
+          ) : null}
           {item.isEnrolled === 0 ? (
-            <View style={[styles.payBadge, { backgroundColor: COLORS.warning + '22' }]}>
-              <Text style={[styles.payBadgeText, { color: COLORS.warning }]}>
-                ⚠️ Non réinscrit
-              </Text>
+            <View style={[styles.statusPill, { backgroundColor: COLORS.warning + '20' }]}>
+              <Text style={[styles.statusText, { color: COLORS.warning }]}>⚠️ Non réinscrit</Text>
             </View>
           ) : null}
         </View>
@@ -491,14 +507,20 @@ const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus,
 });
 
 // ── Styles ────────────────────────────────────────────────────────────────────
-const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
+  innerWrapper: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 1000,
+    alignSelf: 'center',
+  },
 
   // Top bar
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: horizontalPadding,
     paddingTop: 12,
     paddingBottom: 8,
     gap: 10,
@@ -689,5 +711,9 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...SHADOWS.button,
+  },
+  fabDisabled: {
+    backgroundColor: COLORS.textMuted,
+    opacity: 0.5,
   },
 });

@@ -83,20 +83,6 @@ export default function PresencesScreen({ route }) {
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(new Date());
 
-  // Horloge optimisée : 1s uniquement si un compte à rebours est en cours, 30s sinon
-  useEffect(() => {
-    if (!slotStartDateTime || Date.now() >= slotStartDateTime.getTime()) {
-      const slowTimer = setInterval(() => {
-        setNow(new Date());
-      }, 30000);
-      return () => clearInterval(slowTimer);
-    }
-    const timer = setInterval(() => {
-      setNow(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [slotStartDateTime]);
-
   // Only show slots matching today's day of the week
   const todayJour = useMemo(() => getTodayJour(), []);
   const creneauxDuJour = useMemo(
@@ -122,18 +108,6 @@ export default function PresencesScreen({ route }) {
     return creneaux.filter(c => c.jour === activeJour);
   }, [creneaux, activeJour]);
 
-  // Synchronisation lors de la navigation depuis "Horaires & Créneaux"
-  useEffect(() => {
-    const paramId = route?.params?.creneauId;
-    if (paramId) {
-      setSelectedCreneauId(paramId);
-      const target = creneaux.find(c => c.id === paramId);
-      if (target?.jour) {
-        setDateSeance(getDateForJour(target.jour));
-      }
-    }
-  }, [route?.params?.creneauId, creneaux]);
-
   // Calcul du temps restant jusqu'au début du créneau sélectionné
   // On utilise directement le jour du créneau (pas dateSeance qui peut être désync)
   const slotStartDateTime = useMemo(() => {
@@ -141,6 +115,20 @@ export default function PresencesScreen({ route }) {
     const dateForSlot = getDateForJour(selectedCreneau.jour);
     return getSlotStartDateTime(dateForSlot, selectedCreneau.heureDebut);
   }, [selectedCreneau?.id, selectedCreneau?.heureDebut, selectedCreneau?.jour]);
+
+  // Horloge optimisée : 1s uniquement si un compte à rebours est en cours, 30s sinon
+  useEffect(() => {
+    if (!slotStartDateTime || Date.now() >= slotStartDateTime.getTime()) {
+      const slowTimer = setInterval(() => {
+        setNow(new Date());
+      }, 30000);
+      return () => clearInterval(slowTimer);
+    }
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [slotStartDateTime]);
 
   const isNotStartedYet = useMemo(() => {
     if (!slotStartDateTime) return false;
@@ -163,6 +151,18 @@ export default function PresencesScreen({ route }) {
 
     return { hh, mm, ss, totalSeconds };
   }, [now, slotStartDateTime, isNotStartedYet]);
+
+  // Synchronisation lors de la navigation depuis "Horaires & Créneaux"
+  useEffect(() => {
+    const paramId = route?.params?.creneauId;
+    if (paramId) {
+      setSelectedCreneauId(paramId);
+      const target = creneaux.find(c => c.id === paramId);
+      if (target?.jour) {
+        setDateSeance(getDateForJour(target.jour));
+      }
+    }
+  }, [route?.params?.creneauId, creneaux]);
 
   // Auto-select : seulement si aucun créneau n'est déjà sélectionné (ex: navigation depuis CreneauxScreen)
   useEffect(() => {

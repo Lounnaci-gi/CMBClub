@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Modal, TextInput, Alert, RefreshControl,
+  Modal, TextInput, Alert, RefreshControl, ScrollView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -14,9 +14,18 @@ import { generateSeasonLabel, getCurrentSeasonYear, canCreateSeason } from '../.
 export default function SeasonScreen() {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
-  const { saisons, saisonActive, loadSaisons, createSaison, activateSaison } = useStore();
-  const [showModal, setShowModal] = useState(false);
+  const { saisons, saisonActive, loadSaisons, createSaison, activateSaison, updateSaison, deleteSaison, closeSaison } = useStore();
+  
+  // États pour modal créer
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [annee, setAnnee] = useState(String(getCurrentSeasonYear()));
+  
+  // États pour modal éditer
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingSaison, setEditingSaison] = useState(null);
+  const [editDateDebut, setEditDateDebut] = useState('');
+  const [editDateFin, setEditDateFin] = useState('');
+  
   const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(useCallback(() => { loadSaisons(); }, []));
@@ -45,11 +54,12 @@ export default function SeasonScreen() {
       label,
       annee: y,
       dateDebut: `${y}-01-01`,
-      dateFin: `${y}-12-31`,
+      dateFin: null,
       actif: 0,
     });
-    setShowModal(false);
-    Alert.alert('✅ Saison créée', `La saison ${label} (01/01/${y} – 31/12/${y}) a été créée.`);
+    setShowCreateModal(false);
+    setAnnee(String(getCurrentSeasonYear()));
+    Alert.alert('✅ Saison créée', `La saison ${label} a été créée et est ouverte pour les inscriptions.`);
   };
 
   const handleActivate = (saison) => {
@@ -70,8 +80,97 @@ export default function SeasonScreen() {
     );
   };
 
+  const handleEditPress = (saison) => {
+    setEditingSaison(saison);
+    setEditDateDebut(saison.dateDebut);
+    setEditDateFin(saison.dateFin);
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editDateDebut || !editDateFin) {
+      Alert.alert('Erreur', 'Les dates de début et fin sont requises');
+      return;
+    }
+    
+    if (new Date(editDateDebut) >= new Date(editDateFin)) {
+      Alert.alert('Erreur', 'La date de début doit être avant la date de fin');
+      return;
+    }
+
+    try {
+      await updateSaison(editingSaison.id, {
+        dateDebut: editDateDebut,
+        dateFin: editDateFin,
+      });
+      setShowEditModal(false);
+      Alert.alert('✅ Saison modifiée', `Les dates de la saison ${editingSaison.label} ont été mises à jour.`);
+    } catch (e) {
+      Alert.alert('Erreur', e.message);
+    }
+  };
+
+  const handleDeletePress = (saison) => {
+    if (saison.actif || saison.id === saisonActive?.id) {
+      Alert.alert(
+        '⛔ Action impossible',
+        `La saison "${saison.label}" est actuellement active.\n\nUne application a toujours besoin d'une saison active. Pour supprimer cette saison, activez d'abord une autre saison.`
+      );
+      return;
+    }
+
+    Alert.alert(
+      '⚠️ Supprimer la saison',
+      `Êtes-vous sûr de vouloir supprimer la saison ${saison.label} ?\n\n⚠️ Cette action est irréversible.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteSaison(saison.id);
+              Alert.alert('✅ Saison supprimée', `La saison ${saison.label} a été supprimée.`);
+            } catch (e) {
+              Alert.alert('Erreur', e.message);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleClosePress = (saison) => {
+    const isClosed = saison.statut === 'fermé';
+    const action = isClosed ? 'Rouvrir' : 'Clôturer';
+    const message = isClosed 
+      ? `Êtes-vous sûr de vouloir rouvrir la saison ${saison.label} pour de nouvelles inscriptions ?`
+      : `Êtes-vous sûr de vouloir clôturer la saison ${saison.label} ?\n\n⚠️ Les nouvelles inscriptions ne seront plus possibles.`;
+
+    Alert.alert(
+      `${action} la saison`,
+      message,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: action,
+          style: isClosed ? 'default' : 'destructive',
+          onPress: async () => {
+            try {
+              await closeSaison(saison.id);
+              Alert.alert('✅ Mise à jour', `La saison ${saison.label} est désormais ${isClosed ? 'ouverte' : 'fermée'}.`);
+            } catch (e) {
+              Alert.alert('Erreur', e.message);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const renderSaison = ({ item }) => {
     const isActive = item.id === saisonActive?.id;
+    const isClosed = item.statut === 'fermé';
     return (
       <View style={[styles.card, isActive && styles.activeCard]}>
         <View style={styles.cardLeft}>
@@ -80,32 +179,66 @@ export default function SeasonScreen() {
               {item.annee}
             </Text>
           </View>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={styles.saisonLabel}>Saison {item.label}</Text>
             <Text style={styles.saisonDates}>
-              01 Jan. {item.annee} – 31 Déc. {item.annee}
+              Depuis le {new Date(item.dateDebut).toLocaleDateString('fr-FR')}
+              {item.dateFin ? ` jusqu'au ${new Date(item.dateFin).toLocaleDateString('fr-FR')}` : ''}
             </Text>
-            {isActive && (
-              <View style={styles.activeBadge}>
-                <MaterialCommunityIcons name="check-circle" size={12} color={COLORS.success} />
-                <Text style={styles.activeText}>Saison active</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              {isActive && (
+                <View style={styles.activeBadge}>
+                  <MaterialCommunityIcons name="check-circle" size={12} color={COLORS.success} />
+                  <Text style={styles.activeText}>Active</Text>
+                </View>
+              )}
+              <View style={[styles.statusBadge, { backgroundColor: isClosed ? COLORS.danger + '20' : COLORS.success + '20' }]}>
+                <MaterialCommunityIcons 
+                  name={isClosed ? 'lock' : 'lock-open-variant'} 
+                  size={12} 
+                  color={isClosed ? COLORS.danger : COLORS.success} 
+                />
+                <Text style={{ color: isClosed ? COLORS.danger : COLORS.success, fontSize: 11, fontWeight: '600' }}>
+                  {isClosed ? 'Fermée' : 'Ouverte'}
+                </Text>
               </View>
-            )}
+            </View>
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[styles.activateBtn, isActive && styles.activateBtnDone]}
-          onPress={() => handleActivate(item)}
-          disabled={isActive}
-        >
-          <Text style={[styles.activateBtnText, isActive && { color: COLORS.success }]}>
-            {isActive ? 'Active' : 'Activer'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: COLORS.primary + '20' }]}
+            onPress={() => handleClosePress(item)}
+          >
+            <MaterialCommunityIcons 
+              name={isClosed ? 'lock-open' : 'lock'} 
+              size={18} 
+              color={COLORS.primary} 
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: COLORS.danger + '20' }]}
+            onPress={() => handleDeletePress(item)}
+          >
+            <MaterialCommunityIcons name="trash-can-outline" size={18} color={COLORS.danger} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.activateBtn, isActive && styles.activateBtnDone]}
+            onPress={() => handleActivate(item)}
+            disabled={isActive}
+          >
+            <Text style={[styles.activateBtnText, isActive && { color: COLORS.success }]}>
+              {isActive ? 'Active' : 'Activer'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
+
 
   return (
     <View style={styles.container}>
@@ -116,7 +249,7 @@ export default function SeasonScreen() {
             {saisons.length} saison{saisons.length > 1 ? 's' : ''} configurée{saisons.length > 1 ? 's' : ''}
           </Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => setShowModal(true)}>
+        <TouchableOpacity style={styles.addBtn} onPress={() => setShowCreateModal(true)}>
           <MaterialCommunityIcons name="plus" size={20} color="#fff" />
           <Text style={styles.addBtnText}>Nouvelle</Text>
         </TouchableOpacity>
@@ -138,7 +271,7 @@ export default function SeasonScreen() {
       />
 
       {/* Create Modal */}
-      <Modal visible={showModal} transparent animationType="slide" onRequestClose={() => setShowModal(false)}>
+      <Modal visible={showCreateModal} transparent animationType="slide" onRequestClose={() => setShowCreateModal(false)}>
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>
             <View style={styles.modalHandle} />
@@ -164,7 +297,7 @@ export default function SeasonScreen() {
             )}
 
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowModal(false)}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowCreateModal(false)}>
                 <Text style={styles.cancelText}>Annuler</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={handleCreate}>
@@ -172,6 +305,51 @@ export default function SeasonScreen() {
                 <Text style={styles.saveBtnText}>Créer</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>Modifier la saison {editingSaison?.label}</Text>
+
+              <Text style={styles.fieldLabel}>📅 Date de début</Text>
+              <TextInput
+                style={styles.input}
+                value={editDateDebut}
+                onChangeText={setEditDateDebut}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={COLORS.textMuted}
+              />
+
+              <Text style={styles.fieldLabel} style={{ marginTop: 16 }}>📅 Date de fin</Text>
+              <TextInput
+                style={styles.input}
+                value={editDateFin}
+                onChangeText={setEditDateFin}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={COLORS.textMuted}
+              />
+
+              <View style={styles.infoBox}>
+                <MaterialCommunityIcons name="information" size={16} color={COLORS.textMuted} />
+                <Text style={styles.infoText}>Les dates doivent être au format YYYY-MM-DD</Text>
+              </View>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowEditModal(false)}>
+                  <Text style={styles.cancelText}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveEdit}>
+                  <MaterialCommunityIcons name="check" size={18} color="#fff" />
+                  <Text style={styles.saveBtnText}>Enregistrer</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -217,7 +395,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderColor: COLORS.primary + '50',
     backgroundColor: COLORS.primary + '08',
   },
-  cardLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  cardLeft: { flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1 },
   yearBadge: {
     width: 56,
     height: 56,
@@ -230,14 +408,34 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   saisonDates: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
   activeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   activeText: { color: COLORS.success, fontSize: 12, fontWeight: '600' },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   activateBtn: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     backgroundColor: COLORS.primary,
     borderRadius: RADIUS.full,
   },
   activateBtnDone: { backgroundColor: COLORS.success + '20', borderWidth: 1, borderColor: COLORS.success + '40' },
-  activateBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  activateBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  statusBadge: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 4, 
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
   empty: { alignItems: 'center', paddingTop: 80, gap: 12 },
   emptyText: { color: COLORS.textMuted, fontSize: 15 },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
@@ -246,23 +444,22 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderTopLeftRadius: RADIUS.xl,
     borderTopRightRadius: RADIUS.xl,
     padding: 24,
-    gap: 14,
+    paddingBottom: 32,
+    maxHeight: '85%',
   },
   modalHandle: { width: 40, height: 4, backgroundColor: COLORS.border, borderRadius: 2, alignSelf: 'center', marginBottom: 4 },
-  modalTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '700' },
-  fieldLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
+  modalTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 16 },
+  fieldLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600', marginBottom: 8 },
   input: {
     backgroundColor: COLORS.bgInput,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
     color: COLORS.textPrimary,
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 16,
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    textAlign: 'center',
-    letterSpacing: 4,
+    paddingVertical: 12,
+    marginBottom: 12,
   },
   previewBox: {
     flexDirection: 'row',
@@ -273,9 +470,20 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: COLORS.primary + '30',
+    marginBottom: 16,
   },
   previewText: { color: COLORS.primary, fontSize: 14, fontWeight: '600' },
-  modalActions: { flexDirection: 'row', gap: 12 },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.md,
+    padding: 12,
+    marginBottom: 16,
+  },
+  infoText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '500' },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 16 },
   cancelBtn: {
     flex: 1,
     paddingVertical: 14,

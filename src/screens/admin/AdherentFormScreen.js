@@ -216,7 +216,7 @@ export default function AdherentFormScreen({ navigation, route }) {
 
         if (saisonActive) {
           const todayIso = today.toISOString();
-          await enrollAdherent(adherent.id, saisonActive.id, todayIso);
+          await enrollAdherent(adherent.id, saisonActive.id, todayIso, form.assure ? 1 : 0);
 
           let initialPaymentRemaining = getInitialPaymentAmount();
           const schedule = generatePaymentSchedule(saisonActive.annee, config, todayIso);
@@ -743,7 +743,12 @@ export default function AdherentFormScreen({ navigation, route }) {
           </View>
         ) : null}
 
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave} activeOpacity={0.85} disabled={loading}>
+        <TouchableOpacity 
+          style={[styles.saveBtn, !isEdit && !saisonActive && styles.saveBtnDisabled]} 
+          onPress={handleSave} 
+          activeOpacity={0.85} 
+          disabled={loading || (!isEdit && !saisonActive)}
+        >
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
@@ -757,6 +762,18 @@ export default function AdherentFormScreen({ navigation, route }) {
         </TouchableOpacity>
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {!isEdit && !saisonActive && (
+        <View style={styles.warningBanner}>
+          <MaterialCommunityIcons name="alert-circle" size={20} color={COLORS.danger} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={styles.warningTitle}>Saison inactive</Text>
+            <Text style={styles.warningText}>
+              Créez et activez une saison avant d'ajouter des adhérents
+            </Text>
+          </View>
+        </View>
+      )}
 
       {createdAdherent && (
         <AdherentCardModal
@@ -1132,6 +1149,10 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     gap: 10,
     ...SHADOWS.button,
   },
+  saveBtnDisabled: {
+    backgroundColor: COLORS.textMuted,
+    opacity: 0.5,
+  },
   saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 
   // ── Catégorie override ──
@@ -1221,6 +1242,26 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   catResetText: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.danger + '15',
+    borderTopWidth: 1,
+    borderColor: COLORS.danger + '40',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  warningTitle: {
+    color: COLORS.danger,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  warningText: {
+    color: COLORS.danger,
+    fontSize: 12,
+    marginTop: 2,
+    fontWeight: '500',
   },
 });
 

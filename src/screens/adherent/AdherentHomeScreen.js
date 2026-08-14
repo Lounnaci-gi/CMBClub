@@ -10,14 +10,19 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import PaymentCard from '../../components/PaymentCard';
 import CategoryBadge from '../../components/CategoryBadge';
-import useTheme from '../../theme/useTheme';
+import useTheme, { useResponsive } from '../../theme/useTheme';
 import { getCategoryByAge, getEffectiveCategory, calculateAge } from '../../utils/categories';
 import { calculateBalance, PAYMENT_STATUS } from '../../utils/payments';
 import { getAdherentById, getPaiementsByAdherent } from '../../database/database';
 
 export default function AdherentHomeScreen() {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
-  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const { isSmall, isTablet, isDesktop, horizontalPadding } = useResponsive();
+  const isLarge = isTablet || isDesktop;
+  const styles = useMemo(
+    () => createStyles(COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding),
+    [COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding],
+  );
   const { user, saisonActive, creneaux, loadSaisons, loadCreneaux, getPresencesAdherent, logout } = useStore();
   const [adherent, setAdherent] = useState(null);
   const [paiements, setPaiements] = useState([]);
@@ -79,31 +84,35 @@ export default function AdherentHomeScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       <LinearGradient colors={[COLORS.bg, COLORS.bgCard]} style={styles.header}>
-        <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.greeting}>Mon espace</Text>
-            <Text style={styles.userName}>
-              {adherent ? `${adherent.prenom} ${adherent.nom}` : user?.username || 'Adhérent'}
-            </Text>
+        <View style={styles.headerInner}>
+          <View style={styles.headerTop}>
+            <View>
+              <Text style={styles.greeting}>Mon espace</Text>
+              <Text style={styles.userName}>
+                {adherent ? `${adherent.prenom} ${adherent.nom}` : user?.username || 'Adhérent'}
+              </Text>
+            </View>
+            <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+              <MaterialCommunityIcons name="logout" size={22} color={COLORS.textSecondary} />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
-            <MaterialCommunityIcons name="logout" size={22} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
 
-        {saisonActive && (
-          <View style={styles.saisonBadge}>
-            <MaterialCommunityIcons name="calendar-check" size={14} color={COLORS.secondary} />
-            <Text style={styles.saisonText}>Saison {saisonActive.label}</Text>
-          </View>
-        )}
+          {saisonActive && (
+            <View style={styles.saisonBadge}>
+              <MaterialCommunityIcons name="calendar-check" size={14} color={COLORS.secondary} />
+              <Text style={styles.saisonText}>Saison {saisonActive.label}</Text>
+            </View>
+          )}
+        </View>
       </LinearGradient>
 
       <ScrollView
         style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.bodyWrapper}>
         {!user?.adherentId ? (
           <View style={styles.empty}>
             <MaterialCommunityIcons name="account-off" size={48} color={COLORS.textMuted} />
@@ -338,18 +347,24 @@ export default function AdherentHomeScreen() {
             </View>
           </>
         )}
-        <View style={{ height: 40 }} />
+          <View style={{ height: 40 }} />
+        </View>
       </ScrollView>
     </View>
   );
 }
 
-const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: {
     paddingTop: 56,
-    paddingHorizontal: 20,
+    paddingHorizontal: horizontalPadding,
     paddingBottom: 20,
+  },
+  headerInner: {
+    width: '100%',
+    maxWidth: 840,
+    alignSelf: 'center',
     gap: 10,
   },
   headerTop: {
@@ -358,7 +373,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     alignItems: 'flex-start',
   },
   greeting: { color: COLORS.textSecondary, fontSize: 14 },
-  userName: { color: COLORS.textPrimary, fontSize: 24, fontWeight: '800' },
+  userName: { color: COLORS.textPrimary, fontSize: isSmall ? 20 : isLarge ? 26 : 24, fontWeight: '800' },
   logoutBtn: {
     backgroundColor: COLORS.bgInput,
     borderRadius: RADIUS.full,
@@ -380,6 +395,13 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   },
   saisonText: { color: COLORS.secondary, fontSize: 13, fontWeight: '600' },
   scroll: { flex: 1 },
+  scrollContent: {
+    alignItems: 'center',
+  },
+  bodyWrapper: {
+    width: '100%',
+    maxWidth: 840,
+  },
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',

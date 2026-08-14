@@ -41,8 +41,9 @@ async function initDatabase(database) {
       label TEXT NOT NULL,
       annee INTEGER NOT NULL,
       dateDebut TEXT NOT NULL,
-      dateFin TEXT NOT NULL,
+      dateFin TEXT,
       actif INTEGER DEFAULT 0,
+      statut TEXT DEFAULT 'ouvert',
       createdAt TEXT NOT NULL
     );
 
@@ -517,6 +518,57 @@ export async function activateSaison(saisonId) {
   const db = await getDatabase();
   await db.runAsync('UPDATE saisons SET actif = 0');
   await db.runAsync('UPDATE saisons SET actif = 1 WHERE id = ?', [saisonId]);
+}
+
+export async function updateSaison(saisonId, { dateDebut, dateFin }) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.updateSaison(saisonId, { dateDebut, dateFin });
+    } catch (e) {
+      console.warn('Cloudflare updateSaison fallback:', e.message);
+    }
+  }
+  const db = await getDatabase();
+  await db.runAsync(
+    'UPDATE saisons SET dateDebut = ?, dateFin = ? WHERE id = ?',
+    [dateDebut, dateFin, saisonId]
+  );
+}
+
+export async function deleteSaison(saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.deleteSaison(saisonId);
+    } catch (e) {
+      console.warn('Cloudflare deleteSaison fallback:', e.message);
+    }
+  }
+  const db = await getDatabase();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM presences WHERE saisonId = ?', [saisonId]);
+    await db.runAsync('DELETE FROM paiements WHERE saisonId = ?', [saisonId]);
+    await db.runAsync('DELETE FROM adherent_saisons WHERE saisonId = ?', [saisonId]);
+    await db.runAsync('DELETE FROM saisons WHERE id = ?', [saisonId]);
+  });
+}
+
+export async function closeSaison(saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      await CloudflareAPI.closeSaison(saisonId);
+    } catch (e) {
+      console.warn('Cloudflare closeSaison fallback:', e.message);
+    }
+  }
+  const db = await getDatabase();
+  const saison = await db.getFirstAsync('SELECT statut FROM saisons WHERE id = ?', [saisonId]);
+  const newStatut = saison?.statut === 'ouvert' ? 'fermé' : 'ouvert';
+  const dateClose = newStatut === 'fermé' ? new Date().toISOString() : null;
+  
+  await db.runAsync(
+    'UPDATE saisons SET statut = ?, dateFin = ? WHERE id = ?',
+    [newStatut, dateClose, saisonId]
+  );
 }
 
 // ──────────────── ADHÉRENTS ────────────────

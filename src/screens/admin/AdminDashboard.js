@@ -13,7 +13,12 @@ import useTheme from '../../theme/useTheme';
 
 export default function AdminDashboard({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
-  const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+  const { isSmall, isTablet, isDesktop, dashboardActionCols, statCols, horizontalPadding } = useResponsive();
+  const isLarge = isTablet || isDesktop;
+  const styles = useMemo(
+    () => createStyles(COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding),
+    [COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding],
+  );
   const { user, stats, saisonActive, loadStats, loadSaisons, loadAdherents, loadRemises, loadConfig, logout } = useStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
@@ -21,7 +26,7 @@ export default function AdminDashboard({ navigation }) {
     await Promise.all([loadSaisons(), loadAdherents(), loadRemises(), loadConfig()]);
     const saison = useStore.getState().saisonActive;
     if (saison) await loadStats(saison.id);
-  }, []);
+  }, [loadSaisons, loadAdherents, loadRemises, loadConfig, loadStats]);
 
   useFocusEffect(useCallback(() => { loadAll(); }, [loadAll]));
 
@@ -40,6 +45,9 @@ export default function AdminDashboard({ navigation }) {
     { icon: 'cog', label: 'Paramètres', color: COLORS.textSecondary, screen: 'Config' },
   ];
 
+  // Calcul dynamique de la largeur des cartes d'action
+  const actionCardWidth = dashboardActionCols === 6 ? '15.3%' : dashboardActionCols === 4 ? '23.5%' : dashboardActionCols === 3 ? '31%' : '48%';
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -47,94 +55,104 @@ export default function AdminDashboard({ navigation }) {
         colors={[COLORS.bg, COLORS.bgCard]}
         style={styles.header}
       >
-        <View style={styles.headerContent}>
-          <View>
-            <Text style={styles.greeting}>Bonjour,</Text>
-            <Text style={styles.userName}>{user?.username || 'Admin'} 👋</Text>
+        <View style={styles.headerInner}>
+          <View style={styles.headerContent}>
+            <View>
+              <Text style={styles.greeting}>Bonjour,</Text>
+              <Text style={styles.userName}>{user?.username || 'Admin'} 👋</Text>
+            </View>
+            <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+              <MaterialCommunityIcons name="logout" size={22} color={COLORS.textSecondary} />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
-            <MaterialCommunityIcons name="logout" size={22} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-        </View>
 
-        {saisonActive && (
-          <View style={styles.saisonBadge}>
-            <MaterialCommunityIcons name="calendar-check" size={14} color={COLORS.secondary} />
-            <Text style={styles.saisonText}>Saison active : {saisonActive.label}</Text>
-          </View>
-        )}
+          {saisonActive && (
+            <View style={styles.saisonBadge}>
+              <MaterialCommunityIcons name="calendar-check" size={14} color={COLORS.secondary} />
+              <Text style={styles.saisonText}>Saison active : {saisonActive.label}</Text>
+            </View>
+          )}
+        </View>
       </LinearGradient>
 
       <ScrollView
         style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Stats */}
-        <Text style={styles.sectionTitle}>Statistiques de la saison</Text>
-        <View style={styles.statsRow}>
-          <StatCard icon="account-group" label="Adhérents" value={stats.nbAdherents} color={COLORS.primary} />
-          <StatCard icon="cash-check" label="Encaissé" value={(stats.collected / 1000).toFixed(1)} suffix="k DA" color={COLORS.success} />
-          <StatCard icon="alert-circle" label="Retards" value={stats.retards} color={COLORS.danger} />
-        </View>
+        <View style={styles.bodyWrapper}>
+          {/* Stats */}
+          <Text style={styles.sectionTitle}>Statistiques de la saison</Text>
+          <View style={[styles.statsRow, statCols === 1 && styles.statsRowVertical]}>
+            <StatCard icon="account-group" label="Adhérents" value={stats.nbAdherents} color={COLORS.primary} />
+            <StatCard icon="cash-check" label="Encaissé" value={(stats.collected / 1000).toFixed(1)} suffix="k DA" color={COLORS.success} />
+            <StatCard icon="alert-circle" label="Retards" value={stats.retards} color={COLORS.danger} />
+          </View>
 
-        {/* Quick Actions */}
-        <Text style={styles.sectionTitle}>Actions rapides</Text>
-        <View style={styles.actionsGrid}>
-          {quickActions.map((action) => (
-            <TouchableOpacity
-              key={action.label}
-              style={[styles.actionCard, { borderColor: action.color + '30' }]}
-              onPress={() => navigation.navigate(action.screen)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
-                <MaterialCommunityIcons name={action.icon} size={26} color={action.color} />
-              </View>
-              <Text style={styles.actionLabel}>{action.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+          {/* Quick Actions */}
+          <Text style={styles.sectionTitle}>Actions rapides</Text>
+          <View style={styles.actionsGrid}>
+            {quickActions.map((action) => (
+              <TouchableOpacity
+                key={action.label}
+                style={[styles.actionCard, { width: actionCardWidth, borderColor: action.color + '30' }]}
+                onPress={() => navigation.navigate(action.screen)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                  <MaterialCommunityIcons name={action.icon} size={isSmall ? 22 : 26} color={action.color} />
+                </View>
+                <Text style={styles.actionLabel} numberOfLines={2}>{action.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-        {/* Recent activity section */}
-        <Text style={styles.sectionTitle}>Module de gestion</Text>
-        <View style={styles.menuList}>
-          {[
-            { icon: 'account-multiple', label: 'Liste des adhérents', sub: 'Filtrer, rechercher, voir fiches', screen: 'AdherentList', color: COLORS.primary },
-            { icon: 'clipboard-check', label: 'Gestion des présences', sub: 'Appel par créneau & suivi d\'assiduité', screen: 'Presences', color: COLORS.success },
-            { icon: 'calendar-clock', label: 'Planning & Créneaux', sub: 'Horaires par discipline et catégorie', screen: 'Creneaux', color: COLORS.secondary },
-            { icon: 'calendar-month', label: 'Gestion des saisons', sub: 'Créer et activer des saisons', screen: 'Seasons', color: COLORS.catCadet },
-            { icon: 'tune', label: 'Configuration', sub: 'Tarifs, remises, paramètres', screen: 'Config', color: COLORS.catMinime },
-          ].map((item) => (
-            <TouchableOpacity
-              key={item.label}
-              style={styles.menuItem}
-              onPress={() => navigation.navigate(item.screen)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.menuIcon, { backgroundColor: item.color + '20' }]}>
-                <MaterialCommunityIcons name={item.icon} size={22} color={item.color} />
-              </View>
-              <View style={styles.menuText}>
-                <Text style={styles.menuLabel}>{item.label}</Text>
-                <Text style={styles.menuSub}>{item.sub}</Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
-          ))}
+          {/* Module de gestion */}
+          <Text style={styles.sectionTitle}>Module de gestion</Text>
+          <View style={[styles.menuList, isLarge && styles.menuGrid]}>
+            {[
+              { icon: 'account-multiple', label: 'Liste des adhérents', sub: 'Filtrer, rechercher, voir fiches', screen: 'AdherentList', color: COLORS.primary },
+              { icon: 'clipboard-check', label: 'Gestion des présences', sub: 'Appel par créneau & suivi d\'assiduité', screen: 'Presences', color: COLORS.success },
+              { icon: 'calendar-clock', label: 'Planning & Créneaux', sub: 'Horaires par discipline et catégorie', screen: 'Creneaux', color: COLORS.secondary },
+              { icon: 'calendar-month', label: 'Gestion des saisons', sub: 'Créer et activer des saisons', screen: 'Seasons', color: COLORS.catCadet },
+              { icon: 'tune', label: 'Configuration', sub: 'Tarifs, remises, paramètres', screen: 'Config', color: COLORS.catMinime },
+            ].map((item) => (
+              <TouchableOpacity
+                key={item.label}
+                style={[styles.menuItem, isLarge && styles.menuItemLarge]}
+                onPress={() => navigation.navigate(item.screen)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.menuIcon, { backgroundColor: item.color + '20' }]}>
+                  <MaterialCommunityIcons name={item.icon} size={22} color={item.color} />
+                </View>
+                <View style={styles.menuText}>
+                  <Text style={styles.menuLabel}>{item.label}</Text>
+                  <Text style={styles.menuSub}>{item.sub}</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={{ height: 40 }} />
         </View>
-        <View style={{ height: 40 }} />
       </ScrollView>
     </View>
   );
 }
 
-const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
+const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: {
     paddingTop: 56,
-    paddingHorizontal: 20,
+    paddingHorizontal: horizontalPadding,
     paddingBottom: 20,
+  },
+  headerInner: {
+    width: '100%',
+    maxWidth: 1000,
+    alignSelf: 'center',
     gap: 10,
   },
   headerContent: {
@@ -143,7 +161,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     alignItems: 'flex-start',
   },
   greeting: { color: COLORS.textSecondary, fontSize: 14 },
-  userName: { color: COLORS.textPrimary, fontSize: 24, fontWeight: '800' },
+  userName: { color: COLORS.textPrimary, fontSize: isSmall ? 20 : isLarge ? 28 : 24, fontWeight: '800' },
   logoutBtn: {
     backgroundColor: COLORS.bgInput,
     borderRadius: RADIUS.full,
@@ -165,51 +183,64 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   },
   saisonText: { color: COLORS.secondary, fontSize: 13, fontWeight: '600' },
   scroll: { flex: 1 },
+  scrollContent: {
+    alignItems: 'center',
+  },
+  bodyWrapper: {
+    width: '100%',
+    maxWidth: 1000,
+  },
   sectionTitle: {
     color: COLORS.textPrimary,
-    fontSize: 17,
+    fontSize: isSmall ? 16 : 18,
     fontWeight: '700',
-    paddingHorizontal: 20,
-    marginTop: 24,
+    paddingHorizontal: horizontalPadding,
+    marginTop: isSmall ? 18 : 24,
     marginBottom: 12,
   },
   statsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 10,
+    paddingHorizontal: horizontalPadding,
+    gap: isSmall ? 8 : 10,
+  },
+  statsRowVertical: {
+    flexDirection: 'column',
   },
   actionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: 16,
-    gap: 10,
+    paddingHorizontal: horizontalPadding,
+    gap: isSmall ? 8 : 10,
   },
   actionCard: {
-    width: '30.5%',
     backgroundColor: COLORS.bgCard,
     borderRadius: RADIUS.lg,
-    padding: 14,
+    padding: isSmall ? 10 : 14,
     alignItems: 'center',
     gap: 8,
     borderWidth: 1,
     ...SHADOWS.card,
   },
   actionIcon: {
-    width: 50,
-    height: 50,
+    width: isSmall ? 42 : 50,
+    height: isSmall ? 42 : 50,
     borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   actionLabel: {
     color: COLORS.textPrimary,
-    fontSize: 11,
+    fontSize: isSmall ? 10 : 11,
     fontWeight: '600',
     textAlign: 'center',
   },
   menuList: {
-    paddingHorizontal: 16,
+    paddingHorizontal: horizontalPadding,
     gap: 10,
+  },
+  menuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
   menuItem: {
     flexDirection: 'row',
@@ -221,6 +252,9 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     ...SHADOWS.card,
+  },
+  menuItemLarge: {
+    width: '48.8%',
   },
   menuIcon: {
     width: 44,

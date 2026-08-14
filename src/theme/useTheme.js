@@ -18,4 +18,4 @@ export function useThemedStyles(factory) {
     () => factory(theme.colors, theme.RADIUS, theme.shadows),
     [theme.colors, theme.RADIUS, theme.shadows, factory],
   );
-}
+}export { useResponsive, ResponsiveContainer, MAX_CONTENT_WIDTHS, BREAKPOINTS } from './responsive';
