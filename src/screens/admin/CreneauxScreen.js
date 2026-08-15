@@ -15,7 +15,7 @@ export default function CreneauxScreen({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   
-  const { creneaux, disciplines, loadCreneaux, loadDisciplines, createCreneau, updateCreneau, deleteCreneau } = useStore();
+  const { creneaux, disciplines, saisonActive, loadCreneaux, loadDisciplines, loadSaisons, createCreneau, updateCreneau, deleteCreneau } = useStore();
 
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -38,8 +38,8 @@ export default function CreneauxScreen({ navigation }) {
   const [submitting, setSubmitting] = useState(false);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([loadCreneaux(), loadDisciplines()]);
-  }, [loadCreneaux, loadDisciplines]);
+    await Promise.all([loadCreneaux(), loadDisciplines(), loadSaisons()]);
+  }, [loadCreneaux, loadDisciplines, loadSaisons]);
 
   useEffect(() => {
     loadAll();
@@ -56,6 +56,10 @@ export default function CreneauxScreen({ navigation }) {
   }, [disciplines]);
 
   const openModal = (item = null) => {
+    if (!item && !saisonActive) {
+      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’ajouter un créneau.');
+      return;
+    }
     if (item) {
       setEditingCreneau(item);
       setDiscipline(item.discipline);
@@ -224,7 +228,7 @@ export default function CreneauxScreen({ navigation }) {
           <Text style={styles.topTitle}>Horaires & Créneaux</Text>
           <Text style={styles.topSubtitle}>{filteredCreneaux.length} créneau(x) configuré(s)</Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => openModal()} activeOpacity={0.8}>
+        <TouchableOpacity style={[styles.addBtn, !saisonActive && { opacity: 0.5 }]} onPress={() => openModal()} activeOpacity={0.8}>
           <MaterialCommunityIcons name="plus" size={20} color="#FFF" />
           <Text style={styles.addBtnText}>Créneau</Text>
         </TouchableOpacity>

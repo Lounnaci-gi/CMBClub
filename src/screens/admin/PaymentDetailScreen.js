@@ -27,6 +27,7 @@ export default function PaymentDetailScreen({ route }) {
   const [refreshing, setRefreshing] = useState(false);
 
   const adherent = adherents.find(a => a.id === adherentId);
+  const canManagePayments = Boolean(saisonActive);
 
   const load = useCallback(async () => {
     if (adherent && saisonActive) {
@@ -42,6 +43,10 @@ export default function PaymentDetailScreen({ route }) {
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const openPayModal = (p) => {
+    if (!canManagePayments) {
+      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’enregistrer un paiement.');
+      return;
+    }
     setSelected(p);
     const remise = remises.find(r => r.id === p.remiseId);
     const remiseM = remise
@@ -57,6 +62,10 @@ export default function PaymentDetailScreen({ route }) {
 
   const handleSave = async () => {
     if (!selected) return;
+    if (!canManagePayments) {
+      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’enregistrer un paiement.');
+      return;
+    }
     setSaving(true);
     try {
       const remiseMontant = selectedRemise
@@ -195,6 +204,10 @@ export default function PaymentDetailScreen({ route }) {
   }, [selectedMultiItems, selectedRemiseMulti]);
 
   const openMultiModal = () => {
+    if (!canManagePayments) {
+      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’enregistrer un paiement.');
+      return;
+    }
     if (unpaidPaiements.length === 0) {
       Alert.alert('Info', 'Tous les paiements de la saison sont déjà réglés !');
       return;
@@ -260,6 +273,10 @@ export default function PaymentDetailScreen({ route }) {
   const surplusMulti = Math.max(0, montantAvanceNum - totalDuMulti);
 
   const handleSaveMultiMonth = async () => {
+    if (!canManagePayments) {
+      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’enregistrer un paiement.');
+      return;
+    }
     if (selectedMultiItems.length === 0) {
       Alert.alert('Info', 'Aucun paiement sélectionné.');
       return;
@@ -388,7 +405,7 @@ export default function PaymentDetailScreen({ route }) {
 
           {/* Bouton Paiement Multi-mois */}
           <TouchableOpacity
-            style={styles.multiPayBtn}
+            style={[styles.multiPayBtn, !canManagePayments && { opacity: 0.5 }]}
             onPress={openMultiModal}
             activeOpacity={0.85}
           >

@@ -181,6 +181,12 @@ export default function PresencesScreen({ route }) {
       const currentCreneaux = useStore.getState().creneaux;
       const currentSaison = useStore.getState().saisonActive;
 
+      if (!currentSaison) {
+        setAdherents([]);
+        setPresenceMap({});
+        return;
+      }
+
       const targetCreneau = currentCreneaux.find(c => c.id === selectedCreneauId) || currentCreneaux[0] || null;
       if (!selectedCreneauId && targetCreneau) {
         setSelectedCreneauId(targetCreneau.id);
@@ -331,6 +337,10 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleSave = async () => {
+    if (!saisonActive) {
+      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant de gérer les absences.');
+      return;
+    }
     if (isNotStartedYet) {
       Alert.alert('Action interdite', 'L\'enregistrement des présences est impossible avant le début du créneau.');
       return;
@@ -427,10 +437,18 @@ export default function PresencesScreen({ route }) {
   const todayStr = getLocalDateString();
   const isToday = dateSeance === todayStr;
   const isFuture = dateSeance > todayStr;
+  const noOpenSeason = !saisonActive;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+
+      {noOpenSeason && (
+        <View style={styles.futureWarningBox}>
+          <MaterialCommunityIcons name="lock" size={20} color={COLORS.danger} />
+          <Text style={styles.futureWarningText}>Aucune saison ouverte : la gestion des absences est indisponible.</Text>
+        </View>
+      )}
 
       {/* Creneaux Selector - filtré uniquement par le jour sélectionné */}
       <View style={styles.selectorSection}>
@@ -507,7 +525,7 @@ export default function PresencesScreen({ route }) {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={[styles.markAllBtn, isFuture && { opacity: 0.5 }]} onPress={handleMarkAllPresent} disabled={isFuture}>
+          <TouchableOpacity style={[styles.markAllBtn, (isFuture || noOpenSeason) && { opacity: 0.5 }]} onPress={handleMarkAllPresent} disabled={isFuture || noOpenSeason}>
             <MaterialCommunityIcons name="check-all" size={16} color={COLORS.success} />
             <Text style={styles.markAllText}>Tout présent</Text>
           </TouchableOpacity>
@@ -734,13 +752,15 @@ export default function PresencesScreen({ route }) {
           {adherents.length > 0 && (
             <View style={styles.footer}>
               <TouchableOpacity
-                style={[styles.saveBtn, (isFuture || isNotStartedYet) && { backgroundColor: COLORS.textMuted }]}
+                style={[styles.saveBtn, (isFuture || isNotStartedYet || noOpenSeason) && { backgroundColor: COLORS.textMuted }]}
                 onPress={handleSave}
-                disabled={saving || isFuture || isNotStartedYet}
+                disabled={saving || isFuture || isNotStartedYet || noOpenSeason}
               >
                 <MaterialCommunityIcons name={isFuture || isNotStartedYet ? 'cancel' : 'content-save'} size={20} color="#FFF" />
                 <Text style={styles.saveBtnText}>
-                  {isFuture
+                  {noOpenSeason
+                    ? 'Saison ouverte requise'
+                    : isFuture
                     ? 'Date future (Saisie interdite)'
                     : isNotStartedYet
                     ? 'Créneau non débuté'

@@ -198,6 +198,10 @@ export default function AdherentFormScreen({ navigation, route }) {
   };
 
   const handleSave = async () => {
+    if (!isEdit && !saisonActive) {
+      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’ajouter un adhérent.');
+      return;
+    }
     if (!validate()) return;
     setLoading(true);
     try {

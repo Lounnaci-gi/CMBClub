@@ -37,9 +37,21 @@ export default function SeasonScreen() {
   
   const [refreshing, setRefreshing] = useState(false);
 
+  const aucuneSaisonOuverte = useMemo(
+    () => !saisons.some((saison) => saison.statut !== 'fermé'),
+    [saisons],
+  );
+
   useFocusEffect(useCallback(() => { loadSaisons(); }, []));
 
   const onRefresh = async () => { setRefreshing(true); await loadSaisons(); setRefreshing(false); };
+
+  const openCreateModal = () => {
+    const currentYear = getCurrentSeasonYear();
+    const currentYearAlreadyExists = saisons.some((saison) => Number(saison.annee) === currentYear);
+    setAnnee(String(aucuneSaisonOuverte && currentYearAlreadyExists ? currentYear + 1 : currentYear));
+    setShowCreateModal(true);
+  };
 
   const handleCreate = async () => {
     const y = parseInt(annee);
@@ -48,7 +60,7 @@ export default function SeasonScreen() {
       return;
     }
     const check = canCreateSeason(y);
-    if (!check.allowed) {
+    if (!aucuneSaisonOuverte && !check.allowed) {
       Alert.alert('Création impossible ⛔', check.reason);
       return;
     }
@@ -65,11 +77,17 @@ export default function SeasonScreen() {
       dateDebut: `${y}-01-01`,
       // D1 requires an end date; a season follows the calendar year.
       dateFin: `${y}-12-31`,
-      actif: 0,
+      // Sans saison ouverte, la nouvelle devient la saison courante.
+      actif: aucuneSaisonOuverte,
     });
     setShowCreateModal(false);
     setAnnee(String(getCurrentSeasonYear()));
-    Alert.alert('✅ Saison créée', `La saison ${label} a été créée et est ouverte pour les inscriptions.`);
+    Alert.alert(
+      '✅ Saison créée',
+      aucuneSaisonOuverte
+        ? `La saison ${label} est créée, ouverte et maintenant active.`
+        : `La saison ${label} a été créée et est ouverte pour les inscriptions.`,
+    );
   };
 
   const handleActivate = (saison) => {
@@ -82,8 +100,12 @@ export default function SeasonScreen() {
         {
           text: 'Activer',
           onPress: async () => {
-            await activateSaison(saison.id);
-            Alert.alert('Saison activée 🚀', `La saison ${saison.label} est désormais active.`);
+            try {
+              await activateSaison(saison.id);
+              Alert.alert('Saison activée 🚀', `La saison ${saison.label} est désormais active.`);
+            } catch (e) {
+              Alert.alert('Action impossible', e.message || 'Impossible d’activer cette saison.');
+            }
           },
         },
       ],
@@ -251,12 +273,12 @@ export default function SeasonScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.activateBtn, isActive && styles.activateBtnDone]}
+            style={[styles.activateBtn, (isActive || isClosed) && styles.activateBtnDone]}
             onPress={() => handleActivate(item)}
-            disabled={isActive}
+            disabled={isActive || isClosed}
           >
-            <Text style={[styles.activateBtnText, isActive && { color: COLORS.success }]}>
-              {isActive ? 'Active' : 'Activer'}
+            <Text style={[styles.activateBtnText, (isActive || isClosed) && { color: isClosed ? COLORS.textMuted : COLORS.success }]}>
+              {isActive ? 'Active' : isClosed ? 'Fermée' : 'Activer'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -274,7 +296,12 @@ export default function SeasonScreen() {
             {saisons.length} saison{saisons.length > 1 ? 's' : ''} configurée{saisons.length > 1 ? 's' : ''}
           </Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => setShowCreateModal(true)}>
+        <TouchableOpacity
+          style={styles.addBtn}
+          onPress={openCreateModal}
+          accessibilityRole="button"
+          accessibilityLabel="Créer une nouvelle saison"
+        >
           <MaterialCommunityIcons name="plus" size={20} color="#fff" />
           <Text style={styles.addBtnText}>Nouvelle</Text>
         </TouchableOpacity>
@@ -317,6 +344,15 @@ export default function SeasonScreen() {
                 <MaterialCommunityIcons name="information" size={16} color={COLORS.primary} />
                 <Text style={styles.previewText}>
                   Saison {generateSeasonLabel(parseInt(annee))} (01 Jan {annee} – 31 Déc {annee})
+                </Text>
+              </View>
+            )}
+
+            {aucuneSaisonOuverte && (
+              <View style={styles.infoBox}>
+                <MaterialCommunityIcons name="lock-open-variant" size={16} color={COLORS.success} />
+                <Text style={styles.infoText}>
+                  Aucune saison n’est ouverte : cette nouvelle saison deviendra automatiquement active.
                 </Text>
               </View>
             )}

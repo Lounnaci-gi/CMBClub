@@ -489,13 +489,35 @@ export async function getSaisons() {
 export async function getSaisonActive() {
   if (isCloudflareEnabled()) {
     try {
-      return await CloudflareAPI.getSaisonActive();
+      const saison = await CloudflareAPI.getSaisonActive();
+      return saison?.statut === 'ouvert' ? saison : null;
     } catch (e) {
       console.warn('Cloudflare getSaisonActive fallback:', e.message);
     }
   }
   const db = await getDatabase();
-  return await db.getFirstAsync('SELECT * FROM saisons WHERE actif = 1 LIMIT 1');
+  return await db.getFirstAsync(
+    "SELECT * FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
+  );
+}
+
+const OPEN_SEASON_REQUIRED_MESSAGE = 'Aucune saison ouverte. Créez ou rouvrez une saison avant de continuer.';
+
+async function requireOpenActiveSeason(database, saisonId) {
+  const saison = await database.getFirstAsync(
+    "SELECT id FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
+  );
+  if (!saison) throw new Error(OPEN_SEASON_REQUIRED_MESSAGE);
+  if (saisonId && saison.id !== saisonId) {
+    throw new Error('La saison concernée n’est pas la saison ouverte active.');
+  }
+  return saison;
+}
+
+function rethrowOpenSeasonError(error) {
+  if (error?.message?.includes('saison ouverte') || error?.message?.includes('saison fermée')) {
+    throw error;
+  }
 }
 
 export async function createSaison(saison) {
@@ -512,10 +534,15 @@ export async function createSaison(saison) {
     }
   }
   const db = await getDatabase();
-  await db.runAsync(
-    `INSERT INTO saisons (id, label, annee, dateDebut, dateFin, actif, createdAt) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [saisonToCreate.id, saisonToCreate.label, saisonToCreate.annee, saisonToCreate.dateDebut, saisonToCreate.dateFin, saisonToCreate.actif ? 1 : 0],
-  );
+  await db.withTransactionAsync(async () => {
+    if (saisonToCreate.actif) {
+      await db.runAsync('UPDATE saisons SET actif = 0');
+    }
+    await db.runAsync(
+      `INSERT INTO saisons (id, label, annee, dateDebut, dateFin, actif, createdAt) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [saisonToCreate.id, saisonToCreate.label, saisonToCreate.annee, saisonToCreate.dateDebut, saisonToCreate.dateFin, saisonToCreate.actif ? 1 : 0],
+    );
+  });
 }
 
 export async function activateSaison(saisonId) {
@@ -523,10 +550,18 @@ export async function activateSaison(saisonId) {
     try {
       await CloudflareAPI.activateSaison(saisonId);
     } catch (e) {
+      rethrowOpenSeasonError(e);
       console.warn('Cloudflare activateSaison fallback:', e.message);
     }
   }
   const db = await getDatabase();
+  const saison = await db.getFirstAsync(
+    "SELECT COALESCE(statut, 'ouvert') AS statut FROM saisons WHERE id = ?",
+    [saisonId],
+  );
+  if (!saison || saison.statut !== 'ouvert') {
+    throw new Error('Impossible d’activer une saison fermée. Rouvrez-la d’abord.');
+  }
   await db.runAsync('UPDATE saisons SET actif = 0');
   await db.runAsync('UPDATE saisons SET actif = 1 WHERE id = ?', [saisonId]);
 }
@@ -597,11 +632,21 @@ export async function closeSaison(saisonId, credentials = {}) {
   }
   const newStatut = saison?.statut === 'ouvert' ? 'fermé' : 'ouvert';
   const dateClose = newStatut === 'fermé' ? new Date().toISOString() : null;
-  
-  await db.runAsync(
-    'UPDATE saisons SET statut = ?, dateFin = CASE WHEN ? THEN ? ELSE \'\' END WHERE id = ?',
-    [newStatut, newStatut === 'fermé' ? 1 : 0, dateClose, saisonId]
+  const openActiveSeason = await db.getFirstAsync(
+    "SELECT id FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
   );
+  const shouldActivateReopenedSeason = newStatut === 'ouvert' && !openActiveSeason;
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      'UPDATE saisons SET statut = ?, dateFin = CASE WHEN ? THEN ? ELSE \'\' END WHERE id = ?',
+      [newStatut, newStatut === 'fermé' ? 1 : 0, dateClose, saisonId]
+    );
+    if (shouldActivateReopenedSeason) {
+      await db.runAsync('UPDATE saisons SET actif = 0');
+      await db.runAsync('UPDATE saisons SET actif = 1 WHERE id = ?', [saisonId]);
+    }
+  });
 }
 
 // ──────────────── ADHÉRENTS ────────────────
@@ -673,10 +718,12 @@ export async function createAdherent(adherent) {
     try {
       await CloudflareAPI.createAdherent(adherent);
     } catch (e) {
+      rethrowOpenSeasonError(e);
       console.warn('Cloudflare createAdherent fallback:', e.message);
     }
   }
   const db = await getDatabase();
+  await requireOpenActiveSeason(db);
   const now = new Date().toISOString();
   // La date d'inscription est automatiquement la date du jour si non fournie
   const dateInscription = adherent.dateInscription || now.slice(0, 10);
@@ -942,10 +989,12 @@ export async function createPaiement(paiement) {
     try {
       await CloudflareAPI.createPaiement(paiement);
     } catch (e) {
+      rethrowOpenSeasonError(e);
       console.warn('Cloudflare createPaiement fallback:', e.message);
     }
   }
   const db = await getDatabase();
+  await requireOpenActiveSeason(db, paiement.saisonId);
   const now = new Date().toISOString();
   await db.runAsync(
     `INSERT INTO paiements (id, adherentId, saisonId, type, label, mois, annee, montantDu, remisePct, remiseMontant, montantPaye, datePaiement, statut, notes, createdAt, updatedAt)
@@ -965,10 +1014,13 @@ export async function updatePaiement(paiement) {
     try {
       await CloudflareAPI.updatePaiement(paiement);
     } catch (e) {
+      rethrowOpenSeasonError(e);
       console.warn('Cloudflare updatePaiement fallback:', e.message);
     }
   }
   const db = await getDatabase();
+  const existing = await db.getFirstAsync('SELECT saisonId FROM paiements WHERE id = ?', [paiement.id]);
+  await requireOpenActiveSeason(db, existing?.saisonId || paiement.saisonId);
   const now = new Date().toISOString();
   await db.runAsync(
     `UPDATE paiements SET montantPaye=?, remisePct=?, remiseMontant=?, datePaiement=?, statut=?, notes=?, updatedAt=? WHERE id=?`,
@@ -1501,10 +1553,12 @@ export async function createCreneau(creneau) {
     try {
       await CloudflareAPI.createCreneau(creneau);
     } catch (e) {
+      rethrowOpenSeasonError(e);
       console.warn('Cloudflare createCreneau fallback:', e.message);
     }
   }
   const db = await getDatabase();
+  await requireOpenActiveSeason(db);
   await checkCreneauOverlap(db, creneau);
 
   const createdAt = creneau.createdAt || new Date().toISOString();
@@ -1633,6 +1687,7 @@ export async function savePresencesSeance(creneauId, dateSeance, saisonId, prese
     try {
       await CloudflareAPI.savePresencesSeance(creneauId, dateSeance, saisonId, presencesList);
     } catch (e) {
+      rethrowOpenSeasonError(e);
       console.warn('Cloudflare savePresencesSeance fallback:', e.message);
     }
   }
@@ -1648,9 +1703,10 @@ export async function savePresencesSeance(creneauId, dateSeance, saisonId, prese
 
   let effectiveSaisonId = saisonId;
   if (!effectiveSaisonId) {
-    const active = await getSaisonActive();
-    effectiveSaisonId = active?.id || 'saison-default';
+    const active = await requireOpenActiveSeason(db);
+    effectiveSaisonId = active.id;
   }
+  await requireOpenActiveSeason(db, effectiveSaisonId);
 
   for (const item of presencesList) {
     const existing = await db.getFirstAsync(

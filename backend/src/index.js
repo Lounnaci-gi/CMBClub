@@ -122,6 +122,24 @@ function resetAttempts(ip) {
 const ok = (c, data) => c.json({ success: true, data });
 const err = (c, message, status = 400) => c.json({ success: false, error: message }, status);
 
+const OPEN_SEASON_REQUIRED_MESSAGE = 'Aucune saison ouverte. Créez ou rouvrez une saison avant de continuer.';
+
+async function requireOpenActiveSeason(c, saisonId) {
+  const activeSaison = await c.env.DB.prepare(
+    "SELECT id FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
+  ).first();
+
+  if (!activeSaison) {
+    return { error: err(c, OPEN_SEASON_REQUIRED_MESSAGE, 409) };
+  }
+
+  if (saisonId && saisonId !== activeSaison.id) {
+    return { error: err(c, 'La saison concernée n’est pas la saison ouverte active.', 409) };
+  }
+
+  return { saison: activeSaison };
+}
+
 // ── Health Check ──
 app.get('/api/health', async (c) => {
   try {
@@ -500,10 +518,9 @@ app.get('/api/saisons', async (c) => {
 
 app.get('/api/saisons/active', async (c) => {
   try {
-    let active = await c.env.DB.prepare('SELECT * FROM saisons WHERE actif = 1 LIMIT 1').first();
-    if (!active) {
-      active = await c.env.DB.prepare('SELECT * FROM saisons ORDER BY annee DESC LIMIT 1').first();
-    }
+    const active = await c.env.DB.prepare(
+      "SELECT * FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
+    ).first();
     return ok(c, active || null);
   } catch (e) {
     return err(c, e.message, 500);
@@ -531,6 +548,9 @@ app.post('/api/saisons', async (c) => {
 app.put('/api/saisons/:id/activate', async (c) => {
   try {
     const id = c.req.param('id');
+    const saison = await c.env.DB.prepare('SELECT *, COALESCE(statut, \'ouvert\') AS statut FROM saisons WHERE id = ?').bind(id).first();
+    if (!saison) return err(c, 'Saison non trouvée', 404);
+    if (saison.statut !== 'ouvert') return err(c, 'Impossible d’activer une saison fermée.', 409);
     await c.env.DB.batch([
       c.env.DB.prepare('UPDATE saisons SET actif = 0'),
       c.env.DB.prepare('UPDATE saisons SET actif = 1 WHERE id = ?').bind(id),
@@ -626,10 +646,21 @@ app.put('/api/saisons/:id/close', async (c) => {
     // La colonne dateFin des anciennes bases D1 est NOT NULL. Une chaîne vide
     // représente donc une saison rouverte sans date de clôture.
     const dateClose = newStatut === 'fermé' ? new Date().toISOString() : '';
-    
-    await c.env.DB.prepare(
-      'UPDATE saisons SET statut = ?, dateFin = ? WHERE id = ?'
-    ).bind(newStatut, dateClose, id).run();
+    const hasOpenActiveSeason = await c.env.DB.prepare(
+      "SELECT id FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
+    ).first();
+    const shouldActivateReopenedSeason = newStatut === 'ouvert' && !hasOpenActiveSeason;
+
+    const statements = [
+      c.env.DB.prepare('UPDATE saisons SET statut = ?, dateFin = ? WHERE id = ?').bind(newStatut, dateClose, id),
+    ];
+    if (shouldActivateReopenedSeason) {
+      statements.push(
+        c.env.DB.prepare('UPDATE saisons SET actif = 0'),
+        c.env.DB.prepare('UPDATE saisons SET actif = 1 WHERE id = ?').bind(id),
+      );
+    }
+    await c.env.DB.batch(statements);
 
     const updated = await c.env.DB.prepare('SELECT * FROM saisons WHERE id = ?').bind(id).first();
     return ok(c, updated);
@@ -680,11 +711,8 @@ app.get('/api/adherents/:id', async (c) => {
 
 app.post('/api/adherents', async (c) => {
   try {
-    // Vérifier qu'il y a une saison active
-    const activeSaison = await c.env.DB.prepare('SELECT id FROM saisons WHERE actif = 1 LIMIT 1').first();
-    if (!activeSaison) {
-      return err(c, 'Impossible de créer un adhérent sans saison active. Veuillez d\'abord créer et activer une saison.', 400);
-    }
+    const seasonCheck = await requireOpenActiveSeason(c);
+    if (seasonCheck.error) return seasonCheck.error;
 
     const raw = await c.req.json();
     const now = new Date().toISOString();
@@ -797,6 +825,8 @@ app.post('/api/adherents/:id/enroll', async (c) => {
   try {
     const id = c.req.param('id');
     const { saisonId, dateInscription, assure } = await c.req.json();
+    const seasonCheck = await requireOpenActiveSeason(c, saisonId);
+    if (seasonCheck.error) return seasonCheck.error;
     const linkId = `${id}-${saisonId}`;
     await c.env.DB.prepare(
       `INSERT INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif)
@@ -843,6 +873,8 @@ app.get('/api/paiements', async (c) => {
 app.post('/api/paiements', async (c) => {
   try {
     const p = await c.req.json();
+    const seasonCheck = await requireOpenActiveSeason(c, p.saisonId);
+    if (seasonCheck.error) return seasonCheck.error;
     const now = new Date().toISOString();
     await c.env.DB.prepare(
       `INSERT INTO paiements (
@@ -867,6 +899,10 @@ app.put('/api/paiements/:id', async (c) => {
   try {
     const id = c.req.param('id');
     const p = await c.req.json();
+    const existing = await c.env.DB.prepare('SELECT saisonId FROM paiements WHERE id = ?').bind(id).first();
+    if (!existing) return err(c, 'Paiement non trouvé', 404);
+    const seasonCheck = await requireOpenActiveSeason(c, existing.saisonId);
+    if (seasonCheck.error) return seasonCheck.error;
     const now = new Date().toISOString();
     await c.env.DB.prepare(
       `UPDATE paiements SET
@@ -960,6 +996,8 @@ app.get('/api/creneaux', async (c) => {
 
 app.post('/api/creneaux', async (c) => {
   try {
+    const seasonCheck = await requireOpenActiveSeason(c);
+    if (seasonCheck.error) return seasonCheck.error;
     const cr = await c.req.json();
     await c.env.DB.prepare(
       `INSERT INTO creneaux (id, discipline, categorie, jour, heureDebut, heureFin, lieu, remarque, createdAt)
@@ -1021,6 +1059,8 @@ app.get('/api/presences/seance', async (c) => {
 app.post('/api/presences/seance', async (c) => {
   try {
     const { creneauId, dateSeance, saisonId, presencesList } = await c.req.json();
+    const seasonCheck = await requireOpenActiveSeason(c, saisonId);
+    if (seasonCheck.error) return seasonCheck.error;
     const now = new Date().toISOString();
     const statements = [];
 
