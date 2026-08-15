@@ -14,6 +14,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
   const loadConfig = useStore(s => s.loadConfig);
+  const restoreSession = useStore(s => s.restoreSession);
   const { colors: COLORS, RADIUS, shadows: SHADOWS, themeId } = useTheme();
   const statusBarStyle = themeId === THEME_IDS.LIGHT ? 'dark-content' : 'light-content';
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
@@ -23,12 +24,13 @@ export default function App() {
       try {
         await getDatabase();
         await loadConfig();
+        await restoreSession();
         setReady(true);
       } catch (e) {
         setError(e.message || 'Erreur d\'initialisation');
       }
     })();
-  }, [loadConfig]);
+  }, [loadConfig, restoreSession]);
 
   if (error) {
     return (

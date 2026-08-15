@@ -132,35 +132,20 @@ app.get('/api/health', async (c) => {
   }
 });
 
-// ── Sécurité : Chiffrement des identifiants & Hachage des mots de passe ──
+// ── Vérification compatible avec les mots de passe déjà enregistrés ──
 const SALT_PREFIX = 'cmb_slt_v1:';
 const ENC_PREFIX = 'cmb_enc_u1:';
-const SECRET_KEY = 'CMBClub@SecureKey#2026_AuthVault';
 
-function encryptUsername(plainUsername) {
-  if (!plainUsername) return '';
-  const text = String(plainUsername).trim();
-  if (text.startsWith(ENC_PREFIX)) return text;
-  const utf8 = unescape(encodeURIComponent(text));
-  let result = '';
-  for (let i = 0; i < utf8.length; i++) {
-    const charCode = utf8.charCodeAt(i);
-    const keyChar = SECRET_KEY.charCodeAt(i % SECRET_KEY.length);
-    const enc = charCode ^ keyChar;
-    result += enc.toString(16).padStart(2, '0');
-  }
-  return `${ENC_PREFIX}${result}`;
-}
-
-function decryptUsername(cipherUsername) {
+function decryptUsername(cipherUsername, cipherKey) {
   if (!cipherUsername) return '';
   const str = String(cipherUsername).trim();
   if (!str.startsWith(ENC_PREFIX)) return str;
+  if (!cipherKey) return '';
   const hex = str.slice(ENC_PREFIX.length);
   let utf8 = '';
   for (let i = 0; i < hex.length; i += 2) {
     const enc = parseInt(hex.substr(i, 2), 16);
-    const keyChar = SECRET_KEY.charCodeAt((i / 2) % SECRET_KEY.length);
+    const keyChar = cipherKey.charCodeAt((i / 2) % cipherKey.length);
     utf8 += String.fromCharCode(enc ^ keyChar);
   }
   try {
@@ -170,12 +155,12 @@ function decryptUsername(cipherUsername) {
   }
 }
 
-function matchesUsername(inputUsername, storedUsername) {
+function matchesUsername(inputUsername, storedUsername, cipherKey) {
   if (!inputUsername || !storedUsername) return false;
   const cleanInput = String(inputUsername).trim().toLowerCase();
-  const decrypted = decryptUsername(storedUsername).toLowerCase();
-  if (cleanInput === decrypted) return true;
   if (cleanInput === String(storedUsername).trim().toLowerCase()) return true;
+  const decrypted = decryptUsername(storedUsername, cipherKey).toLowerCase();
+  if (cleanInput === decrypted) return true;
   return false;
 }
 
@@ -204,10 +189,144 @@ async function verifyPassword(inputPassword, storedHash) {
   const directHash = await sha256(cleanInput);
   if (cleanStored === directHash) return true;
 
-  if (cleanStored === cleanInput) return true;
-
   return false;
 }
+
+const JWT_ISSUER = 'cmbclub-api';
+const JWT_AUDIENCE = 'cmbclub-mobile';
+const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+const REFRESH_TOKEN_TTL_DAYS = 30;
+
+function base64UrlEncode(value) {
+  const bytes = value instanceof Uint8Array ? value : new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function requireJwtSecret(env) {
+  const secret = String(env.JWT_SECRET || '');
+  if (secret.length < 32) throw new Error('JWT_SECRET doit être configuré comme secret Cloudflare (32 caractères minimum).');
+  return secret;
+}
+
+async function jwtKey(env) {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(requireJwtSecret(env)),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify'],
+  );
+}
+
+async function signAccessToken(env, user) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64UrlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = base64UrlEncode(JSON.stringify({
+    iss: JWT_ISSUER,
+    aud: JWT_AUDIENCE,
+    sub: user.id,
+    role: user.role,
+    adherentId: user.adherentId || null,
+    iat: now,
+    exp: now + ACCESS_TOKEN_TTL_SECONDS,
+    jti: crypto.randomUUID(),
+  }));
+  const content = `${header}.${payload}`;
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', await jwtKey(env), new TextEncoder().encode(content)));
+  return `${content}.${base64UrlEncode(signature)}`;
+}
+
+async function verifyAccessToken(env, token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const header = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[0])));
+    if (header.alg !== 'HS256' || header.typ !== 'JWT') return null;
+    const validSignature = await crypto.subtle.verify(
+      'HMAC',
+      await jwtKey(env),
+      base64UrlDecode(parts[2]),
+      new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
+    );
+    if (!validSignature) return null;
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1])));
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      payload.iss !== JWT_ISSUER ||
+      payload.aud !== JWT_AUDIENCE ||
+      !payload.sub ||
+      !Number.isInteger(payload.exp) ||
+      payload.exp <= now ||
+      !Number.isInteger(payload.iat) ||
+      payload.iat > now + 60
+    ) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function refreshExpiry() {
+  return new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function newRefreshToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(48));
+  return base64UrlEncode(bytes);
+}
+
+async function issueRefreshToken(db, userId) {
+  const token = newRefreshToken();
+  const id = crypto.randomUUID();
+  await db.prepare(
+    'INSERT INTO refresh_tokens (id, userId, tokenHash, expiresAt, createdAt) VALUES (?, ?, ?, ?, ?)'
+  ).bind(id, userId, await sha256(token), refreshExpiry(), new Date().toISOString()).run();
+  return { id, token };
+}
+
+function safeUser(user, env) {
+  return {
+    id: user.id,
+    username: decryptUsername(user.username, env.USERNAME_CIPHER_KEY),
+    role: user.role,
+    adherentId: user.adherentId || null,
+  };
+}
+
+async function authenticateRequest(c) {
+  const authorization = c.req.header('Authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  return verifyAccessToken(c.env, match[1]);
+}
+
+const PUBLIC_API_PATHS = new Set([
+  '/api/health',
+  '/api/auth/login',
+  '/api/auth/refresh',
+  '/api/auth/logout',
+]);
+
+app.use('/api/*', async (c, next) => {
+  if (PUBLIC_API_PATHS.has(c.req.path)) return next();
+  try {
+    const authUser = await authenticateRequest(c);
+    if (!authUser) return err(c, 'Jeton d’accès invalide ou expiré.', 401);
+    c.set('authUser', authUser);
+    return next();
+  } catch {
+    return err(c, 'Service d’authentification indisponible.', 503);
+  }
+});
 
 // ── Auth & Users ──
 app.post('/api/auth/login', async (c) => {
@@ -232,68 +351,27 @@ app.post('/api/auth/login', async (c) => {
       return err(c, 'Identifiant ou mot de passe incorrect', 401);
     }
 
-    const cleanUser = rawUser;
-    const cleanPass = rawPass;
-    const encUser = encryptUsername(cleanUser);
+    const { results: users } = await c.env.DB.prepare(
+      'SELECT id, username, password, role, adherentId FROM users'
+    ).all();
+    const user = (users || []).find((candidate) =>
+      matchesUsername(rawUser, candidate.username, c.env.USERNAME_CIPHER_KEY)
+    );
 
-    // 1. Chercher un utilisateur
-    let user = await c.env.DB.prepare(
-      'SELECT id, username, password, role, adherentId FROM users WHERE username = ? OR LOWER(username) = LOWER(?)'
-    ).bind(encUser, cleanUser).first();
-
-    if (!user) {
-      const { results: allUsers } = await c.env.DB.prepare('SELECT id, username, password, role, adherentId FROM users').all();
-      user = (allUsers || []).find(u => matchesUsername(cleanUser, u.username));
-    }
-
-    if (user && (await verifyPassword(cleanPass, user.password))) {
+    if (user && await verifyPassword(rawPass, user.password)) {
       resetAttempts(ip);
-      const needsUserEnc = user.username && !user.username.startsWith(ENC_PREFIX);
-      const needsPassHash = user.password && !user.password.startsWith(SALT_PREFIX);
-      if (needsUserEnc || needsPassHash) {
-        const nextUser = needsUserEnc ? encryptUsername(cleanUser) : user.username;
-        const nextPass = needsPassHash ? await hashPassword(cleanPass) : user.password;
-        await c.env.DB.prepare('UPDATE users SET username = ?, password = ? WHERE id = ?').bind(nextUser, nextPass, user.id).run();
-      }
-      const { password: _, ...safeUser } = user;
-      return ok(c, { user: { ...safeUser, username: decryptUsername(safeUser.username) } });
+      const accessToken = await signAccessToken(c.env, user);
+      const refresh = await issueRefreshToken(c.env.DB, user.id);
+      return ok(c, {
+        user: safeUser(user, c.env),
+        accessToken,
+        refreshToken: refresh.token,
+        expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      });
     }
 
-    // 2. Chercher un adhérent par son code ou son nom de famille
-    const adherent = await c.env.DB.prepare(
-      'SELECT id, code, nom, prenom FROM adherents WHERE LOWER(code) = LOWER(?) OR LOWER(nom) = LOWER(?)'
-    ).bind(cleanUser, cleanUser).first();
-
-    if (adherent) {
-      let adherentUser = await c.env.DB.prepare(
-        'SELECT id, username, password, role, adherentId FROM users WHERE adherentId = ?'
-      ).bind(adherent.id).first();
-
-      if (!adherentUser) {
-        const newId = `user-${adherent.id}`;
-        const encCode = encryptUsername(adherent.code);
-        const hashedPass = await hashPassword(adherent.code);
-        await c.env.DB.prepare(
-          `INSERT INTO users (id, username, password, role, adherentId, createdAt)
-           VALUES (?, ?, ?, 'adherent', ?, datetime('now'))`
-        ).bind(newId, encCode, hashedPass, adherent.id).run();
-        adherentUser = { id: newId, username: encCode, role: 'adherent', adherentId: adherent.id };
-      }
-
-      if ((await verifyPassword(cleanPass, adherentUser.password)) || cleanPass === adherent.code) {
-        resetAttempts(ip);
-        const needsUserEnc = adherentUser.username && !adherentUser.username.startsWith(ENC_PREFIX);
-        const needsPassHash = adherentUser.password && !adherentUser.password.startsWith(SALT_PREFIX);
-        if (needsUserEnc || needsPassHash) {
-          const nextUser = needsUserEnc ? encryptUsername(adherent.code) : adherentUser.username;
-          const nextPass = needsPassHash ? await hashPassword(cleanPass) : adherentUser.password;
-          await c.env.DB.prepare('UPDATE users SET username = ?, password = ? WHERE id = ?').bind(nextUser, nextPass, adherentUser.id).run();
-        }
-        return ok(c, { user: { id: adherentUser.id, username: adherent.code, role: 'adherent', adherentId: adherent.id } });
-      }
-    }
-
-    // Identifiants incorrects → enregistrer la tentative
+    // Identifiants incorrects → enregistrer la tentative.
+    // La table users existante n’est jamais modifiée ni complétée ici.
     recordFailedAttempt(ip);
     const newCheck = checkRateLimit(ip);
     if (!newCheck.allowed) {
@@ -308,42 +386,77 @@ app.post('/api/auth/login', async (c) => {
   }
 });
 
+app.post('/api/auth/refresh', async (c) => {
+  try {
+    const { refreshToken } = await c.req.json().catch(() => ({}));
+    const cleanToken = sanitizeCredential(refreshToken, 512);
+    if (!cleanToken) return err(c, 'Refresh token invalide.', 401);
+
+    const tokenHash = await sha256(cleanToken);
+    const current = await c.env.DB.prepare(
+      'SELECT id, userId, expiresAt, revokedAt FROM refresh_tokens WHERE tokenHash = ?'
+    ).bind(tokenHash).first();
+    if (!current || current.revokedAt || current.expiresAt <= new Date().toISOString()) {
+      return err(c, 'Refresh token invalide ou expiré.', 401);
+    }
+
+    // Une révocation conditionnelle garantit qu’un token n’est utilisable qu’une fois.
+    const revokedAt = new Date().toISOString();
+    const revokeResult = await c.env.DB.prepare(
+      'UPDATE refresh_tokens SET revokedAt = ? WHERE id = ? AND revokedAt IS NULL AND expiresAt > ?'
+    ).bind(revokedAt, current.id, revokedAt).run();
+    if (!revokeResult.meta?.changes) return err(c, 'Refresh token déjà utilisé.', 401);
+
+    const user = await c.env.DB.prepare(
+      'SELECT id, username, role, adherentId FROM users WHERE id = ?'
+    ).bind(current.userId).first();
+    if (!user) return err(c, 'Utilisateur introuvable.', 401);
+
+    const refresh = await issueRefreshToken(c.env.DB, user.id);
+    await c.env.DB.prepare(
+      'UPDATE refresh_tokens SET replacedByTokenId = ? WHERE id = ?'
+    ).bind(refresh.id, current.id).run();
+
+    return ok(c, {
+      user: safeUser(user, c.env),
+      accessToken: await signAccessToken(c.env, user),
+      refreshToken: refresh.token,
+      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+    });
+  } catch (e) {
+    return err(c, e.message, 500);
+  }
+});
+
+app.post('/api/auth/logout', async (c) => {
+  try {
+    const { refreshToken } = await c.req.json().catch(() => ({}));
+    const cleanToken = sanitizeCredential(refreshToken, 512);
+    if (cleanToken) {
+      await c.env.DB.prepare(
+        'UPDATE refresh_tokens SET revokedAt = COALESCE(revokedAt, ?) WHERE tokenHash = ?'
+      ).bind(new Date().toISOString(), await sha256(cleanToken)).run();
+    }
+    return ok(c, { loggedOut: true });
+  } catch (e) {
+    return err(c, e.message, 500);
+  }
+});
+
 app.get('/api/auth/admin', async (c) => {
   try {
     const admin = await c.env.DB.prepare(
       "SELECT id, username, role FROM users WHERE role = 'admin' LIMIT 1"
     ).first();
     if (!admin) return ok(c, null);
-    return ok(c, { ...admin, username: decryptUsername(admin.username) });
+    return ok(c, safeUser(admin, c.env));
   } catch (e) {
     return err(c, e.message, 500);
   }
 });
 
 app.put('/api/auth/admin-credentials', async (c) => {
-  try {
-    const body = await c.req.json();
-    const cleanUsername = sanitizeCredential(body.username, 64);
-    const cleanPassword = sanitizeCredential(body.password, 128);
-    if (!cleanUsername || !cleanPassword) return err(c, 'Champs obligatoires');
-    if (cleanUsername.length < 2) return err(c, "L'identifiant doit contenir au moins 2 caractères.");
-    if (cleanPassword.length < 4) return err(c, 'Le mot de passe doit contenir au moins 4 caractères.');
-
-    const admin = await c.env.DB.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").first();
-    const adminId = admin ? admin.id : 'admin-001';
-    const encUsername = encryptUsername(cleanUsername);
-    const hashedPassword = await hashPassword(cleanPassword);
-
-    await c.env.DB.prepare(
-      `INSERT INTO users (id, username, password, role, createdAt)
-       VALUES (?, ?, ?, 'admin', datetime('now'))
-       ON CONFLICT(id) DO UPDATE SET username = excluded.username, password = excluded.password`
-    ).bind(adminId, encUsername, hashedPassword).run();
-
-    return ok(c, { id: adminId, username: username.trim(), role: 'admin' });
-  } catch (e) {
-    return err(c, e.message, 500);
-  }
+  return err(c, 'La modification des identifiants n’est pas gérée par cette API.', 405);
 });
 
 // ── Config ──
@@ -502,7 +615,7 @@ app.put('/api/saisons/:id/close', async (c) => {
       admin &&
       cleanUsername &&
       cleanPassword &&
-      matchesUsername(cleanUsername, admin.username) &&
+      matchesUsername(cleanUsername, admin.username, c.env.USERNAME_CIPHER_KEY) &&
       await verifyPassword(cleanPassword, admin.password)
     );
 

@@ -22,7 +22,7 @@ import {
   updateAdminCredentials,
 } from '../database/database';
 
-import { setApiUrl, isCloudflareEnabled } from '../services/api';
+import { CloudflareAPI, setApiUrl, isCloudflareEnabled } from '../services/api';
 
 const useStore = create((set, get) => ({
   // ── Auth & Admin ──
@@ -30,7 +30,18 @@ const useStore = create((set, get) => ({
   adminUser: null,
   isCloudflare: false,
   setUser: (user) => set({ user }),
-  logout: () => set({ user: null }),
+  restoreSession: async () => {
+    const user = await CloudflareAPI.restoreSession();
+    if (user) set({ user });
+    return user;
+  },
+  logout: async () => {
+    try {
+      await CloudflareAPI.logout();
+    } finally {
+      set({ user: null });
+    }
+  },
   loadAdminUser: async () => {
     const adminUser = await getAdminUser();
     set({ adminUser });

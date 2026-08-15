@@ -85,15 +85,24 @@ CREATE TABLE IF NOT EXISTS remises (
   createdAt TEXT NOT NULL
 );
 
--- 7. Utilisateurs (Authentification Admin & Adhérents)
-CREATE TABLE IF NOT EXISTS users (
+-- 7. Utilisateurs
+-- La table users existe déjà dans D1 et n'est volontairement ni créée ni alimentée ici.
+-- Ses mots de passe hachés sont uniquement vérifiés par l'API.
+
+-- 7b. Sessions persistantes (refresh tokens hachés et révocables)
+CREATE TABLE IF NOT EXISTS refresh_tokens (
   id TEXT PRIMARY KEY,
-  username TEXT UNIQUE NOT NULL,
-  password TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'adherent',
-  adherentId TEXT,
-  createdAt TEXT NOT NULL
+  userId TEXT NOT NULL,
+  tokenHash TEXT NOT NULL UNIQUE,
+  expiresAt TEXT NOT NULL,
+  revokedAt TEXT,
+  replacedByTokenId TEXT,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (replacedByTokenId) REFERENCES refresh_tokens(id)
 );
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_userId ON refresh_tokens(userId);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expiresAt ON refresh_tokens(expiresAt);
 
 -- 8. Disciplines
 CREATE TABLE IF NOT EXISTS disciplines (
@@ -138,10 +147,6 @@ CREATE TABLE IF NOT EXISTS presences (
 -- Configuration par défaut
 INSERT OR IGNORE INTO config (key, value) VALUES ('fraisInscription', '2000');
 INSERT OR IGNORE INTO config (key, value) VALUES ('fraisMensuel', '1500');
-
--- Administrateur par défaut
-INSERT OR IGNORE INTO users (id, username, password, role, createdAt) 
-VALUES ('admin-001', 'admin', 'admin123', 'admin', datetime('now'));
 
 -- Remises par défaut
 INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) 

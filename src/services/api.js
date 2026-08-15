@@ -1,7 +1,76 @@
 // src/services/api.js
 // Client API HTTP pour le backend Cloudflare Worker / Cloudflare D1
+import * as SecureStore from 'expo-secure-store';
 
 let currentApiUrl = '';
+let refreshPromise = null;
+
+const ACCESS_TOKEN_KEY = 'cmbclub.access-token';
+const REFRESH_TOKEN_KEY = 'cmbclub.refresh-token';
+
+async function saveSession(session) {
+  if (!session?.accessToken || !session?.refreshToken) throw new Error('Session invalide.');
+  await Promise.all([
+    SecureStore.setItemAsync(ACCESS_TOKEN_KEY, session.accessToken),
+    SecureStore.setItemAsync(REFRESH_TOKEN_KEY, session.refreshToken),
+  ]);
+}
+
+async function clearSession() {
+  await Promise.all([
+    SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
+    SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+  ]);
+}
+
+async function parseResponse(response) {
+  const rawText = await response.text();
+  let json = null;
+  try {
+    json = JSON.parse(rawText);
+  } catch (_e) {
+    if (!response.ok) {
+      const error = new Error(`Erreur HTTP ${response.status}: ${rawText.slice(0, 100) || response.statusText}`);
+      error.status = response.status;
+      throw error;
+    }
+    return rawText;
+  }
+  if (!response.ok || json?.success === false) {
+    const error = new Error(json?.error || `Erreur HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return json?.data !== undefined ? json.data : json;
+}
+
+async function fetchApi(endpoint, options = {}, includeAccessToken = true) {
+  if (!currentApiUrl) throw new Error('URL Cloudflare non configurée');
+  const url = `${currentApiUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const accessToken = includeAccessToken ? await SecureStore.getItemAsync(ACCESS_TOKEN_KEY) : null;
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  return fetch(url, { ...options, headers });
+}
+
+async function refreshAccessToken() {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      if (!refreshToken) throw new Error('Session expirée.');
+      const response = await fetchApi('/api/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
+      }, false);
+      const session = await parseResponse(response);
+      await saveSession(session);
+      return session;
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
 
 export function setApiUrl(url) {
   if (!url) {
@@ -21,39 +90,16 @@ export function isCloudflareEnabled() {
 }
 
 async function request(endpoint, options = {}) {
-  if (!currentApiUrl) {
-    throw new Error('URL Cloudflare non configurée');
-  }
-
-  const url = `${currentApiUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-  const defaultHeaders = {
-    'Content-Type': 'application/json',
-  };
-
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...defaultHeaders,
-      ...options.headers,
-    },
-  });
-
-  const rawText = await response.text();
-  let json = null;
-  try {
-    json = JSON.parse(rawText);
-  } catch (_e) {
-    if (!response.ok) {
-      throw new Error(`Erreur HTTP ${response.status}: ${rawText.slice(0, 100) || response.statusText}`);
+  const response = await fetchApi(endpoint, options);
+  if (response.status === 401 && !endpoint.startsWith('/api/auth/')) {
+    try {
+      await refreshAccessToken();
+      return parseResponse(await fetchApi(endpoint, options));
+    } catch (_e) {
+      await clearSession();
     }
-    return rawText;
   }
-
-  if (!response.ok || json?.success === false) {
-    throw new Error(json?.error || `Erreur HTTP ${response.status}`);
-  }
-
-  return json?.data !== undefined ? json.data : json;
+  return parseResponse(response);
 }
 
 export const CloudflareAPI = {
@@ -71,11 +117,40 @@ export const CloudflareAPI = {
   },
 
   // ── Auth ──
-  login: (username, password) =>
-    request('/api/auth/login', {
+  login: async (username, password) => {
+    const session = await request('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
-    }),
+    });
+    await saveSession(session);
+    return session;
+  },
+
+  restoreSession: async () => {
+    if (!isCloudflareEnabled()) return null;
+    try {
+      const session = await refreshAccessToken();
+      return session.user || null;
+    } catch (_e) {
+      await clearSession();
+      return null;
+    }
+  },
+
+  logout: async () => {
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    try {
+      if (currentApiUrl && refreshToken) {
+        const response = await fetchApi('/api/auth/logout', {
+          method: 'POST',
+          body: JSON.stringify({ refreshToken }),
+        }, false);
+        await parseResponse(response);
+      }
+    } finally {
+      await clearSession();
+    }
+  },
 
   getAdminUser: () => request('/api/auth/admin'),
 
