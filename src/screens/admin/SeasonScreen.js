@@ -54,7 +54,8 @@ export default function SeasonScreen() {
       label,
       annee: y,
       dateDebut: `${y}-01-01`,
-      dateFin: null,
+      // D1 requires an end date; a season follows the calendar year.
+      dateFin: `${y}-12-31`,
       actif: 0,
     });
     setShowCreateModal(false);

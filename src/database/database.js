@@ -493,9 +493,14 @@ export async function getSaisonActive() {
 }
 
 export async function createSaison(saison) {
+  // Keep local SQLite and the remote D1 database aligned. Older D1 schemas
+  // require dateFin to be non-null, even for a newly opened season.
+  const dateFin = saison.dateFin || `${saison.annee}-12-31`;
+  const saisonToCreate = { ...saison, dateFin };
+
   if (isCloudflareEnabled()) {
     try {
-      await CloudflareAPI.createSaison(saison);
+      await CloudflareAPI.createSaison(saisonToCreate);
     } catch (e) {
       console.warn('Cloudflare createSaison fallback:', e.message);
     }
@@ -503,7 +508,7 @@ export async function createSaison(saison) {
   const db = await getDatabase();
   await db.runAsync(
     `INSERT INTO saisons (id, label, annee, dateDebut, dateFin, actif, createdAt) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [saison.id, saison.label, saison.annee, saison.dateDebut, saison.dateFin, saison.actif ? 1 : 0],
+    [saisonToCreate.id, saisonToCreate.label, saisonToCreate.annee, saisonToCreate.dateDebut, saisonToCreate.dateFin, saisonToCreate.actif ? 1 : 0],
   );
 }
 

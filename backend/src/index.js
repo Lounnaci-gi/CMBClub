@@ -400,15 +400,16 @@ app.get('/api/saisons/active', async (c) => {
 app.post('/api/saisons', async (c) => {
   try {
     const s = await c.req.json();
+    const dateFin = s.dateFin || `${s.annee}-12-31`;
     await c.env.DB.prepare(
       `INSERT INTO saisons (id, label, annee, dateDebut, dateFin, actif, statut, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(s.id, s.label, s.annee, s.dateDebut, s.dateFin || null, s.actif ? 1 : 0, 'ouvert', s.createdAt || new Date().toISOString()).run();
+    ).bind(s.id, s.label, s.annee, s.dateDebut, dateFin, s.actif ? 1 : 0, 'ouvert', s.createdAt || new Date().toISOString()).run();
 
     if (s.actif) {
       await c.env.DB.prepare('UPDATE saisons SET actif = 0 WHERE id != ?').bind(s.id).run();
     }
-    return ok(c, { ...s, statut: 'ouvert' });
+    return ok(c, { ...s, dateFin, statut: 'ouvert' });
   } catch (e) {
     return err(c, e.message, 500);
   }
