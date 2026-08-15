@@ -566,9 +566,7 @@ export async function deleteSaison(saisonId) {
 export async function closeSaison(saisonId, credentials = {}) {
   const db = await getDatabase();
   const saison = await db.getFirstAsync('SELECT statut FROM saisons WHERE id = ?', [saisonId]);
-  const isClosing = saison?.statut !== 'fermé';
-
-  if (isClosing) {
+  if (saison) {
     const cleanUsername = String(credentials.username || '').trim();
     const cleanPassword = String(credentials.password || '').trim();
     const admin = await db.getFirstAsync(
@@ -601,8 +599,8 @@ export async function closeSaison(saisonId, credentials = {}) {
   const dateClose = newStatut === 'fermé' ? new Date().toISOString() : null;
   
   await db.runAsync(
-    'UPDATE saisons SET statut = ?, dateFin = ? WHERE id = ?',
-    [newStatut, dateClose, saisonId]
+    'UPDATE saisons SET statut = ?, dateFin = CASE WHEN ? THEN ? ELSE \'\' END WHERE id = ?',
+    [newStatut, newStatut === 'fermé' ? 1 : 0, dateClose, saisonId]
   );
 }
 

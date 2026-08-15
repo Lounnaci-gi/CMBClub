@@ -151,41 +151,11 @@ export default function SeasonScreen() {
   };
 
   const handleClosePress = (saison) => {
-    const isClosed = saison.statut === 'fermé';
-    const action = isClosed ? 'Rouvrir' : 'Clôturer';
-
-    if (!isClosed) {
-      setSaisonToClose(saison);
-      setCloseUsername('');
-      setClosePassword('');
-      setShowClosePassword(false);
-      setShowCloseAuthModal(true);
-      return;
-    }
-
-    const message = isClosed 
-      ? `Êtes-vous sûr de vouloir rouvrir la saison ${saison.label} pour de nouvelles inscriptions ?`
-      : `Êtes-vous sûr de vouloir clôturer la saison ${saison.label} ?\n\n⚠️ Les nouvelles inscriptions ne seront plus possibles.`;
-
-    Alert.alert(
-      `${action} la saison`,
-      message,
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: action,
-          style: isClosed ? 'default' : 'destructive',
-          onPress: async () => {
-            try {
-              await closeSaison(saison.id);
-              Alert.alert('✅ Mise à jour', `La saison ${saison.label} est désormais ${isClosed ? 'ouverte' : 'fermée'}.`);
-            } catch (e) {
-              Alert.alert('Erreur', e.message);
-            }
-          },
-        },
-      ],
-    );
+    setSaisonToClose(saison);
+    setCloseUsername('');
+    setClosePassword('');
+    setShowClosePassword(false);
+    setShowCloseAuthModal(true);
   };
 
   const closeAuthModal = (force = false) => {
@@ -210,10 +180,14 @@ export default function SeasonScreen() {
         password: closePassword,
       });
       const label = saisonToClose.label;
+      const isReopening = saisonToClose.statut === 'fermé';
       closeAuthModal(true);
-      Alert.alert('Saison clôturée', `La saison ${label} est désormais fermée.`);
+      Alert.alert(
+        isReopening ? 'Saison rouverte' : 'Saison clôturée',
+        `La saison ${label} est désormais ${isReopening ? 'ouverte' : 'fermée'}.`,
+      );
     } catch (e) {
-      Alert.alert('Clôture refusée', e.message || 'Les identifiants administrateur sont invalides.');
+      Alert.alert('Action refusée', e.message || 'Les identifiants administrateur sont invalides.');
     } finally {
       setIsClosingSeason(false);
     }
@@ -378,9 +352,11 @@ export default function SeasonScreen() {
                 <MaterialCommunityIcons name="shield-lock-outline" size={22} color={COLORS.danger} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Autoriser la clôture</Text>
+                <Text style={styles.modalTitle}>
+                  {saisonToClose?.statut === 'fermé' ? 'Autoriser la réouverture' : 'Autoriser la clôture'}
+                </Text>
                 <Text style={styles.authIntro}>
-                  Saisissez les identifiants administrateur pour clôturer la saison {saisonToClose?.label}.
+                  Saisissez les identifiants administrateur pour {saisonToClose?.statut === 'fermé' ? 'rouvrir' : 'clôturer'} la saison {saisonToClose?.label}.
                 </Text>
               </View>
             </View>
@@ -435,7 +411,7 @@ export default function SeasonScreen() {
                 onPress={closeAuthModal}
                 disabled={isClosingSeason}
                 accessibilityRole="button"
-                accessibilityLabel="Annuler la clôture"
+                accessibilityLabel="Annuler la modification de la saison"
               >
                 <Text style={styles.cancelText}>Annuler</Text>
               </TouchableOpacity>
@@ -444,14 +420,16 @@ export default function SeasonScreen() {
                 onPress={handleConfirmClose}
                 disabled={isClosingSeason}
                 accessibilityRole="button"
-                accessibilityLabel="Confirmer la clôture avec les identifiants administrateur"
+                accessibilityLabel="Confirmer la modification avec les identifiants administrateur"
               >
                 {isClosingSeason ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <MaterialCommunityIcons name="lock" size={18} color="#fff" />
+                  <MaterialCommunityIcons name={saisonToClose?.statut === 'fermé' ? 'lock-open' : 'lock'} size={18} color="#fff" />
                 )}
-                <Text style={styles.saveBtnText}>{isClosingSeason ? 'Vérification…' : 'Clôturer'}</Text>
+                <Text style={styles.saveBtnText}>
+                  {isClosingSeason ? 'Vérification…' : saisonToClose?.statut === 'fermé' ? 'Rouvrir' : 'Clôturer'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

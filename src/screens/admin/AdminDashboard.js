@@ -19,7 +19,7 @@ export default function AdminDashboard({ navigation }) {
     () => createStyles(COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding),
     [COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding],
   );
-  const { user, stats, saisonActive, loadStats, loadSaisons, loadAdherents, loadRemises, loadConfig, logout } = useStore();
+  const { user, stats, saisons, saisonActive, loadStats, loadSaisons, loadAdherents, loadRemises, loadConfig, logout } = useStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const loadAll = useCallback(async () => {
@@ -45,6 +45,10 @@ export default function AdminDashboard({ navigation }) {
     { icon: 'cog', label: 'Paramètres', color: COLORS.textSecondary, screen: 'Config' },
   ];
 
+  const saisonOuverte = saisons.find((saison) => saison.statut !== 'fermé');
+  const saisonAffichee = saisonOuverte || saisonActive || saisons[0];
+  const afficheSaisonFermee = Boolean(saisonAffichee && saisonAffichee.statut === 'fermé' && !saisonOuverte);
+
   // Calcul dynamique de la largeur des cartes d'action
   const actionCardWidth = dashboardActionCols === 6 ? '15.3%' : dashboardActionCols === 4 ? '23.5%' : dashboardActionCols === 3 ? '31%' : '48%';
 
@@ -66,10 +70,26 @@ export default function AdminDashboard({ navigation }) {
             </TouchableOpacity>
           </View>
 
-          {saisonActive && (
-            <View style={styles.saisonBadge}>
-              <MaterialCommunityIcons name="calendar-check" size={14} color={COLORS.secondary} />
-              <Text style={styles.saisonText}>Saison active : {saisonActive.label}</Text>
+          {saisonAffichee && (
+            <View
+              style={[styles.saisonBadge, afficheSaisonFermee && styles.saisonBadgeClosed]}
+              accessible
+              accessibilityLabel={
+                afficheSaisonFermee
+                  ? `Saison ${saisonAffichee.label} fermée`
+                  : `Saison active ${saisonAffichee.label}`
+              }
+            >
+              <MaterialCommunityIcons
+                name={afficheSaisonFermee ? 'lock' : 'calendar-check'}
+                size={14}
+                color={afficheSaisonFermee ? COLORS.danger : COLORS.secondary}
+              />
+              <Text style={[styles.saisonText, afficheSaisonFermee && styles.saisonTextClosed]} numberOfLines={1}>
+                {afficheSaisonFermee
+                  ? `Saison ${saisonAffichee.label} : Fermée`
+                  : `Saison active : ${saisonAffichee.label}`}
+              </Text>
             </View>
           )}
         </View>
@@ -181,7 +201,12 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     borderWidth: 1,
     borderColor: COLORS.secondary + '30',
   },
+  saisonBadgeClosed: {
+    backgroundColor: COLORS.danger + '18',
+    borderColor: COLORS.danger + '45',
+  },
   saisonText: { color: COLORS.secondary, fontSize: 13, fontWeight: '600' },
+  saisonTextClosed: { color: COLORS.danger },
   scroll: { flex: 1 },
   scrollContent: {
     alignItems: 'center',

@@ -493,30 +493,30 @@ app.put('/api/saisons/:id/close', async (c) => {
 
     const newStatut = saison.statut === 'ouvert' ? 'fermé' : 'ouvert';
 
-    if (newStatut === 'fermé') {
-      const cleanUsername = sanitizeCredential(username, 64);
-      const cleanPassword = sanitizeCredential(password, 128);
-      const admin = await c.env.DB.prepare(
-        "SELECT username, password FROM users WHERE role = 'admin' LIMIT 1"
-      ).first();
-      const authorized = Boolean(
-        admin &&
-        cleanUsername &&
-        cleanPassword &&
-        matchesUsername(cleanUsername, admin.username) &&
-        await verifyPassword(cleanPassword, admin.password)
-      );
+    const cleanUsername = sanitizeCredential(username, 64);
+    const cleanPassword = sanitizeCredential(password, 128);
+    const admin = await c.env.DB.prepare(
+      "SELECT username, password FROM users WHERE role = 'admin' LIMIT 1"
+    ).first();
+    const authorized = Boolean(
+      admin &&
+      cleanUsername &&
+      cleanPassword &&
+      matchesUsername(cleanUsername, admin.username) &&
+      await verifyPassword(cleanPassword, admin.password)
+    );
 
-      if (!authorized) {
-        return err(c, 'Identifiants administrateur invalides.', 401);
-      }
+    if (!authorized) {
+      return err(c, 'Identifiants administrateur invalides.', 401);
     }
 
-    const dateClose = newStatut === 'fermé' ? new Date().toISOString() : null;
+    // La colonne dateFin des anciennes bases D1 est NOT NULL. Une chaîne vide
+    // représente donc une saison rouverte sans date de clôture.
+    const dateClose = newStatut === 'fermé' ? new Date().toISOString() : '';
     
     await c.env.DB.prepare(
-      'UPDATE saisons SET statut = ?, dateFin = CASE WHEN ? THEN ? ELSE dateFin END WHERE id = ?'
-    ).bind(newStatut, newStatut === 'fermé', dateClose, id).run();
+      'UPDATE saisons SET statut = ?, dateFin = ? WHERE id = ?'
+    ).bind(newStatut, dateClose, id).run();
 
     const updated = await c.env.DB.prepare('SELECT * FROM saisons WHERE id = ?').bind(id).first();
     return ok(c, updated);
