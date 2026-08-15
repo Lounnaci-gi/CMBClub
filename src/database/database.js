@@ -162,6 +162,12 @@ async function initDatabase(database) {
     CREATE INDEX IF NOT EXISTS idx_users_role_adherent ON users(role, adherentId);
   `);
 
+  // Migration : état d'ouverture de la saison pour les bases SQLite créées avant cette colonne
+  const saisonColumns = await database.getAllAsync('PRAGMA table_info(saisons)');
+  if (!saisonColumns.some(column => column.name === 'statut')) {
+    await database.execAsync(`ALTER TABLE saisons ADD COLUMN statut TEXT NOT NULL DEFAULT 'ouvert'`);
+  }
+
   // Migration : ajout de dateInscription si la colonne n'existe pas encore
   try {
     await database.execAsync(`ALTER TABLE adherents ADD COLUMN dateInscription TEXT`);
@@ -557,16 +563,40 @@ export async function deleteSaison(saisonId) {
   });
 }
 
-export async function closeSaison(saisonId) {
+export async function closeSaison(saisonId, credentials = {}) {
+  const db = await getDatabase();
+  const saison = await db.getFirstAsync('SELECT statut FROM saisons WHERE id = ?', [saisonId]);
+  const isClosing = saison?.statut !== 'fermé';
+
+  if (isClosing) {
+    const cleanUsername = String(credentials.username || '').trim();
+    const cleanPassword = String(credentials.password || '').trim();
+    const admin = await db.getFirstAsync(
+      "SELECT username, password FROM users WHERE role = 'admin' LIMIT 1"
+    );
+    const authorized = Boolean(
+      admin &&
+      cleanUsername &&
+      cleanPassword &&
+      matchesUsername(cleanUsername, admin.username) &&
+      verifyPassword(cleanPassword, admin.password)
+    );
+
+    if (!authorized) {
+      throw new Error('Identifiants administrateur invalides.');
+    }
+  }
+
   if (isCloudflareEnabled()) {
     try {
-      await CloudflareAPI.closeSaison(saisonId);
+      await CloudflareAPI.closeSaison(saisonId, credentials);
     } catch (e) {
+      if (e.message === 'Identifiants administrateur invalides.') {
+        throw e;
+      }
       console.warn('Cloudflare closeSaison fallback:', e.message);
     }
   }
-  const db = await getDatabase();
-  const saison = await db.getFirstAsync('SELECT statut FROM saisons WHERE id = ?', [saisonId]);
   const newStatut = saison?.statut === 'ouvert' ? 'fermé' : 'ouvert';
   const dateClose = newStatut === 'fermé' ? new Date().toISOString() : null;
   

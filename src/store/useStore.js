@@ -108,8 +108,8 @@ const useStore = create((set, get) => ({
     await deleteSaison(saisonId);
     await get().loadSaisons();
   },
-  closeSaison: async (saisonId) => {
-    await closeSaison(saisonId);
+  closeSaison: async (saisonId, credentials) => {
+    await closeSaison(saisonId, credentials);
     await get().loadSaisons();
   },
 

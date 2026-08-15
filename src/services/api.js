@@ -110,9 +110,10 @@ export const CloudflareAPI = {
       method: 'PUT',
       body: JSON.stringify({ dateDebut, dateFin }),
     }),
-  closeSaison: (saisonId) =>
+  closeSaison: (saisonId, credentials = {}) =>
     request(`/api/saisons/${encodeURIComponent(saisonId)}/close`, {
       method: 'PUT',
+      body: JSON.stringify(credentials),
     }),
   deleteSaison: (saisonId) =>
     request(`/api/saisons/${encodeURIComponent(saisonId)}`, {

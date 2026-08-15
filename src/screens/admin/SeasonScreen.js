@@ -2,7 +2,8 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Modal, TextInput, Alert, RefreshControl, ScrollView,
+  Modal, TextInput, Alert, RefreshControl, ScrollView, KeyboardAvoidingView,
+  Platform, ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -25,6 +26,14 @@ export default function SeasonScreen() {
   const [editingSaison, setEditingSaison] = useState(null);
   const [editDateDebut, setEditDateDebut] = useState('');
   const [editDateFin, setEditDateFin] = useState('');
+
+  // Confirmation administrateur requise avant la clôture d'une saison
+  const [showCloseAuthModal, setShowCloseAuthModal] = useState(false);
+  const [saisonToClose, setSaisonToClose] = useState(null);
+  const [closeUsername, setCloseUsername] = useState('');
+  const [closePassword, setClosePassword] = useState('');
+  const [showClosePassword, setShowClosePassword] = useState(false);
+  const [isClosingSeason, setIsClosingSeason] = useState(false);
   
   const [refreshing, setRefreshing] = useState(false);
 
@@ -144,6 +153,16 @@ export default function SeasonScreen() {
   const handleClosePress = (saison) => {
     const isClosed = saison.statut === 'fermé';
     const action = isClosed ? 'Rouvrir' : 'Clôturer';
+
+    if (!isClosed) {
+      setSaisonToClose(saison);
+      setCloseUsername('');
+      setClosePassword('');
+      setShowClosePassword(false);
+      setShowCloseAuthModal(true);
+      return;
+    }
+
     const message = isClosed 
       ? `Êtes-vous sûr de vouloir rouvrir la saison ${saison.label} pour de nouvelles inscriptions ?`
       : `Êtes-vous sûr de vouloir clôturer la saison ${saison.label} ?\n\n⚠️ Les nouvelles inscriptions ne seront plus possibles.`;
@@ -167,6 +186,37 @@ export default function SeasonScreen() {
         },
       ],
     );
+  };
+
+  const closeAuthModal = (force = false) => {
+    if (isClosingSeason && !force) return;
+    setShowCloseAuthModal(false);
+    setSaisonToClose(null);
+    setClosePassword('');
+  };
+
+  const handleConfirmClose = async () => {
+    if (!closeUsername.trim() || !closePassword.trim()) {
+      Alert.alert('Identifiants requis', 'Saisissez l’identifiant et le mot de passe administrateur.');
+      return;
+    }
+
+    if (!saisonToClose) return;
+
+    setIsClosingSeason(true);
+    try {
+      await closeSaison(saisonToClose.id, {
+        username: closeUsername,
+        password: closePassword,
+      });
+      const label = saisonToClose.label;
+      closeAuthModal(true);
+      Alert.alert('Saison clôturée', `La saison ${label} est désormais fermée.`);
+    } catch (e) {
+      Alert.alert('Clôture refusée', e.message || 'Les identifiants administrateur sont invalides.');
+    } finally {
+      setIsClosingSeason(false);
+    }
   };
 
   const renderSaison = ({ item }) => {
@@ -308,6 +358,104 @@ export default function SeasonScreen() {
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* Close season authorization */}
+      <Modal
+        visible={showCloseAuthModal}
+        transparent
+        animationType="slide"
+        onRequestClose={closeAuthModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBg}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
+            <View style={styles.authTitleRow}>
+              <View style={styles.authIcon}>
+                <MaterialCommunityIcons name="shield-lock-outline" size={22} color={COLORS.danger} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Autoriser la clôture</Text>
+                <Text style={styles.authIntro}>
+                  Saisissez les identifiants administrateur pour clôturer la saison {saisonToClose?.label}.
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.fieldLabel}>Identifiant administrateur</Text>
+            <TextInput
+              style={styles.input}
+              value={closeUsername}
+              onChangeText={setCloseUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="username"
+              textContentType="username"
+              placeholder="Identifiant"
+              placeholderTextColor={COLORS.textMuted}
+              editable={!isClosingSeason}
+              accessibilityLabel="Identifiant administrateur"
+            />
+
+            <Text style={styles.fieldLabel}>Mot de passe administrateur</Text>
+            <View style={styles.passwordInputRow}>
+              <TextInput
+                style={styles.passwordInput}
+                value={closePassword}
+                onChangeText={setClosePassword}
+                secureTextEntry={!showClosePassword}
+                autoComplete="current-password"
+                textContentType="password"
+                placeholder="Mot de passe"
+                placeholderTextColor={COLORS.textMuted}
+                editable={!isClosingSeason}
+                accessibilityLabel="Mot de passe administrateur"
+              />
+              <TouchableOpacity
+                style={styles.passwordToggle}
+                onPress={() => setShowClosePassword(value => !value)}
+                disabled={isClosingSeason}
+                accessibilityRole="button"
+                accessibilityLabel={showClosePassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+              >
+                <MaterialCommunityIcons
+                  name={showClosePassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={COLORS.textSecondary}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={closeAuthModal}
+                disabled={isClosingSeason}
+                accessibilityRole="button"
+                accessibilityLabel="Annuler la clôture"
+              >
+                <Text style={styles.cancelText}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveBtn, styles.closeConfirmBtn, isClosingSeason && styles.closeConfirmBtnDisabled]}
+                onPress={handleConfirmClose}
+                disabled={isClosingSeason}
+                accessibilityRole="button"
+                accessibilityLabel="Confirmer la clôture avec les identifiants administrateur"
+              >
+                {isClosingSeason ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <MaterialCommunityIcons name="lock" size={18} color="#fff" />
+                )}
+                <Text style={styles.saveBtnText}>{isClosingSeason ? 'Vérification…' : 'Clôturer'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Edit Modal */}
@@ -484,6 +632,27 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     marginBottom: 16,
   },
   infoText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '500' },
+  authTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 20 },
+  authIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.danger + '18',
+  },
+  authIntro: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19, marginTop: -12 },
+  passwordInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 12,
+  },
+  passwordInput: { flex: 1, color: COLORS.textPrimary, fontSize: 16, paddingHorizontal: 16, paddingVertical: 12 },
+  passwordToggle: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   modalActions: { flexDirection: 'row', gap: 12, marginTop: 16 },
   cancelBtn: {
     flex: 1,
@@ -507,4 +676,6 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     ...SHADOWS.button,
   },
   saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  closeConfirmBtn: { backgroundColor: COLORS.danger },
+  closeConfirmBtnDisabled: { opacity: 0.7 },
 });

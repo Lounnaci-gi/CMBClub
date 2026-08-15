@@ -484,6 +484,7 @@ app.delete('/api/saisons/:id', async (c) => {
 app.put('/api/saisons/:id/close', async (c) => {
   try {
     const id = c.req.param('id');
+    const { username, password } = await c.req.json().catch(() => ({}));
     const saison = await c.env.DB.prepare('SELECT * FROM saisons WHERE id = ?').bind(id).first();
     
     if (!saison) {
@@ -491,6 +492,26 @@ app.put('/api/saisons/:id/close', async (c) => {
     }
 
     const newStatut = saison.statut === 'ouvert' ? 'fermé' : 'ouvert';
+
+    if (newStatut === 'fermé') {
+      const cleanUsername = sanitizeCredential(username, 64);
+      const cleanPassword = sanitizeCredential(password, 128);
+      const admin = await c.env.DB.prepare(
+        "SELECT username, password FROM users WHERE role = 'admin' LIMIT 1"
+      ).first();
+      const authorized = Boolean(
+        admin &&
+        cleanUsername &&
+        cleanPassword &&
+        matchesUsername(cleanUsername, admin.username) &&
+        await verifyPassword(cleanPassword, admin.password)
+      );
+
+      if (!authorized) {
+        return err(c, 'Identifiants administrateur invalides.', 401);
+      }
+    }
+
     const dateClose = newStatut === 'fermé' ? new Date().toISOString() : null;
     
     await c.env.DB.prepare(
