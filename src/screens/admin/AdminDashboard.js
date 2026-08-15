@@ -9,7 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import StatCard from '../../components/StatCard';
-import useTheme from '../../theme/useTheme';
+import useTheme, { useResponsive } from '../../theme/useTheme';
 
 export default function AdminDashboard({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();

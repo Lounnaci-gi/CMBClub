@@ -9,7 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getUserByCredentials } from '../../database/database';
 import useStore from '../../store/useStore';
-import useTheme from '../../theme/useTheme';
+import useTheme, { useResponsive } from '../../theme/useTheme';
 import {
   validateLoginInput,
   isLoginLocked,

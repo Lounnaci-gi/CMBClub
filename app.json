@@ -3,7 +3,7 @@
     "name": "CMBClub",
     "slug": "CMBClub",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/cmbclub.png",
     "userInterfaceStyle": "dark",
     "plugins": [
