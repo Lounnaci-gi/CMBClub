@@ -20,6 +20,8 @@ import {
   CREANCE_TYPES,
   getStatusLabel,
 } from '../../services/portefeuilleService';
+import { printAdherentCotisations } from '../../utils/printAdherentCotisations';
+import { getPaiementsByAdherent } from '../../database/database';
 
 function statusColor(statut, COLORS) {
   switch (statut) {
@@ -145,6 +147,26 @@ export default function PortefeuilleScreen({ route }) {
     setEstimeGroupe(estim);
   };
 
+  const [printing, setPrinting] = useState(false);
+
+  const handlePrint = async () => {
+    if (!adherent || !saisonActive) return;
+    setPrinting(true);
+    try {
+      const paiements = await getPaiementsByAdherent(adherent.id, saisonActive.id);
+      await printAdherentCotisations({
+        adherent,
+        saison: saisonActive,
+        paiements,
+        config,
+      });
+    } catch (e) {
+      Alert.alert('Erreur', e.message || "Erreur lors de l'impression");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   if (!saisonActive) {
     return (
       <View style={styles.centered}>
@@ -169,10 +191,35 @@ export default function PortefeuilleScreen({ route }) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.heroName}>
-        {adherent ? `${adherent.prenom} ${adherent.nom}` : 'Portefeuille'}
-      </Text>
-      <Text style={styles.heroSub}>Saison {saisonActive.label}</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.heroName}>
+            {adherent ? `${adherent.prenom} ${adherent.nom}` : 'Portefeuille'}
+          </Text>
+          <Text style={styles.heroSub}>Saison {saisonActive.label}</Text>
+        </View>
+        <TouchableOpacity
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: COLORS.primary + '18',
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            borderRadius: RADIUS.full,
+            borderWidth: 1,
+            borderColor: COLORS.primary + '40',
+          }}
+          onPress={handlePrint}
+          disabled={printing}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons name="printer" size={16} color={COLORS.primary} />
+          <Text style={{ color: COLORS.primary, fontWeight: '700', fontSize: 12 }}>
+            {printing ? 'Impression…' : 'Imprimer'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Résumé */}
       <View style={styles.summaryCard}>

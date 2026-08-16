@@ -11,12 +11,13 @@ import PaymentCard from '../../components/PaymentCard';
 import useTheme from '../../theme/useTheme';
 import { calculateBalance, getStatusColor, getStatusLabel, PAYMENT_STATUS } from '../../utils/payments';
 import { getPaiementsByAdherent, refreshPaymentStatuses } from '../../database/database';
+import { printAdherentCotisations } from '../../utils/printAdherentCotisations';
 
 export default function PaymentDetailScreen({ route }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { adherentId } = route.params;
-  const { adherents, saisonActive, remises, loadRemises, updatePaiement } = useStore();
+  const { adherents, saisonActive, remises, loadRemises, updatePaiement, config } = useStore();
   const [paiements, setPaiements] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -25,6 +26,7 @@ export default function PaymentDetailScreen({ route }) {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const adherent = adherents.find(a => a.id === adherentId);
   const canManagePayments = Boolean(saisonActive);
@@ -38,13 +40,30 @@ export default function PaymentDetailScreen({ route }) {
     }
   }, [adherent, saisonActive, loadRemises]);
 
+  const handlePrint = async () => {
+    if (!adherent || !saisonActive) return;
+    setPrinting(true);
+    try {
+      await printAdherentCotisations({
+        adherent,
+        saison: saisonActive,
+        paiements,
+        config,
+      });
+    } catch (e) {
+      Alert.alert('Erreur', e.message || "Erreur lors de l'impression");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const openPayModal = (p) => {
     if (!canManagePayments) {
-      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’enregistrer un paiement.');
+      Alert.alert('Saison requise', "Créez ou rouvrez une saison avant d’enregistrer un paiement.");
       return;
     }
     setSelected(p);
@@ -63,7 +82,7 @@ export default function PaymentDetailScreen({ route }) {
   const handleSave = async () => {
     if (!selected) return;
     if (!canManagePayments) {
-      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’enregistrer un paiement.');
+      Alert.alert('Saison requise', "Créez ou rouvrez une saison avant d’enregistrer un paiement.");
       return;
     }
     setSaving(true);
@@ -205,7 +224,7 @@ export default function PaymentDetailScreen({ route }) {
 
   const openMultiModal = () => {
     if (!canManagePayments) {
-      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’enregistrer un paiement.');
+      Alert.alert('Saison requise', "Créez ou rouvrez une saison avant d’enregistrer un paiement.");
       return;
     }
     if (unpaidPaiements.length === 0) {
@@ -274,7 +293,7 @@ export default function PaymentDetailScreen({ route }) {
 
   const handleSaveMultiMonth = async () => {
     if (!canManagePayments) {
-      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’enregistrer un paiement.');
+      Alert.alert('Saison requise', "Créez ou rouvrez une saison avant d’enregistrer un paiement.");
       return;
     }
     if (selectedMultiItems.length === 0) {
@@ -333,7 +352,7 @@ export default function PaymentDetailScreen({ route }) {
         `Mois traités : ${selectedMultiItems.length}\nMontant encaissé : ${cash.toLocaleString()} DA\nReste à payer sur ces mois : ${resteAPayerMulti.toLocaleString()} DA`
       );
     } catch (e) {
-      Alert.alert('Erreur', e.message || 'Impossible d’enregistrer.');
+      Alert.alert('Erreur', e.message || "Impossible d'enregistrer.");
     } finally {
       setSavingMulti(false);
     }
@@ -412,6 +431,31 @@ export default function PaymentDetailScreen({ route }) {
             <MaterialCommunityIcons name="calendar-multiselect" size={20} color="#fff" />
             <Text style={styles.multiPayBtnText}>Avancer plusieurs mois ({unpaidPaiements.length} restant{unpaidPaiements.length > 1 ? 's' : ''})</Text>
           </TouchableOpacity>
+
+          {/* Bouton Impression Cotisations */}
+          <TouchableOpacity
+            style={{
+              marginTop: 8,
+              backgroundColor: COLORS.primary + '18',
+              borderRadius: RADIUS.md,
+              paddingVertical: 10,
+              paddingHorizontal: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              borderWidth: 1,
+              borderColor: COLORS.primary + '40',
+            }}
+            onPress={handlePrint}
+            disabled={printing}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="printer" size={18} color={COLORS.primary} />
+            <Text style={{ color: COLORS.primary, fontWeight: '700', fontSize: 13 }}>
+              {printing ? 'Impression en cours…' : 'Imprimer l’état des cotisations'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Payment list */}
@@ -433,8 +477,6 @@ export default function PaymentDetailScreen({ route }) {
         </View>
         <View style={{ height: 40 }} />
       </ScrollView>
-
-      {/* Single Payment Modal */}
       <Modal visible={showModal} transparent animationType="slide" onRequestClose={() => setShowModal(false)}>
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>

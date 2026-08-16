@@ -24,6 +24,7 @@ import {
   isAdherentEnrolled,
   refreshPaymentStatuses,
 } from '../../database/database';
+import { printAdherentCotisations } from '../../utils/printAdherentCotisations';
 
 export default function AdherentDetailScreen({ navigation, route }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -36,11 +37,29 @@ export default function AdherentDetailScreen({ navigation, route }) {
   const [paiements, setPaiements] = useState([]);
   const [presencesData, setPresencesData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [account, setAccount] = useState(null);
   const [enrolled, setEnrolled] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
 
   const adherent = adherents.find(a => a.id === adherentId);
+
+  const handlePrintCotisations = async () => {
+    if (!adherent || !saisonActive) return;
+    setPrinting(true);
+    try {
+      await printAdherentCotisations({
+        adherent,
+        saison: saisonActive,
+        paiements,
+        config,
+      });
+    } catch (e) {
+      Alert.alert('Erreur', e.message || "Erreur lors de l'impression");
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const loadPaiements = useCallback(async () => {
     if (!adherent) return;
@@ -386,28 +405,54 @@ export default function AdherentDetailScreen({ navigation, route }) {
             ) : null}
 
             {enrolled ? (
-              <TouchableOpacity
-                style={{
-                  marginTop: 10,
-                  backgroundColor: COLORS.bgInput,
-                  borderRadius: RADIUS.md,
-                  paddingVertical: 10,
-                  paddingHorizontal: 14,
-                  alignItems: 'center',
-                  flexDirection: 'row',
-                  justifyContent: 'center',
-                  gap: 8,
-                  borderWidth: 1,
-                  borderColor: COLORS.primary + '40',
-                }}
-                onPress={() => navigation.navigate('Portefeuille', { adherentId: adherent.id })}
-                activeOpacity={0.8}
-              >
-                <MaterialCommunityIcons name="wallet" size={18} color={COLORS.primary} />
-                <Text style={{ color: COLORS.primary, fontWeight: '700', fontSize: 13 }}>
-                  Ouvrir le portefeuille
-                </Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    backgroundColor: COLORS.bgInput,
+                    borderRadius: RADIUS.md,
+                    paddingVertical: 10,
+                    paddingHorizontal: 10,
+                    alignItems: 'center',
+                    flexDirection: 'row',
+                    justifyContent: 'center',
+                    gap: 6,
+                    borderWidth: 1,
+                    borderColor: COLORS.primary + '40',
+                  }}
+                  onPress={() => navigation.navigate('Portefeuille', { adherentId: adherent.id })}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="wallet" size={17} color={COLORS.primary} />
+                  <Text style={{ color: COLORS.primary, fontWeight: '700', fontSize: 12 }}>
+                    Portefeuille
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    backgroundColor: COLORS.primary + '15',
+                    borderRadius: RADIUS.md,
+                    paddingVertical: 10,
+                    paddingHorizontal: 10,
+                    alignItems: 'center',
+                    flexDirection: 'row',
+                    justifyContent: 'center',
+                    gap: 6,
+                    borderWidth: 1,
+                    borderColor: COLORS.primary + '40',
+                  }}
+                  onPress={handlePrintCotisations}
+                  disabled={printing}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="printer" size={17} color={COLORS.primary} />
+                  <Text style={{ color: COLORS.primary, fontWeight: '700', fontSize: 12 }}>
+                    {printing ? 'Impression…' : 'Imprimer'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             ) : null}
           </View>
         ) : null}
