@@ -125,9 +125,26 @@ const err = (c, message, status = 400) => c.json({ success: false, error: messag
 const OPEN_SEASON_REQUIRED_MESSAGE = 'Aucune saison ouverte. Créez ou rouvrez une saison avant de continuer.';
 
 async function requireOpenActiveSeason(c, saisonId) {
-  const activeSaison = await c.env.DB.prepare(
+  let activeSaison = await c.env.DB.prepare(
     "SELECT id FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
   ).first();
+
+  // Répare les anciennes données où une unique saison a été rouverte sans
+  // redevenir la saison courante. Ne jamais choisir automatiquement lorsqu'il
+  // y a plusieurs saisons ouvertes : ce choix reste du ressort de l'admin.
+  if (!activeSaison) {
+    const { results: openSaisons } = await c.env.DB.prepare(
+      "SELECT id FROM saisons WHERE COALESCE(statut, 'ouvert') = 'ouvert' ORDER BY annee DESC, createdAt DESC LIMIT 2"
+    ).all();
+
+    if (openSaisons?.length === 1) {
+      activeSaison = openSaisons[0];
+      await c.env.DB.batch([
+        c.env.DB.prepare('UPDATE saisons SET actif = 0'),
+        c.env.DB.prepare('UPDATE saisons SET actif = 1 WHERE id = ?').bind(activeSaison.id),
+      ]);
+    }
+  }
 
   if (!activeSaison) {
     return { error: err(c, OPEN_SEASON_REQUIRED_MESSAGE, 409) };

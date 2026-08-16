@@ -504,9 +504,26 @@ export async function getSaisonActive() {
 const OPEN_SEASON_REQUIRED_MESSAGE = 'Aucune saison ouverte. Créez ou rouvrez une saison avant de continuer.';
 
 async function requireOpenActiveSeason(database, saisonId) {
-  const saison = await database.getFirstAsync(
+  let saison = await database.getFirstAsync(
     "SELECT id FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
   );
+
+  // Répare les données locales héritées où une unique saison rouverte n'a pas
+  // été réactivée. En présence de plusieurs saisons ouvertes, seul l'admin
+  // peut décider laquelle doit devenir la saison courante.
+  if (!saison) {
+    const openSaisons = await database.getAllAsync(
+      "SELECT id FROM saisons WHERE COALESCE(statut, 'ouvert') = 'ouvert' ORDER BY annee DESC, createdAt DESC LIMIT 2"
+    );
+    if (openSaisons.length === 1) {
+      saison = openSaisons[0];
+      await database.withTransactionAsync(async () => {
+        await database.runAsync('UPDATE saisons SET actif = 0');
+        await database.runAsync('UPDATE saisons SET actif = 1 WHERE id = ?', [saison.id]);
+      });
+    }
+  }
+
   if (!saison) throw new Error(OPEN_SEASON_REQUIRED_MESSAGE);
   if (saisonId && saison.id !== saisonId) {
     throw new Error('La saison concernée n’est pas la saison ouverte active.');
