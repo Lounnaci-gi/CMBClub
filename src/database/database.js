@@ -1196,8 +1196,10 @@ export async function updatePaiement(paiement) {
     }
   }
   const db = await getDatabase();
-  const existing = await db.getFirstAsync('SELECT saisonId FROM paiements WHERE id = ?', [paiement.id]);
-  await requireOpenActiveSeason(db, existing?.saisonId || paiement.saisonId);
+  const existing = await db.getFirstAsync('SELECT adherentId, saisonId FROM paiements WHERE id = ?', [paiement.id]);
+  const sId = existing?.saisonId || paiement.saisonId;
+  const adhId = existing?.adherentId || paiement.adherentId;
+  await requireOpenActiveSeason(db, sId);
   const now = new Date().toISOString();
   await db.runAsync(
     `UPDATE paiements SET montantPaye=?, remisePct=?, remiseMontant=?, datePaiement=?, statut=?, notes=?, updatedAt=? WHERE id=?`,
@@ -1207,6 +1209,17 @@ export async function updatePaiement(paiement) {
       paiement.notes || null, now, paiement.id,
     ],
   );
+
+  if (adhId && sId) {
+    try {
+      await syncLegacyPaiementsToVersements(db, adhId, sId);
+      const creancesRaw = await getCreancesByAdherent(adhId, sId);
+      const versements = await getVersementsByAdherent(adhId, sId);
+      await reconcilerPortefeuille(adhId, sId, new Date(), creancesRaw, versements);
+    } catch (e) {
+      console.warn('Erreur sync portefeuille dans updatePaiement:', e);
+    }
+  }
 }
 
 export async function getStatsBySaison(saisonId) {
@@ -2272,6 +2285,8 @@ export async function enregistrerVersement({
     }
   });
 
+  await syncCreancesToPaiements(database, adherentId, saisonId, result.creances, dateV);
+
   return {
     versementId,
     ...result,
@@ -2279,22 +2294,256 @@ export async function enregistrerVersement({
   };
 }
 
+async function syncLegacyPaiementsToVersements(database, adherentId, saisonId) {
+  try {
+    const paidPaiements = await database.getAllAsync(
+      `SELECT * FROM paiements WHERE adherentId = ? AND saisonId = ? AND montantPaye > 0 ORDER BY CASE type WHEN 'inscription' THEN 0 WHEN 'assurance' THEN 1 ELSE 2 END, annee, mois`,
+      [adherentId, saisonId],
+    );
+    if (!paidPaiements || paidPaiements.length === 0) return;
+
+    const versements = await database.getAllAsync(
+      `SELECT * FROM versements WHERE adherentId = ? AND saisonId = ?`,
+      [adherentId, saisonId],
+    );
+
+    const totalPaidPaiements = paidPaiements.reduce((sum, p) => sum + (Number(p.montantPaye) || 0), 0);
+    const totalVersements = versements.reduce((sum, v) => sum + (Number(v.montant) || 0), 0);
+
+    if (totalPaidPaiements > totalVersements) {
+      const now = new Date().toISOString();
+      if (versements.length === 0) {
+        for (const p of paidPaiements) {
+          const dateV = (p.datePaiement || p.updatedAt || p.createdAt || now).slice(0, 10);
+          await database.runAsync(
+            `INSERT INTO versements (id, adherentId, saisonId, montant, dateVersement, notes, createdAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [uuidv4(), adherentId, saisonId, Number(p.montantPaye), dateV, p.notes || `Règlement ${p.label}`, p.createdAt || now],
+          );
+        }
+      } else {
+        const diff = Math.round((totalPaidPaiements - totalVersements) * 100) / 100;
+        if (diff > 0) {
+          const dateV = now.slice(0, 10);
+          await database.runAsync(
+            `INSERT INTO versements (id, adherentId, saisonId, montant, dateVersement, notes, createdAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [uuidv4(), adherentId, saisonId, diff, dateV, 'Synchronisation des versements', now],
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Erreur syncLegacyPaiementsToVersements:', err);
+  }
+}
+
+async function syncCreancesToPaiements(database, adherentId, saisonId, creances, dateV = null) {
+  try {
+    const now = new Date().toISOString();
+    const existingPaiements = await database.getAllAsync(
+      `SELECT * FROM paiements WHERE adherentId = ? AND saisonId = ?`,
+      [adherentId, saisonId],
+    );
+
+    for (const c of creances) {
+      let target = null;
+      if (c.type === 'inscription') {
+        target = existingPaiements.find((p) => p.type === 'inscription');
+      } else if (c.type === 'assurance') {
+        target = existingPaiements.find((p) => p.type === 'assurance');
+      } else if (c.type === 'mensualite') {
+        target = existingPaiements.find(
+          (p) => p.type === 'mensualite' && Number(p.mois) === Number(c.mois) && Number(p.annee) === Number(c.annee),
+        );
+      }
+
+      const statutPaiement =
+        c.montantPaye >= c.montantDu
+          ? 'paye'
+          : c.montantPaye > 0
+          ? 'avance'
+          : 'a_payer';
+
+      if (target) {
+        await database.runAsync(
+          `UPDATE paiements SET montantPaye = ?, statut = ?, datePaiement = COALESCE(datePaiement, ?), updatedAt = ? WHERE id = ?`,
+          [c.montantPaye, statutPaiement, c.montantPaye > 0 ? (dateV || now) : null, now, target.id],
+        );
+      } else if (c.type === 'mensualite') {
+        const id = uuidv4();
+        await database.runAsync(
+          `INSERT INTO paiements (id, adherentId, saisonId, type, label, mois, annee, montantDu, remisePct, remiseMontant, montantPaye, datePaiement, statut, notes, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            adherentId,
+            saisonId,
+            c.type,
+            c.label,
+            c.mois,
+            c.annee,
+            c.montantDu,
+            c.montantPaye,
+            c.montantPaye > 0 ? (dateV || now) : null,
+            statutPaiement,
+            '[Avance Portefeuille]',
+            now,
+            now,
+          ],
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('Erreur syncCreancesToPaiements:', err);
+  }
+}
+
+/**
+ * Réconcilie les créances depuis les versements bruts.
+ * Réimpute tous les versements dans l'ordre chronologique sur une copie
+ * vierge des créances, puis écrit en BDD si un écart est détecté.
+ * Garantit que montantPaye est toujours exact, même si une mise à jour
+ * précédente a échoué silencieusement.
+ */
+async function reconcilerPortefeuille(adherentId, saisonId, asOfDate, creancesActuelles, versements) {
+  if (!versements || versements.length === 0) return creancesActuelles;
+
+  const database = await getDatabase();
+  const saison = await database.getFirstAsync(`SELECT * FROM saisons WHERE id = ?`, [saisonId]);
+  const config = await loadPortefeuilleConfigMap(database);
+  const tarifPerso = await getTarifPersonnalise(adherentId, saisonId);
+  const tarifMensuel = resolveTarifMensuel(config.fraisMensuel, tarifPerso?.montantMensuel);
+
+  // Trier les versements du plus ancien au plus récent
+  const versementsTries = [...versements].sort((a, b) =>
+    (a.dateVersement || a.createdAt || '').localeCompare(b.dateVersement || b.createdAt || ''),
+  );
+
+  // Repartir d'une base vierge : montantPaye = 0 pour toutes les créances existantes
+  let creancesBase = creancesActuelles.map((c) => ({ ...c, montantPaye: 0 }));
+  const nouvellesCreancesCumulees = [];
+
+  // Réimputer chaque versement dans l'ordre
+  for (const v of versementsTries) {
+    const toutesCreances = [...creancesBase, ...nouvellesCreancesCumulees];
+    const result = imputerVersement({
+      montant: Number(v.montant),
+      creances: toutesCreances,
+      asOfDate,
+      adherentId,
+      saisonId,
+      saisonAnnee: saison?.annee,
+      tarifMensuel,
+    });
+    // Mettre à jour creancesBase depuis result.creances
+    const byId = new Map(result.creances.map((c) => [c.id || c._tempId, c]));
+    creancesBase = creancesBase.map((c) => byId.get(c.id) || c);
+    // Accumuler les nouvelles créances futures créées lors de cette imputation
+    for (const nc of result.nouvellesCreances) {
+      const existe = nouvellesCreancesCumulees.some(
+        (x) => x._tempId === nc._tempId || (x.mois === nc.mois && x.annee === nc.annee && x.type === nc.type),
+      );
+      if (!existe) {
+        const inResult = result.creances.find((c) => c._tempId === nc._tempId);
+        nouvellesCreancesCumulees.push({ ...nc, montantPaye: inResult?.montantPaye || nc.montantPaye });
+      } else {
+        const idx = nouvellesCreancesCumulees.findIndex(
+          (x) => x._tempId === nc._tempId || (x.mois === nc.mois && x.annee === nc.annee && x.type === nc.type),
+        );
+        if (idx >= 0) {
+          const inResult = result.creances.find((c) => c._tempId === nc._tempId);
+          nouvellesCreancesCumulees[idx] = {
+            ...nouvellesCreancesCumulees[idx],
+            montantPaye: inResult?.montantPaye || nouvellesCreancesCumulees[idx].montantPaye,
+          };
+        }
+      }
+    }
+  }
+
+  // Recalculer les statuts finaux
+  for (const c of creancesBase) {
+    c.statut = computeCreanceStatus(c, asOfDate);
+  }
+  for (const c of nouvellesCreancesCumulees) {
+    c.statut = computeCreanceStatus(c, asOfDate);
+  }
+
+  // Insérer ou mettre à jour en BDD
+  const now = new Date().toISOString();
+  await database.withTransactionAsync(async () => {
+    for (const c of creancesBase) {
+      if (!c.id) continue;
+      await database.runAsync(
+        `UPDATE creances SET montantPaye = ?, statut = ?, updatedAt = ? WHERE id = ?`,
+        [c.montantPaye, c.statut, now, c.id],
+      );
+    }
+
+    for (const nc of nouvellesCreancesCumulees) {
+      const existingInDb = await database.getFirstAsync(
+        `SELECT id FROM creances WHERE adherentId = ? AND saisonId = ? AND type = ? AND mois = ? AND annee = ?`,
+        [adherentId, saisonId, nc.type, nc.mois, nc.annee],
+      );
+      if (existingInDb) {
+        nc.id = existingInDb.id;
+        await database.runAsync(
+          `UPDATE creances SET montantPaye = ?, statut = ?, updatedAt = ? WHERE id = ?`,
+          [nc.montantPaye, nc.statut, now, existingInDb.id],
+        );
+      } else {
+        const id = uuidv4();
+        nc.id = id;
+        await database.runAsync(
+          `INSERT INTO creances (id, adherentId, saisonId, type, label, mois, annee, montantDu, montantPaye, statut, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            adherentId,
+            saisonId,
+            nc.type,
+            nc.label,
+            nc.mois,
+            nc.annee,
+            nc.montantDu,
+            nc.montantPaye,
+            nc.statut,
+            now,
+            now,
+          ],
+        );
+      }
+    }
+  });
+
+  const allCreances = [...creancesBase, ...nouvellesCreancesCumulees];
+  await syncCreancesToPaiements(database, adherentId, saisonId, allCreances);
+  return allCreances;
+}
+
 export async function fetchResumePortefeuille(adherentId, saisonId, asOfDate = new Date()) {
+  const database = await getDatabase();
   await ensureCreancesAdherent(adherentId, saisonId, asOfDate);
-  const creances = await getCreancesByAdherent(adherentId, saisonId);
+  await syncLegacyPaiementsToVersements(database, adherentId, saisonId);
+  const creancesRaw = await getCreancesByAdherent(adherentId, saisonId);
   const versements = await getVersementsByAdherent(adherentId, saisonId);
+  const creances = await reconcilerPortefeuille(adherentId, saisonId, asOfDate, creancesRaw, versements);
   return getResumePortefeuille({ creances, versements, asOfDate });
 }
 
 export async function fetchDetailMensuel(adherentId, saisonId, asOfDate = new Date()) {
   const database = await getDatabase();
   await ensureCreancesAdherent(adherentId, saisonId, asOfDate);
+  await syncLegacyPaiementsToVersements(database, adherentId, saisonId);
   const saison = await database.getFirstAsync(`SELECT * FROM saisons WHERE id = ?`, [saisonId]);
   const enrollment = await database.getFirstAsync(
     `SELECT dateInscription FROM adherent_saisons WHERE adherentId = ? AND saisonId = ? AND actif = 1`,
     [adherentId, saisonId],
   );
-  const creances = await getCreancesByAdherent(adherentId, saisonId);
+  const creancesRaw = await getCreancesByAdherent(adherentId, saisonId);
+  const versements = await getVersementsByAdherent(adherentId, saisonId);
+  const creances = await reconcilerPortefeuille(adherentId, saisonId, asOfDate, creancesRaw, versements);
   return getDetailMensuel({
     creances,
     dateInscription: enrollment?.dateInscription,
@@ -2304,15 +2553,35 @@ export async function fetchDetailMensuel(adherentId, saisonId, asOfDate = new Da
 }
 
 export async function fetchPortefeuilleComplet(adherentId, saisonId, asOfDate = new Date()) {
+  const database = await getDatabase();
   await ensureCreancesAdherent(adherentId, saisonId, asOfDate);
-  const [creances, versements, resume, detailMensuel, tarifPerso, reductionAdherent] = await Promise.all([
+  await syncLegacyPaiementsToVersements(database, adherentId, saisonId);
+
+  const [creancesRaw, versements, tarifPerso, reductionAdherent] = await Promise.all([
     getCreancesByAdherent(adherentId, saisonId),
     getVersementsByAdherent(adherentId, saisonId),
-    fetchResumePortefeuille(adherentId, saisonId, asOfDate),
-    fetchDetailMensuel(adherentId, saisonId, asOfDate),
     getTarifPersonnalise(adherentId, saisonId),
     getReductionAdherent(adherentId, saisonId),
   ]);
+
+  // Réconciliation : recalcule montantPaye depuis les versements bruts
+  const creances = await reconcilerPortefeuille(adherentId, saisonId, asOfDate, creancesRaw, versements);
+
+  // Recalculer résumé et détail depuis les créances réconciliées
+  const saison = await database.getFirstAsync(`SELECT * FROM saisons WHERE id = ?`, [saisonId]);
+  const enrollment = await database.getFirstAsync(
+    `SELECT dateInscription FROM adherent_saisons WHERE adherentId = ? AND saisonId = ? AND actif = 1`,
+    [adherentId, saisonId],
+  );
+
+  const resume = getResumePortefeuille({ creances, versements, asOfDate });
+  const detailMensuel = getDetailMensuel({
+    creances,
+    dateInscription: enrollment?.dateInscription,
+    saisonAnnee: saison?.annee,
+    asOfDate,
+  });
+
   return { creances, versements, resume, detailMensuel, tarifPerso, reductionAdherent };
 }
 
