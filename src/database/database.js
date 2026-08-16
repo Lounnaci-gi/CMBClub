@@ -3,10 +3,19 @@
 
 import * as SQLite from 'expo-sqlite';
 import { v4 as uuidv4 } from 'uuid';
-import { buildAdherentCodeBase } from '../utils/adherentCode';
+import { buildAdherentCodeBase, findAdherentDuplicate } from '../utils/adherentCode';
 import { computePaymentStatus, generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../utils/payments';
 import { isCloudflareEnabled, CloudflareAPI } from '../services/api';
 import { hashPassword, verifyPassword, encryptUsername, decryptUsername, matchesUsername } from '../utils/security';
+import {
+  genererCreancesMois,
+  imputerVersement,
+  getResumePortefeuille,
+  getDetailMensuel,
+  resolveTarifMensuel,
+  calculerPaiementGroupe,
+  computeCreanceStatus,
+} from '../services/portefeuilleService';
 
 let db = null;
 let dbInitPromise = null;
@@ -107,6 +116,88 @@ async function initDatabase(database) {
       createdAt TEXT NOT NULL
     );
 
+    -- Portefeuille : créances, versements, imputations, tarifs & paliers
+    CREATE TABLE IF NOT EXISTS creances (
+      id TEXT PRIMARY KEY,
+      adherentId TEXT NOT NULL,
+      saisonId TEXT NOT NULL,
+      type TEXT NOT NULL,
+      label TEXT NOT NULL,
+      mois INTEGER,
+      annee INTEGER,
+      montantDu REAL NOT NULL,
+      montantPaye REAL DEFAULT 0,
+      statut TEXT NOT NULL DEFAULT 'non_paye',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (adherentId) REFERENCES adherents(id),
+      FOREIGN KEY (saisonId) REFERENCES saisons(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS versements (
+      id TEXT PRIMARY KEY,
+      adherentId TEXT NOT NULL,
+      saisonId TEXT NOT NULL,
+      montant REAL NOT NULL,
+      dateVersement TEXT NOT NULL,
+      notes TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (adherentId) REFERENCES adherents(id),
+      FOREIGN KEY (saisonId) REFERENCES saisons(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS imputation_versements (
+      id TEXT PRIMARY KEY,
+      versementId TEXT NOT NULL,
+      creanceId TEXT NOT NULL,
+      montant REAL NOT NULL,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (versementId) REFERENCES versements(id),
+      FOREIGN KEY (creanceId) REFERENCES creances(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS tarifs_personnalises (
+      id TEXT PRIMARY KEY,
+      adherentId TEXT NOT NULL,
+      saisonId TEXT NOT NULL,
+      montantMensuel REAL NOT NULL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      UNIQUE(adherentId, saisonId),
+      FOREIGN KEY (adherentId) REFERENCES adherents(id),
+      FOREIGN KEY (saisonId) REFERENCES saisons(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS paliers_reduction (
+      id TEXT PRIMARY KEY,
+      label TEXT,
+      nbMoisMin INTEGER NOT NULL,
+      reductionPct REAL NOT NULL,
+      actif INTEGER DEFAULT 1,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reductions_adherent (
+      id TEXT PRIMARY KEY,
+      adherentId TEXT NOT NULL,
+      saisonId TEXT NOT NULL,
+      nbMoisMin INTEGER DEFAULT 1,
+      reductionPct REAL NOT NULL,
+      actif INTEGER DEFAULT 1,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      UNIQUE(adherentId, saisonId),
+      FOREIGN KEY (adherentId) REFERENCES adherents(id),
+      FOREIGN KEY (saisonId) REFERENCES saisons(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_creances_adherent_saison ON creances(adherentId, saisonId);
+    CREATE INDEX IF NOT EXISTS idx_creances_type_mois ON creances(type, annee, mois);
+    CREATE INDEX IF NOT EXISTS idx_versements_adherent_saison ON versements(adherentId, saisonId);
+    CREATE INDEX IF NOT EXISTS idx_imputation_versement ON imputation_versements(versementId);
+    CREATE INDEX IF NOT EXISTS idx_imputation_creance ON imputation_versements(creanceId);
+
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -202,6 +293,9 @@ async function initDatabase(database) {
   );
   await database.runAsync(
     `INSERT OR IGNORE INTO config (key, value) VALUES ('fraisMensuel', '1500')`,
+  );
+  await database.runAsync(
+    `INSERT OR IGNORE INTO config (key, value) VALUES ('fraisAssurance', '500')`,
   );
   await database.runAsync(
     `INSERT OR IGNORE INTO config (key, value) VALUES ('cloudflareApiUrl', 'https://cmbclub-api.ahmedlounnaci.workers.dev')`,
@@ -430,11 +524,16 @@ export async function resetDatabase() {
   const db = await getDatabase();
   await db.withTransactionAsync(async () => {
     // Supprimer les données transactionnelles
+    await db.runAsync('DELETE FROM imputation_versements');
+    await db.runAsync('DELETE FROM versements');
+    await db.runAsync('DELETE FROM creances');
+    await db.runAsync('DELETE FROM tarifs_personnalises');
+    await db.runAsync('DELETE FROM reductions_adherent');
     await db.runAsync('DELETE FROM presences');
     await db.runAsync('DELETE FROM paiements');
     await db.runAsync('DELETE FROM adherent_saisons');
     await db.runAsync('DELETE FROM adherents');
-    // Conserver : users (admin), config, saisons, remises, disciplines, creneaux
+    // Conserver : users (admin), config, saisons, remises, paliers_reduction, disciplines, creneaux
   });
 }
 
@@ -503,7 +602,7 @@ export async function getSaisonActive() {
 
 const OPEN_SEASON_REQUIRED_MESSAGE = 'Aucune saison ouverte. Créez ou rouvrez une saison avant de continuer.';
 
-async function requireOpenActiveSeason(database, saisonId) {
+export async function requireOpenActiveSeason(database, saisonId) {
   let saison = await database.getFirstAsync(
     "SELECT id FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
   );
@@ -608,6 +707,11 @@ export async function deleteSaison(saisonId) {
   }
   const db = await getDatabase();
   await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM imputation_versements WHERE creanceId IN (SELECT id FROM creances WHERE saisonId = ?)', [saisonId]);
+    await db.runAsync('DELETE FROM versements WHERE saisonId = ?', [saisonId]);
+    await db.runAsync('DELETE FROM creances WHERE saisonId = ?', [saisonId]);
+    await db.runAsync('DELETE FROM tarifs_personnalises WHERE saisonId = ?', [saisonId]);
+    await db.runAsync('DELETE FROM reductions_adherent WHERE saisonId = ?', [saisonId]);
     await db.runAsync('DELETE FROM presences WHERE saisonId = ?', [saisonId]);
     await db.runAsync('DELETE FROM paiements WHERE saisonId = ?', [saisonId]);
     await db.runAsync('DELETE FROM adherent_saisons WHERE saisonId = ?', [saisonId]);
@@ -730,17 +834,43 @@ export async function getAdherentByCode(code) {
   return await db.getFirstAsync('SELECT * FROM adherents WHERE code = ?', [code]);
 }
 
+export async function checkAdherentDuplicate({ nom, prenom, dateNaissance, excludeId = null }) {
+  if (!nom || !prenom || !dateNaissance) return null;
+  const db = await getDatabase();
+  const targetDate = String(dateNaissance).trim();
+  const candidates = await db.getAllAsync(
+    'SELECT id, code, nom, prenom, dateNaissance FROM adherents WHERE dateNaissance = ?',
+    [targetDate],
+  );
+  return findAdherentDuplicate(candidates, { nom, prenom, dateNaissance }, excludeId);
+}
+
 export async function createAdherent(adherent) {
   if (isCloudflareEnabled()) {
     try {
       await CloudflareAPI.createAdherent(adherent);
     } catch (e) {
       rethrowOpenSeasonError(e);
+      if (e.message && e.message.includes('existe déjà')) {
+        throw e;
+      }
       console.warn('Cloudflare createAdherent fallback:', e.message);
     }
   }
   const db = await getDatabase();
   await requireOpenActiveSeason(db);
+
+  // Vérification stricte anti-doublon (nom, prénom, dateNaissance)
+  const existingDup = await checkAdherentDuplicate({
+    nom: adherent.nom,
+    prenom: adherent.prenom,
+    dateNaissance: adherent.dateNaissance,
+    excludeId: adherent.id,
+  });
+  if (existingDup) {
+    throw new Error(`Un adhérent avec le même nom, prénom et date de naissance existe déjà (${existingDup.nom} ${existingDup.prenom} - Code : ${existingDup.code || 'N/A'}).`);
+  }
+
   const now = new Date().toISOString();
   // La date d'inscription est automatiquement la date du jour si non fournie
   const dateInscription = adherent.dateInscription || now.slice(0, 10);
@@ -764,10 +894,25 @@ export async function updateAdherent(adherent) {
     try {
       await CloudflareAPI.updateAdherent(adherent);
     } catch (e) {
+      if (e.message && e.message.includes('existe déjà')) {
+        throw e;
+      }
       console.warn('Cloudflare updateAdherent fallback:', e.message);
     }
   }
   const db = await getDatabase();
+
+  // Vérification anti-doublon
+  const existingDup = await checkAdherentDuplicate({
+    nom: adherent.nom,
+    prenom: adherent.prenom,
+    dateNaissance: adherent.dateNaissance,
+    excludeId: adherent.id,
+  });
+  if (existingDup) {
+    throw new Error(`Un autre adhérent avec le même nom, prénom et date de naissance existe déjà (${existingDup.nom} ${existingDup.prenom} - Code : ${existingDup.code || 'N/A'}).`);
+  }
+
   const now = new Date().toISOString();
   const assureVal = adherent.assure ? 1 : 0;
   // Le code et la dateInscription ne sont jamais modifiés après création
@@ -821,6 +966,9 @@ export async function setAdherentAssure(id, assure, saisonId) {
     `UPDATE adherents SET assure = ?, updatedAt = ? WHERE id = ?`,
     [val, now, id],
   );
+  if (val === 1 && targetSaisonId) {
+    await ensureCreancesAdherent(id, targetSaisonId);
+  }
 }
 
 export async function deleteAdherent(id) {
@@ -832,10 +980,20 @@ export async function deleteAdherent(id) {
     }
   }
   const db = await getDatabase();
-  await db.runAsync('DELETE FROM paiements WHERE adherentId = ?', [id]);
-  await db.runAsync('DELETE FROM adherent_saisons WHERE adherentId = ?', [id]);
-  await db.runAsync('DELETE FROM users WHERE adherentId = ?', [id]);
-  await db.runAsync('DELETE FROM adherents WHERE id = ?', [id]);
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      'DELETE FROM imputation_versements WHERE creanceId IN (SELECT id FROM creances WHERE adherentId = ?) OR versementId IN (SELECT id FROM versements WHERE adherentId = ?)',
+      [id, id],
+    );
+    await db.runAsync('DELETE FROM versements WHERE adherentId = ?', [id]);
+    await db.runAsync('DELETE FROM creances WHERE adherentId = ?', [id]);
+    await db.runAsync('DELETE FROM tarifs_personnalises WHERE adherentId = ?', [id]);
+    await db.runAsync('DELETE FROM reductions_adherent WHERE adherentId = ?', [id]);
+    await db.runAsync('DELETE FROM paiements WHERE adherentId = ?', [id]);
+    await db.runAsync('DELETE FROM adherent_saisons WHERE adherentId = ?', [id]);
+    await db.runAsync('DELETE FROM users WHERE adherentId = ?', [id]);
+    await db.runAsync('DELETE FROM adherents WHERE id = ?', [id]);
+  });
 }
 
 // ──────────────── ADHÉRENT-SAISONS ────────────────
@@ -854,6 +1012,8 @@ export async function enrollAdherentInSaison(adherentId, saisonId, dateInscripti
     `INSERT OR REPLACE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif) VALUES (?, ?, ?, ?, ?, 1)`,
     [id, adherentId, saisonId, dateInscription, assure ? 1 : 0],
   );
+  // Créances dues au moment de l'inscription (acte admin ≠ paiement)
+  await ensureCreancesAdherent(adherentId, saisonId);
 }
 
 
@@ -1797,5 +1957,379 @@ export async function getPresencesByAdherent(adherentId, saisonId) {
     tauxPresence,
   };
 }
+
+// ──────────────── PORTEFEUILLE & CRÉANCES ────────────────
+
+async function loadPortefeuilleConfigMap(database) {
+  const rows = await database.getAllAsync('SELECT * FROM config');
+  const map = {};
+  rows.forEach((r) => { map[r.key] = r.value; });
+  return {
+    fraisInscription: parseFloat(map.fraisInscription) || 2000,
+    fraisMensuel: parseFloat(map.fraisMensuel) || 1500,
+    fraisAssurance: parseFloat(map.fraisAssurance) || 500,
+  };
+}
+
+export async function getCreancesByAdherent(adherentId, saisonId) {
+  const database = await getDatabase();
+  return database.getAllAsync(
+    `SELECT * FROM creances WHERE adherentId = ? AND saisonId = ?
+     ORDER BY CASE type WHEN 'inscription' THEN 0 WHEN 'assurance' THEN 1 ELSE 2 END, annee, mois`,
+    [adherentId, saisonId],
+  );
+}
+
+export async function getVersementsByAdherent(adherentId, saisonId) {
+  const database = await getDatabase();
+  return database.getAllAsync(
+    `SELECT * FROM versements WHERE adherentId = ? AND saisonId = ? ORDER BY dateVersement DESC, createdAt DESC`,
+    [adherentId, saisonId],
+  );
+}
+
+export async function getTarifPersonnalise(adherentId, saisonId) {
+  const database = await getDatabase();
+  return database.getFirstAsync(
+    `SELECT * FROM tarifs_personnalises WHERE adherentId = ? AND saisonId = ?`,
+    [adherentId, saisonId],
+  );
+}
+
+export async function setTarifPersonnalise(adherentId, saisonId, montantMensuel) {
+  const database = await getDatabase();
+  await requireOpenActiveSeason(database, saisonId);
+  const now = new Date().toISOString();
+  const existing = await getTarifPersonnalise(adherentId, saisonId);
+  if (montantMensuel == null || montantMensuel === '' || Number.isNaN(Number(montantMensuel))) {
+    if (existing) {
+      await database.runAsync(`DELETE FROM tarifs_personnalises WHERE id = ?`, [existing.id]);
+    }
+    return null;
+  }
+  const montant = Number(montantMensuel);
+  if (existing) {
+    await database.runAsync(
+      `UPDATE tarifs_personnalises SET montantMensuel = ?, updatedAt = ? WHERE id = ?`,
+      [montant, now, existing.id],
+    );
+    return { ...existing, montantMensuel: montant, updatedAt: now };
+  }
+  const row = {
+    id: uuidv4(),
+    adherentId,
+    saisonId,
+    montantMensuel: montant,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await database.runAsync(
+    `INSERT INTO tarifs_personnalises (id, adherentId, saisonId, montantMensuel, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [row.id, row.adherentId, row.saisonId, row.montantMensuel, row.createdAt, row.updatedAt],
+  );
+  return row;
+}
+
+export async function getPaliersReduction() {
+  const database = await getDatabase();
+  return database.getAllAsync(
+    `SELECT * FROM paliers_reduction WHERE actif = 1 ORDER BY nbMoisMin ASC`,
+  );
+}
+
+export async function createPalierReduction(palier) {
+  const database = await getDatabase();
+  const now = new Date().toISOString();
+  const id = palier.id || uuidv4();
+  await database.runAsync(
+    `INSERT INTO paliers_reduction (id, label, nbMoisMin, reductionPct, actif, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, 1, ?, ?)`,
+    [id, palier.label || `${palier.nbMoisMin}+ mois`, palier.nbMoisMin, palier.reductionPct, now, now],
+  );
+  return { id, ...palier, actif: 1, createdAt: now, updatedAt: now };
+}
+
+export async function updatePalierReduction(palier) {
+  const database = await getDatabase();
+  const now = new Date().toISOString();
+  await database.runAsync(
+    `UPDATE paliers_reduction SET label = ?, nbMoisMin = ?, reductionPct = ?, actif = ?, updatedAt = ? WHERE id = ?`,
+    [
+      palier.label,
+      palier.nbMoisMin,
+      palier.reductionPct,
+      palier.actif === 0 ? 0 : 1,
+      now,
+      palier.id,
+    ],
+  );
+}
+
+export async function deletePalierReduction(id) {
+  const database = await getDatabase();
+  await database.runAsync(`UPDATE paliers_reduction SET actif = 0, updatedAt = ? WHERE id = ?`, [
+    new Date().toISOString(),
+    id,
+  ]);
+}
+
+export async function getReductionAdherent(adherentId, saisonId) {
+  const database = await getDatabase();
+  return database.getFirstAsync(
+    `SELECT * FROM reductions_adherent WHERE adherentId = ? AND saisonId = ? AND actif = 1`,
+    [adherentId, saisonId],
+  );
+}
+
+export async function setReductionAdherent(adherentId, saisonId, { nbMoisMin = 1, reductionPct } = {}) {
+  const database = await getDatabase();
+  await requireOpenActiveSeason(database, saisonId);
+  const now = new Date().toISOString();
+  const existing = await database.getFirstAsync(
+    `SELECT * FROM reductions_adherent WHERE adherentId = ? AND saisonId = ?`,
+    [adherentId, saisonId],
+  );
+
+  if (reductionPct == null || reductionPct === '' || Number.isNaN(Number(reductionPct))) {
+    if (existing) {
+      await database.runAsync(`UPDATE reductions_adherent SET actif = 0, updatedAt = ? WHERE id = ?`, [
+        now,
+        existing.id,
+      ]);
+    }
+    return null;
+  }
+
+  const pct = Number(reductionPct);
+  const min = Number(nbMoisMin) || 1;
+
+  if (existing) {
+    await database.runAsync(
+      `UPDATE reductions_adherent SET nbMoisMin = ?, reductionPct = ?, actif = 1, updatedAt = ? WHERE id = ?`,
+      [min, pct, now, existing.id],
+    );
+    return { ...existing, nbMoisMin: min, reductionPct: pct, actif: 1, updatedAt: now };
+  }
+
+  const row = {
+    id: uuidv4(),
+    adherentId,
+    saisonId,
+    nbMoisMin: min,
+    reductionPct: pct,
+    actif: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await database.runAsync(
+    `INSERT INTO reductions_adherent (id, adherentId, saisonId, nbMoisMin, reductionPct, actif, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+    [row.id, row.adherentId, row.saisonId, row.nbMoisMin, row.reductionPct, row.createdAt, row.updatedAt],
+  );
+  return row;
+}
+
+export async function ensureCreancesAdherent(adherentId, saisonId, asOfDate = new Date()) {
+  if (!adherentId || !saisonId) return [];
+  const database = await getDatabase();
+
+  const enrollment = await database.getFirstAsync(
+    `SELECT * FROM adherent_saisons WHERE adherentId = ? AND saisonId = ? AND actif = 1`,
+    [adherentId, saisonId],
+  );
+  if (!enrollment) return [];
+
+  const saison = await database.getFirstAsync(`SELECT * FROM saisons WHERE id = ?`, [saisonId]);
+  if (!saison) return [];
+
+  const config = await loadPortefeuilleConfigMap(database);
+  const tarifPerso = await getTarifPersonnalise(adherentId, saisonId);
+  const tarifMensuel = resolveTarifMensuel(config.fraisMensuel, tarifPerso?.montantMensuel);
+  const existing = await getCreancesByAdherent(adherentId, saisonId);
+
+  const nouvelles = genererCreancesMois({
+    adherentId,
+    saisonId,
+    saisonAnnee: saison.annee,
+    dateInscription: enrollment.dateInscription,
+    asOfDate,
+    fraisInscription: config.fraisInscription,
+    fraisAssurance: config.fraisAssurance,
+    tarifMensuel,
+    assure: Boolean(enrollment.assure),
+    existingCreances: existing,
+  });
+
+  const now = new Date().toISOString();
+  for (const c of nouvelles) {
+    const id = uuidv4();
+    await database.runAsync(
+      `INSERT INTO creances (id, adherentId, saisonId, type, label, mois, annee, montantDu, montantPaye, statut, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      [
+        id,
+        c.adherentId,
+        c.saisonId,
+        c.type,
+        c.label,
+        c.mois ?? null,
+        c.annee ?? null,
+        c.montantDu,
+        c.statut,
+        now,
+        now,
+      ],
+    );
+  }
+
+  return getCreancesByAdherent(adherentId, saisonId);
+}
+
+export async function enregistrerVersement({
+  adherentId,
+  saisonId,
+  montant,
+  notes = null,
+  dateVersement = null,
+  asOfDate = new Date(),
+}) {
+  const database = await getDatabase();
+  await requireOpenActiveSeason(database, saisonId);
+
+  const amount = Number(montant);
+  if (!amount || amount <= 0) throw new Error('Montant de versement invalide');
+
+  await ensureCreancesAdherent(adherentId, saisonId, asOfDate);
+
+  const saison = await database.getFirstAsync(`SELECT * FROM saisons WHERE id = ?`, [saisonId]);
+  const config = await loadPortefeuilleConfigMap(database);
+  const tarifPerso = await getTarifPersonnalise(adherentId, saisonId);
+  const tarifMensuel = resolveTarifMensuel(config.fraisMensuel, tarifPerso?.montantMensuel);
+  const creances = await getCreancesByAdherent(adherentId, saisonId);
+
+  const result = imputerVersement({
+    montant: amount,
+    creances,
+    asOfDate,
+    adherentId,
+    saisonId,
+    saisonAnnee: saison.annee,
+    tarifMensuel,
+  });
+
+  const now = new Date().toISOString();
+  const versementId = uuidv4();
+  const dateV = dateVersement || now.slice(0, 10);
+
+  await database.withTransactionAsync(async () => {
+    await database.runAsync(
+      `INSERT INTO versements (id, adherentId, saisonId, montant, dateVersement, notes, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [versementId, adherentId, saisonId, amount, dateV, notes, now],
+    );
+
+    const tempIdToReal = {};
+    for (const c of result.nouvellesCreances) {
+      const id = uuidv4();
+      tempIdToReal[c._tempId] = id;
+      await database.runAsync(
+        `INSERT INTO creances (id, adherentId, saisonId, type, label, mois, annee, montantDu, montantPaye, statut, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          c.adherentId,
+          c.saisonId,
+          c.type,
+          c.label,
+          c.mois,
+          c.annee,
+          c.montantDu,
+          c.montantPaye,
+          computeCreanceStatus(c, asOfDate),
+          now,
+          now,
+        ],
+      );
+    }
+
+    for (const c of result.creances) {
+      if (c._tempId && tempIdToReal[c._tempId]) continue;
+      if (!c.id) continue;
+      await database.runAsync(
+        `UPDATE creances SET montantPaye = ?, statut = ?, updatedAt = ? WHERE id = ?`,
+        [c.montantPaye, computeCreanceStatus(c, asOfDate), now, c.id],
+      );
+    }
+
+    for (const imp of result.imputations) {
+      const creanceId = tempIdToReal[imp.creanceId] || imp.creanceId;
+      await database.runAsync(
+        `INSERT INTO imputation_versements (id, versementId, creanceId, montant, createdAt)
+         VALUES (?, ?, ?, ?, ?)`,
+        [uuidv4(), versementId, creanceId, imp.montant, now],
+      );
+    }
+  });
+
+  return {
+    versementId,
+    ...result,
+    resume: await fetchResumePortefeuille(adherentId, saisonId, asOfDate),
+  };
+}
+
+export async function fetchResumePortefeuille(adherentId, saisonId, asOfDate = new Date()) {
+  await ensureCreancesAdherent(adherentId, saisonId, asOfDate);
+  const creances = await getCreancesByAdherent(adherentId, saisonId);
+  const versements = await getVersementsByAdherent(adherentId, saisonId);
+  return getResumePortefeuille({ creances, versements, asOfDate });
+}
+
+export async function fetchDetailMensuel(adherentId, saisonId, asOfDate = new Date()) {
+  const database = await getDatabase();
+  await ensureCreancesAdherent(adherentId, saisonId, asOfDate);
+  const saison = await database.getFirstAsync(`SELECT * FROM saisons WHERE id = ?`, [saisonId]);
+  const enrollment = await database.getFirstAsync(
+    `SELECT dateInscription FROM adherent_saisons WHERE adherentId = ? AND saisonId = ? AND actif = 1`,
+    [adherentId, saisonId],
+  );
+  const creances = await getCreancesByAdherent(adherentId, saisonId);
+  return getDetailMensuel({
+    creances,
+    dateInscription: enrollment?.dateInscription,
+    saisonAnnee: saison?.annee,
+    asOfDate,
+  });
+}
+
+export async function fetchPortefeuilleComplet(adherentId, saisonId, asOfDate = new Date()) {
+  await ensureCreancesAdherent(adherentId, saisonId, asOfDate);
+  const [creances, versements, resume, detailMensuel, tarifPerso, reductionAdherent] = await Promise.all([
+    getCreancesByAdherent(adherentId, saisonId),
+    getVersementsByAdherent(adherentId, saisonId),
+    fetchResumePortefeuille(adherentId, saisonId, asOfDate),
+    fetchDetailMensuel(adherentId, saisonId, asOfDate),
+    getTarifPersonnalise(adherentId, saisonId),
+    getReductionAdherent(adherentId, saisonId),
+  ]);
+  return { creances, versements, resume, detailMensuel, tarifPerso, reductionAdherent };
+}
+
+export async function estimerPaiementGroupe(adherentId, saisonId, nbMois) {
+  const database = await getDatabase();
+  const config = await loadPortefeuilleConfigMap(database);
+  const tarifPerso = await getTarifPersonnalise(adherentId, saisonId);
+  const tarifBase = resolveTarifMensuel(config.fraisMensuel, tarifPerso?.montantMensuel);
+  const paliersGeneraux = await getPaliersReduction();
+  const reductionAdherent = await getReductionAdherent(adherentId, saisonId);
+  return calculerPaiementGroupe({
+    nbMois,
+    tarifBase,
+    paliersGeneraux,
+    reductionAdherent,
+  });
+}
+
 
 

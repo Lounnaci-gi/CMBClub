@@ -384,6 +384,31 @@ export default function AdherentDetailScreen({ navigation, route }) {
                 </Text>
               </TouchableOpacity>
             ) : null}
+
+            {enrolled ? (
+              <TouchableOpacity
+                style={{
+                  marginTop: 10,
+                  backgroundColor: COLORS.bgInput,
+                  borderRadius: RADIUS.md,
+                  paddingVertical: 10,
+                  paddingHorizontal: 14,
+                  alignItems: 'center',
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  gap: 8,
+                  borderWidth: 1,
+                  borderColor: COLORS.primary + '40',
+                }}
+                onPress={() => navigation.navigate('Portefeuille', { adherentId: adherent.id })}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons name="wallet" size={18} color={COLORS.primary} />
+                <Text style={{ color: COLORS.primary, fontWeight: '700', fontSize: 13 }}>
+                  Ouvrir le portefeuille
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : null}
 

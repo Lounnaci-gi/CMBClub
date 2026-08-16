@@ -12,6 +12,12 @@ import useTheme from '../../theme/useTheme';
 import { THEME_OPTIONS } from '../../theme/themes';
 import { CloudflareAPI } from '../../services/api';
 import { resetDatabase } from '../../database/database';
+import {
+  getPaliersReduction,
+  createPalierReduction,
+  updatePalierReduction,
+  deletePalierReduction,
+} from '../../database/portefeuilleDb';
 
 export default function ConfigScreen() {
   const {
@@ -26,6 +32,7 @@ export default function ConfigScreen() {
 
   const [fraisInscription, setFraisInscription] = useState(String(config.fraisInscription || 2000));
   const [fraisMensuel, setFraisMensuel] = useState(String(config.fraisMensuel || 1500));
+  const [fraisAssurance, setFraisAssurance] = useState(String(config.fraisAssurance || 500));
   const [cloudflareUrl, setCloudflareUrlInput] = useState(config.cloudflareApiUrl || '');
   const [cloudflareTesting, setCloudflareTesting] = useState(false);
   const [cloudflareStatus, setCloudflareStatus] = useState(null); // { success: boolean, msg: string }
@@ -37,6 +44,13 @@ export default function ConfigScreen() {
   const [remiseLabel, setRemiseLabel] = useState('');
   const [remisePct, setRemisePct] = useState('');
   const [configSaved, setConfigSaved] = useState(false);
+
+  const [paliers, setPaliers] = useState([]);
+  const [showPalierModal, setShowPalierModal] = useState(false);
+  const [editingPalier, setEditingPalier] = useState(null);
+  const [palierLabel, setPalierLabel] = useState('');
+  const [palierMois, setPalierMois] = useState('');
+  const [palierPct, setPalierPct] = useState('');
 
   const [showDiscModal, setShowDiscModal] = useState(false);
   const [editingDisc, setEditingDisc] = useState(null);
@@ -50,6 +64,7 @@ export default function ConfigScreen() {
   useFocusEffect(useCallback(() => {
     loadRemises();
     loadDisciplines();
+    getPaliersReduction().then(setPaliers).catch(() => setPaliers([]));
     loadAdminUser().then(admin => {
       if (admin) {
         setAdminUsername(admin.username || '');
@@ -61,14 +76,64 @@ export default function ConfigScreen() {
   const handleSaveConfig = async () => {
     const fi = parseFloat(fraisInscription);
     const fm = parseFloat(fraisMensuel);
-    if (isNaN(fi) || fi <= 0 || isNaN(fm) || fm <= 0) {
+    const fa = parseFloat(fraisAssurance);
+    if (isNaN(fi) || fi <= 0 || isNaN(fm) || fm <= 0 || isNaN(fa) || fa < 0) {
       Alert.alert('Erreur', 'Montants invalides');
       return;
     }
     await updateConfig('fraisInscription', fi);
     await updateConfig('fraisMensuel', fm);
+    await updateConfig('fraisAssurance', fa);
     setConfigSaved(true);
     setTimeout(() => setConfigSaved(false), 2000);
+  };
+
+  const openPalierModal = (palier = null) => {
+    setEditingPalier(palier);
+    setPalierLabel(palier?.label || '');
+    setPalierMois(String(palier?.nbMoisMin || ''));
+    setPalierPct(String(palier?.reductionPct || ''));
+    setShowPalierModal(true);
+  };
+
+  const handleSavePalier = async () => {
+    const mois = parseInt(palierMois, 10);
+    const pct = parseFloat(palierPct);
+    if (!mois || mois < 1 || isNaN(pct) || pct <= 0 || pct >= 100) {
+      Alert.alert('Erreur', 'Mois ≥ 1 et réduction entre 1 et 99 %');
+      return;
+    }
+    if (editingPalier) {
+      await updatePalierReduction({
+        ...editingPalier,
+        label: palierLabel.trim() || `${mois}+ mois`,
+        nbMoisMin: mois,
+        reductionPct: pct,
+      });
+    } else {
+      await createPalierReduction({
+        id: uuidv4(),
+        label: palierLabel.trim() || `${mois}+ mois`,
+        nbMoisMin: mois,
+        reductionPct: pct,
+      });
+    }
+    setShowPalierModal(false);
+    setPaliers(await getPaliersReduction());
+  };
+
+  const handleDeletePalier = (id) => {
+    Alert.alert('Supprimer le palier', 'Confirmer la suppression ?', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: async () => {
+          await deletePalierReduction(id);
+          setPaliers(await getPaliersReduction());
+        },
+      },
+    ]);
   };
 
   const openRemiseModal = (remise = null) => {
@@ -273,6 +338,21 @@ export default function ConfigScreen() {
           </View>
         </View>
 
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Assurance annuelle (DA)</Text>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.input}
+              value={fraisAssurance}
+              onChangeText={setFraisAssurance}
+              keyboardType="numeric"
+              placeholder="500"
+              placeholderTextColor={COLORS.textMuted}
+            />
+            <View style={styles.unitBadge}><Text style={styles.unitText}>DA</Text></View>
+          </View>
+        </View>
+
         <TouchableOpacity
           style={[styles.saveBtn, configSaved && { backgroundColor: COLORS.success }]}
           onPress={handleSaveConfig}
@@ -280,6 +360,44 @@ export default function ConfigScreen() {
           <MaterialCommunityIcons name={configSaved ? 'check' : 'content-save'} size={18} color="#fff" />
           <Text style={styles.saveBtnText}>{configSaved ? 'Enregistré !' : 'Sauvegarder les tarifs'}</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Paliers multi-mois */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="layers" size={20} color={COLORS.primary} />
+          <Text style={styles.sectionTitle}>Paliers multi-mois</Text>
+          <TouchableOpacity style={styles.addRemiseBtn} onPress={() => openPalierModal()}>
+            <MaterialCommunityIcons name="plus" size={18} color={COLORS.primary} />
+            <Text style={styles.addRemiseText}>Ajouter</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 10 }}>
+          Réductions générales pour un paiement groupé (retard ou avance). Le calcul croise aussi
+          l&apos;éventuelle dérogation adhérent et retient le montant le plus favorable.
+        </Text>
+        {paliers.length === 0 ? (
+          <Text style={styles.emptyText}>Aucun palier défini</Text>
+        ) : (
+          paliers.map((p) => (
+            <View key={p.id} style={styles.remiseCard}>
+              <View style={styles.remiseInfo}>
+                <Text style={styles.remiseLabel}>{p.label || `${p.nbMoisMin}+ mois`}</Text>
+                <Text style={styles.remisePct}>
+                  ≥ {p.nbMoisMin} mois · -{p.reductionPct}%
+                </Text>
+              </View>
+              <View style={styles.remiseActions}>
+                <TouchableOpacity onPress={() => openPalierModal(p)} style={styles.iconBtn}>
+                  <MaterialCommunityIcons name="pencil" size={18} color={COLORS.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDeletePalier(p.id)} style={styles.iconBtn}>
+                  <MaterialCommunityIcons name="trash-can" size={18} color={COLORS.danger} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
       </View>
 
       {/* Disciplines */}
@@ -583,6 +701,55 @@ export default function ConfigScreen() {
                 <Text style={styles.cancelText}>Annuler</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSaveRemise}>
+                <MaterialCommunityIcons name="content-save" size={18} color="#fff" />
+                <Text style={styles.saveBtnText}>Enregistrer</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Palier multi-mois Modal */}
+      <Modal visible={showPalierModal} transparent animationType="slide" onRequestClose={() => setShowPalierModal(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{editingPalier ? 'Modifier le palier' : 'Nouveau palier'}</Text>
+
+            <Text style={styles.fieldLabel}>Libellé (optionnel)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={palierLabel}
+              onChangeText={setPalierLabel}
+              placeholder="Ex: Pack 3 mois"
+              placeholderTextColor={COLORS.textMuted}
+            />
+
+            <Text style={styles.fieldLabel}>À partir de (nombre de mois)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={palierMois}
+              onChangeText={setPalierMois}
+              keyboardType="numeric"
+              placeholder="Ex: 3"
+              placeholderTextColor={COLORS.textMuted}
+            />
+
+            <Text style={styles.fieldLabel}>Réduction (%)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={palierPct}
+              onChangeText={setPalierPct}
+              keyboardType="numeric"
+              placeholder="Ex: 10"
+              placeholderTextColor={COLORS.textMuted}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowPalierModal(false)}>
+                <Text style={styles.cancelText}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSavePalier}>
                 <MaterialCommunityIcons name="content-save" size={18} color="#fff" />
                 <Text style={styles.saveBtnText}>Enregistrer</Text>
               </TouchableOpacity>

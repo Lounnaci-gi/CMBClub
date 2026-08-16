@@ -13,7 +13,7 @@ import DateField from '../../components/DateField';
 import useTheme from '../../theme/useTheme';
 import { DISCIPLINES, BLOOD_GROUPS, CATEGORIES, getCategoryByAge, getEffectiveCategory } from '../../utils/categories';
 import { generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../../utils/payments';
-import { buildAdherentCodeBase, canGenerateAdherentCode } from '../../utils/adherentCode';
+import { buildAdherentCodeBase, canGenerateAdherentCode, findAdherentDuplicate } from '../../utils/adherentCode';
 import { generateUniqueAdherentCode } from '../../database/database';
 
 import AdherentCardModal from '../../components/AdherentCardModal';
@@ -122,6 +122,10 @@ export default function AdherentFormScreen({ navigation, route }) {
     }
   }, [isEdit, editLoaded, adherentId, adherents]);
 
+  const duplicateAdherent = useMemo(() => {
+    return findAdherentDuplicate(adherents, form, isEdit ? adherentId : null);
+  }, [adherents, form.nom, form.prenom, form.dateNaissance, isEdit, adherentId]);
+
   const existingCode = isEdit
     ? (form.code || adherents.find(a => a.id === adherentId)?.code)
     : null;
@@ -193,6 +197,9 @@ export default function AdherentFormScreen({ navigation, route }) {
     if (!form.dateNaissance) e.dateNaissance = 'Champ requis';
     if (!form.lieuNaissance.trim()) e.lieuNaissance = 'Champ requis';
     if (!form.discipline) e.discipline = 'Champ requis';
+    if (duplicateAdherent) {
+      e.duplicate = `Un adhérent avec le même nom, prénom et date de naissance existe déjà (${duplicateAdherent.nom} ${duplicateAdherent.prenom} - Code : ${duplicateAdherent.code}).`;
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -200,6 +207,13 @@ export default function AdherentFormScreen({ navigation, route }) {
   const handleSave = async () => {
     if (!isEdit && !saisonActive) {
       Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’ajouter un adhérent.');
+      return;
+    }
+    if (duplicateAdherent) {
+      Alert.alert(
+        'Adhérent déjà enregistré',
+        `Un adhérent avec le même nom, prénom et date de naissance existe déjà dans la base :\n\n• ${duplicateAdherent.nom} ${duplicateAdherent.prenom} (Code : ${duplicateAdherent.code})\n\nImpossible d'enregistrer le même adhérent plusieurs fois.`
+      );
       return;
     }
     if (!validate()) return;
@@ -441,6 +455,26 @@ export default function AdherentFormScreen({ navigation, route }) {
             required
             error={errors.dateNaissance}
           />
+
+          {duplicateAdherent ? (
+            <View style={styles.duplicateAlertCard}>
+              <View style={styles.duplicateAlertHeader}>
+                <MaterialCommunityIcons name="alert-octagon" size={20} color={COLORS.danger} />
+                <Text style={styles.duplicateAlertTitle}>Adhérent déjà enregistré (Doublon)</Text>
+              </View>
+              <Text style={styles.duplicateAlertText}>
+                Un adhérent avec le même nom, prénom et date de naissance existe déjà dans le club :
+              </Text>
+              <View style={styles.duplicateAlertBadge}>
+                <Text style={styles.duplicateAlertBadgeText}>
+                  {duplicateAdherent.nom} {duplicateAdherent.prenom} • Code : {duplicateAdherent.code}
+                </Text>
+              </View>
+              <Text style={styles.duplicateAlertSubtext}>
+                Il est interdit d'enregistrer le même adhérent plusieurs fois.
+              </Text>
+            </View>
+          ) : null}
 
           <FormField
             label="Lieu de naissance"
@@ -1266,6 +1300,51 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
     fontWeight: '500',
+  },
+  duplicateAlertCard: {
+    backgroundColor: COLORS.danger + '18',
+    borderColor: COLORS.danger,
+    borderWidth: 1.5,
+    borderRadius: RADIUS.md,
+    padding: 12,
+    marginVertical: 10,
+  },
+  duplicateAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  duplicateAlertTitle: {
+    color: COLORS.danger,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  duplicateAlertText: {
+    color: COLORS.text,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  duplicateAlertBadge: {
+    backgroundColor: COLORS.bgSurface || COLORS.bgCard,
+    borderWidth: 1,
+    borderColor: COLORS.danger + '60',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: RADIUS.sm,
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+  },
+  duplicateAlertBadgeText: {
+    color: COLORS.danger,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  duplicateAlertSubtext: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontStyle: 'italic',
   },
 });
 

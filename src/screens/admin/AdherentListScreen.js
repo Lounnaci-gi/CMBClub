@@ -363,27 +363,27 @@ export default function AdherentListScreen({ navigation }) {
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
           {/* Bouton validation assurances */}
           <TouchableOpacity
-            style={[styles.printListBtn, { backgroundColor: COLORS.success + '18', borderColor: COLORS.success + '50' }]}
+            style={styles.assurancesBtn}
             onPress={() => setShowAssuranceModal(true)}
             activeOpacity={0.8}
           >
-            <MaterialCommunityIcons name="shield-check" size={16} color={COLORS.success} />
-            <Text style={[styles.printListText, { color: COLORS.success }]}>Assurances</Text>
+            <MaterialCommunityIcons name="shield-check" size={16} color="#10B981" />
+            <Text style={styles.assurancesBtnText}>Assurances</Text>
           </TouchableOpacity>
 
           {/* Bouton impression */}
           <TouchableOpacity
-            style={styles.printListBtn}
+            style={styles.printBtn}
             onPress={handlePrintList}
             disabled={printing}
             activeOpacity={0.8}
           >
             {printing ? (
-              <ActivityIndicator size="small" color={COLORS.primary} />
+              <ActivityIndicator size="small" color="#38BDF8" />
             ) : (
               <>
-                <MaterialCommunityIcons name="printer" size={16} color={COLORS.primary} />
-                <Text style={styles.printListText}>Imprimer</Text>
+                <MaterialCommunityIcons name="printer" size={16} color="#38BDF8" />
+                <Text style={styles.printBtnText}>Imprimer</Text>
               </>
             )}
           </TouchableOpacity>
@@ -426,7 +426,7 @@ export default function AdherentListScreen({ navigation }) {
         activeOpacity={saisonActive ? 0.85 : 0.5}
         disabled={!saisonActive}
       >
-        <MaterialCommunityIcons name="account-plus" size={24} color="#fff" />
+        <MaterialCommunityIcons name="account-plus" size={26} color="#FFFFFF" />
       </TouchableOpacity>
 
       {/* Modal Validation Assurances */}
@@ -439,76 +439,94 @@ export default function AdherentListScreen({ navigation }) {
   );
 }
 
-// ── Composant Carte Adhérent mémoïsé pour des performances maximales ───────────
+// ── Composant Carte Adhérent mémoïsé ─────────────────────────────────────────
 const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus, COLORS, styles, onPress }) {
   const cat = getEffectiveCategory(item);
   const isFemme = item.genre === 'F';
+  const catColor = cat?.color || '#38BDF8';
 
   return (
     <TouchableOpacity
       style={styles.card}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={0.75}
     >
+      {/* Avatar / Photo / Emoji */}
       <View style={styles.avatar}>
         {item.photo ? (
           <Image source={{ uri: item.photo }} style={styles.photo} />
         ) : (
-          <View style={[styles.photoPlaceholder, { backgroundColor: (cat?.color || COLORS.primary) + '20' }]}>
-            <Text style={{ fontSize: 20 }}>{cat?.icon || '👤'}</Text>
+          <View style={styles.photoPlaceholder}>
+            <Text style={styles.photoEmoji}>{cat?.icon || '👤'}</Text>
           </View>
         )}
       </View>
 
+      {/* Content */}
       <View style={styles.info}>
+        {/* Ligne 1 : Nom complet + Code */}
         <View style={styles.nameRow}>
-          <Text style={styles.name}>{item.nom} {item.prenom}</Text>
-          {cat && <CategoryBadge category={cat.label} />}
-        </View>
-
-        <View style={styles.codeRow}>
-          <Text style={styles.code}>{item.code}</Text>
-          {isFemme ? (
-            <View style={[styles.genreBadge, { backgroundColor: '#FF69B420' }]}>
-              <Text style={{ color: '#FF69B4', fontSize: 10, fontWeight: '700' }}>♀ F</Text>
-            </View>
-          ) : (
-            <View style={[styles.genreBadge, { backgroundColor: COLORS.primary + '20' }]}>
-              <Text style={{ color: COLORS.primary, fontSize: 10, fontWeight: '700' }}>♂ M</Text>
-            </View>
-          )}
-          {payStatus ? (
-            <View style={[styles.statusPill, { backgroundColor: getStatusColor(payStatus, COLORS) + '20' }]}>
-              <Text style={[styles.statusText, { color: getStatusColor(payStatus, COLORS) }]}>
-                {getStatusLabel(payStatus)}
+          <Text style={styles.name} numberOfLines={1}>
+            {item.prenom} {item.nom ? item.nom.toUpperCase() : ''}
+          </Text>
+          {item.code ? (
+            <View style={styles.codeBadge}>
+              <Text style={styles.codeText} numberOfLines={1} ellipsizeMode="middle">
+                {item.code}
               </Text>
             </View>
           ) : null}
-          {item.assure ? (
-            <View style={[styles.statusPill, { backgroundColor: COLORS.success + '20' }]}>
-              <Text style={[styles.statusText, { color: COLORS.success }]}>🛡️ Assuré</Text>
-            </View>
-          ) : null}
-          {item.isEnrolled === 0 ? (
-            <View style={[styles.statusPill, { backgroundColor: COLORS.warning + '20' }]}>
-              <Text style={[styles.statusText, { color: COLORS.warning }]}>⚠️ Non réinscrit</Text>
-            </View>
-          ) : null}
         </View>
 
-        {item.discipline ? (
-          <Text style={styles.discipline}>🥊 {item.discipline}</Text>
-        ) : null}
+        {/* Ligne 2 : Badges (Catégorie, Genre, Assurance) */}
+        <View style={styles.badgesRow}>
+          {/* Catégorie */}
+          {cat && (
+            <View style={[styles.catBadge, { borderColor: catColor + '70', backgroundColor: catColor + '18' }]}>
+              <Text style={styles.catIcon}>{cat.icon}</Text>
+              <Text style={[styles.catText, { color: catColor }]}>{cat.label}</Text>
+            </View>
+          )}
+
+          {/* Genre */}
+          {isFemme ? (
+            <View style={styles.genreBadgeF}>
+              <Text style={styles.genreTextF}>♀ Féminin</Text>
+            </View>
+          ) : (
+            <View style={styles.genreBadgeM}>
+              <Text style={styles.genreTextM}>♂ Masculin</Text>
+            </View>
+          )}
+
+          {/* Assurance */}
+          {item.assure ? (
+            <View style={styles.assureBadge}>
+              <Text style={styles.assureText}>🛡️ Assuré</Text>
+            </View>
+          ) : (
+            <View style={styles.nonAssureBadge}>
+              <Text style={styles.nonAssureText}>Non assuré</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Ligne 3 : Discipline */}
+        <View style={styles.disciplineRow}>
+          <Text style={styles.disciplineIcon}>🥊</Text>
+          <Text style={styles.disciplineText}>{item.discipline || 'Natation'}</Text>
+        </View>
       </View>
 
-      <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textMuted} />
+      {/* Chevron droit */}
+      <MaterialCommunityIcons name="chevron-right" size={22} color="#475569" style={styles.chevron} />
     </TouchableOpacity>
   );
 });
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
+  container: { flex: 1, backgroundColor: COLORS.bg || '#0B1320' },
   innerWrapper: {
     flex: 1,
     width: '100%',
@@ -520,7 +538,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: horizontalPadding,
+    paddingHorizontal: horizontalPadding || 16,
     paddingTop: 12,
     paddingBottom: 8,
     gap: 10,
@@ -529,38 +547,39 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.md,
-    paddingHorizontal: 12,
+    backgroundColor: '#132032',
+    borderRadius: 14,
+    paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    gap: 8,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    gap: 10,
+    height: 48,
   },
   searchInput: {
     flex: 1,
-    color: COLORS.textPrimary,
+    color: '#F8FAFC',
     fontSize: 14,
-    paddingVertical: 10,
+    paddingVertical: 0,
   },
   filterToggleBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.bgCard,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#132032',
     borderWidth: 1,
-    borderColor: COLORS.primary + '40',
+    borderColor: 'rgba(14, 165, 233, 0.35)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   filterToggleBtnActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: '#0284C7',
+    borderColor: '#0284C7',
   },
   filterCountBadge: {
     position: 'absolute',
     top: -4,
     right: -4,
-    backgroundColor: COLORS.danger,
+    backgroundColor: COLORS.danger || '#EF4444',
     borderRadius: 8,
     minWidth: 16,
     height: 16,
@@ -572,19 +591,22 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
 
   // Filter panel
   filterPanel: {
-    backgroundColor: COLORS.bgCard,
+    backgroundColor: '#132032',
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     paddingVertical: 8,
     paddingBottom: 12,
     gap: 4,
+    marginHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 8,
   },
   filterGroup: {
     paddingTop: 6,
   },
   filterGroupLabel: {
-    color: COLORS.textMuted,
+    color: '#94A3B8',
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.8,
@@ -605,17 +627,17 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: RADIUS.full,
-    backgroundColor: COLORS.bgInput,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   filterChipActive: {
-    backgroundColor: COLORS.primary + '20',
-    borderColor: COLORS.primary,
+    backgroundColor: 'rgba(14, 165, 233, 0.2)',
+    borderColor: '#0EA5E9',
   },
   filterChipIcon: { fontSize: 13 },
-  filterChipText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
-  filterChipTextActive: { color: COLORS.primary, fontWeight: '700' },
+  filterChipText: { color: '#94A3B8', fontSize: 12, fontWeight: '600' },
+  filterChipTextActive: { color: '#38BDF8', fontWeight: '700' },
   clearBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -626,11 +648,11 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: RADIUS.full,
-    backgroundColor: COLORS.danger + '15',
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
     borderWidth: 1,
-    borderColor: COLORS.danger + '30',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
-  clearBtnText: { color: COLORS.danger, fontSize: 12, fontWeight: '700' },
+  clearBtnText: { color: '#EF4444', fontSize: 12, fontWeight: '700' },
 
   // Header row
   headerRow: {
@@ -638,82 +660,199 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
-  countText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
-  printListBtn: {
+  countText: { color: '#94A3B8', fontSize: 14, fontWeight: '700' },
+  assurancesBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: COLORS.primary + '15',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: RADIUS.full,
-    borderWidth: 1,
-    borderColor: COLORS.primary + '30',
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#10B981',
   },
-  printListText: { color: COLORS.primary, fontWeight: '700', fontSize: 12 },
+  assurancesBtnText: { color: '#10B981', fontWeight: '700', fontSize: 13 },
+  printBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(2, 132, 199, 0.12)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#0284C7',
+  },
+  printBtnText: { color: '#38BDF8', fontWeight: '700', fontSize: 13 },
 
   // List
-  list: { paddingHorizontal: 16, paddingBottom: 100, gap: 10 },
+  list: { paddingBottom: 100, paddingTop: 4 },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.md,
-    padding: 14,
-    gap: 12,
+    backgroundColor: '#132032',
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginHorizontal: 16,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    ...SHADOWS.card,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
-  avatar: { width: 52, height: 52 },
-  photo: { width: 52, height: 52, borderRadius: 26, resizeMode: 'cover' },
+  avatar: { width: 54, height: 54, marginRight: 12 },
+  photo: { width: 54, height: 54, borderRadius: 27, resizeMode: 'cover' },
   photoPlaceholder: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#1A2A3E',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  info: { flex: 1, gap: 4 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  name: { color: COLORS.textPrimary, fontWeight: '700', fontSize: 15, flex: 1 },
-  code: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-    backgroundColor: COLORS.bgInput,
+  photoEmoji: {
+    fontSize: 24,
+  },
+  info: { flex: 1, justifyContent: 'center' },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  name: {
+    color: '#F8FAFC',
+    fontWeight: '700',
+    fontSize: 16,
+    flexShrink: 1,
+  },
+  codeBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 4,
-    maxWidth: '45%',
+    borderRadius: 5,
+    maxWidth: 130,
   },
-  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, alignItems: 'center' },
-  genreBadge: { borderRadius: RADIUS.full, paddingHorizontal: 7, paddingVertical: 2 },
-  genreBadgeText: { fontSize: 10, fontWeight: '700' },
-  payBadge: { borderRadius: RADIUS.full, paddingHorizontal: 8, paddingVertical: 2 },
-  payBadgeText: { fontSize: 11, fontWeight: '700' },
-  discipline: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
+  codeText: {
+    color: '#64748B',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  badgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  catBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  catIcon: { fontSize: 11 },
+  catText: { fontSize: 11, fontWeight: '700' },
+  genreBadgeM: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: 'rgba(14, 165, 233, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(14, 165, 233, 0.35)',
+  },
+  genreTextM: {
+    color: '#38BDF8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  genreBadgeF: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: 'rgba(236, 72, 153, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(236, 72, 153, 0.35)',
+  },
+  genreTextF: {
+    color: '#F472B6',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  assureBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.35)',
+  },
+  assureText: {
+    color: '#34D399',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  nonAssureBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: 'rgba(249, 115, 22, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.35)',
+  },
+  nonAssureText: {
+    color: '#FB923C',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  disciplineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  disciplineIcon: {
+    fontSize: 12,
+  },
+  disciplineText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  chevron: {
+    marginLeft: 6,
+  },
 
   // Empty
   empty: { alignItems: 'center', paddingTop: 60, gap: 12 },
-  emptyText: { color: COLORS.textMuted, fontSize: 15 },
+  emptyText: { color: '#64748B', fontSize: 15 },
 
   // FAB
   fab: {
     position: 'absolute',
     bottom: 24,
-    right: 24,
-    backgroundColor: COLORS.primary,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    right: 20,
+    backgroundColor: '#00A3FF',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.button,
+    shadowColor: '#00A3FF',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
   },
   fabDisabled: {
-    backgroundColor: COLORS.textMuted,
+    backgroundColor: '#475569',
     opacity: 0.5,
   },
 });
+

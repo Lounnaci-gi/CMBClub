@@ -60,6 +60,33 @@ function sanitizeCredential(str, maxLen = 128) {
   return String(str).replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, maxLen);
 }
 
+function normalizeIdentityString(value) {
+  if (!value) return '';
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+async function findAdherentDuplicateInDb(db, nom, prenom, dateNaissance, excludeId = null) {
+  if (!nom || !prenom || !dateNaissance) return null;
+  const targetDate = String(dateNaissance).trim();
+  const res = await db.prepare(
+    'SELECT id, code, nom, prenom, dateNaissance FROM adherents WHERE dateNaissance = ?'
+  ).bind(targetDate).all();
+  const rows = res.results || [];
+  const targetNom = normalizeIdentityString(nom);
+  const targetPrenom = normalizeIdentityString(prenom);
+
+  return rows.find(r => {
+    if (excludeId && r.id === excludeId) return false;
+    return normalizeIdentityString(r.nom) === targetNom && normalizeIdentityString(r.prenom) === targetPrenom;
+  }) || null;
+}
+
+
 // ── Rate Limiting anti-brute force (en mémoire Worker, par IP) ──
 const loginAttempts = new Map(); // Map<ip, { count, firstAttempt, lockedUntil }>
 
@@ -745,6 +772,13 @@ app.post('/api/adherents', async (c) => {
       discipline: sanitizeStr(raw.discipline, 100),
     };
     if (!a.nom || !a.prenom) return err(c, 'Le nom et le prénom sont obligatoires.');
+    if (!a.dateNaissance) return err(c, 'La date de naissance est obligatoire.');
+
+    const duplicatePost = await findAdherentDuplicateInDb(c.env.DB, a.nom, a.prenom, a.dateNaissance, a.id);
+    if (duplicatePost) {
+      return err(c, `Un adhérent avec le même nom, prénom et date de naissance existe déjà (${duplicatePost.nom} ${duplicatePost.prenom} - Code : ${duplicatePost.code || 'N/A'}).`, 409);
+    }
+
     await c.env.DB.prepare(
       `INSERT INTO adherents (
         id, code, nom, prenom, dateNaissance, lieuNaissance,
@@ -782,6 +816,13 @@ app.put('/api/adherents/:id', async (c) => {
       discipline: sanitizeStr(raw.discipline, 100),
     };
     if (!a.nom || !a.prenom) return err(c, 'Le nom et le prénom sont obligatoires.');
+    if (!a.dateNaissance) return err(c, 'La date de naissance est obligatoire.');
+
+    const duplicatePut = await findAdherentDuplicateInDb(c.env.DB, a.nom, a.prenom, a.dateNaissance, id);
+    if (duplicatePut) {
+      return err(c, `Un autre adhérent avec le même nom, prénom et date de naissance existe déjà (${duplicatePut.nom} ${duplicatePut.prenom} - Code : ${duplicatePut.code || 'N/A'}).`, 409);
+    }
+
     await c.env.DB.prepare(
       `UPDATE adherents SET
         nom = ?, prenom = ?, dateNaissance = ?, lieuNaissance = ?,

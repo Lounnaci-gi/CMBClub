@@ -57,7 +57,7 @@ const useStore = create((set, get) => ({
   },
 
   // ── Config ──
-  config: { fraisInscription: 2000, fraisMensuel: 1500, cloudflareApiUrl: 'https://cmbclub-api.ahmedlounnaci.workers.dev' },
+  config: { fraisInscription: 2000, fraisMensuel: 1500, fraisAssurance: 500, cloudflareApiUrl: 'https://cmbclub-api.ahmedlounnaci.workers.dev' },
   themeId: THEME_IDS.DARK,
   loadConfig: async () => {
     const config = await getConfig();

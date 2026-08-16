@@ -1,5 +1,7 @@
 // src/navigation/AppNavigator.js
 import React, { useMemo } from 'react';
+import { TouchableOpacity } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import useStore from '../store/useStore';
@@ -17,6 +19,7 @@ import SeasonScreen from '../screens/admin/SeasonScreen';
 import ConfigScreen from '../screens/admin/ConfigScreen';
 import CreneauxScreen from '../screens/admin/CreneauxScreen';
 import PresencesScreen from '../screens/admin/PresencesScreen';
+import PortefeuilleScreen from '../screens/admin/PortefeuilleScreen';
 import AdherentHomeScreen from '../screens/adherent/AdherentHomeScreen';
 
 const Stack = createNativeStackNavigator();
@@ -32,7 +35,26 @@ function AdminStack({ screenOptions }) {
       <Stack.Screen
         name="AdherentList"
         component={AdherentListScreen}
-        options={{ title: 'Adhérents' }}
+        options={({ navigation }) => ({
+          title: 'Adhérents',
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Config')}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 4,
+              }}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="cog" size={22} color="#94A3B8" />
+            </TouchableOpacity>
+          ),
+        })}
       />
       <Stack.Screen
         name="AdherentDetail"
@@ -55,6 +77,11 @@ function AdminStack({ screenOptions }) {
         name="PaymentDetail"
         component={PaymentDetailScreen}
         options={{ title: 'Détail paiements' }}
+      />
+      <Stack.Screen
+        name="Portefeuille"
+        component={PortefeuilleScreen}
+        options={{ title: 'Portefeuille' }}
       />
       <Stack.Screen
         name="Seasons"
