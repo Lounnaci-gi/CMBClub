@@ -939,10 +939,10 @@ app.post('/api/paiements', async (c) => {
         id, adherentId, saisonId, type, label, mois, annee,
         montantDu, remisePct, remiseMontant, montantPaye,
         datePaiement, statut, notes, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`
     ).bind(
       p.id, p.adherentId, p.saisonId, p.type, p.label, p.mois || null, p.annee || null,
-      p.montantDu, p.remisePct || 0, p.remiseMontant || 0, p.montantPaye || 0,
+      p.montantDu, p.montantPaye || 0,
       p.datePaiement || null, p.statut || 'a_payer', p.notes || '',
       p.createdAt || now, p.updatedAt || now
     ).run();
@@ -965,46 +965,14 @@ app.put('/api/paiements/:id', async (c) => {
     await c.env.DB.prepare(
       `UPDATE paiements SET
         montantPaye = ?, datePaiement = ?, statut = ?, notes = ?,
-        remisePct = ?, remiseMontant = ?, updatedAt = ?
+        remisePct = 0, remiseMontant = 0, updatedAt = ?
       WHERE id = ?`
     ).bind(
       p.montantPaye, p.datePaiement || null, p.statut, p.notes || '',
-      p.remisePct || 0, p.remiseMontant || 0, now, id
+      now, id
     ).run();
 
     return ok(c, { id, ...p, updatedAt: now });
-  } catch (e) {
-    return err(c, e.message, 500);
-  }
-});
-
-// ── Remises ──
-app.get('/api/remises', async (c) => {
-  try {
-    const { results } = await c.env.DB.prepare('SELECT * FROM remises WHERE actif = 1 ORDER BY pourcentage ASC').all();
-    return ok(c, results || []);
-  } catch (e) {
-    return err(c, e.message, 500);
-  }
-});
-
-app.post('/api/remises', async (c) => {
-  try {
-    const r = await c.req.json();
-    await c.env.DB.prepare(
-      'INSERT INTO remises (id, label, pourcentage, actif, createdAt) VALUES (?, ?, ?, ?, ?)'
-    ).bind(r.id, r.label, r.pourcentage, r.actif !== undefined ? (r.actif ? 1 : 0) : 1, r.createdAt || new Date().toISOString()).run();
-    return ok(c, r);
-  } catch (e) {
-    return err(c, e.message, 500);
-  }
-});
-
-app.delete('/api/remises/:id', async (c) => {
-  try {
-    const id = c.req.param('id');
-    await c.env.DB.prepare('UPDATE remises SET actif = 0 WHERE id = ?').bind(id).run();
-    return ok(c, { deleted: id });
   } catch (e) {
     return err(c, e.message, 500);
   }

@@ -110,7 +110,7 @@ export default function PaymentListScreen({ navigation }) {
     [filtered]
   );
   const totalRetard = useMemo(() =>
-    filtered.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD).reduce((s, p) => s + (p.montantDu - (p.remiseMontant || 0) - (p.montantPaye || 0)), 0),
+    filtered.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD).reduce((s, p) => s + ((p.montantDu || 0) - (p.montantPaye || 0)), 0),
     [filtered]
   );
 
@@ -118,17 +118,16 @@ export default function PaymentListScreen({ navigation }) {
   const totals = useMemo(() => {
     const totalDu = filtered.reduce((s, p) => s + (p.montantDu || 0), 0);
     const totalVerse = filtered.reduce((s, p) => s + (p.montantPaye || 0), 0);
-    const totalRemise = filtered.reduce((s, p) => s + (p.remiseMontant || 0), 0);
     const totalReste = filtered.reduce((s, p) => {
-      const net = (p.montantDu || 0) - (p.remiseMontant || 0);
-      return s + Math.max(0, net - (p.montantPaye || 0));
+      const du = p.montantDu || 0;
+      return s + Math.max(0, du - (p.montantPaye || 0));
     }, 0);
 
     const mensualites = filtered.filter(p => p.type === 'mensualite');
     const totalMoisCibles = mensualites.length;
     const nbMoisPayes = mensualites.filter(p => p.statut === PAYMENT_STATUS.PAYE).length;
 
-    return { totalDu, totalVerse, totalRemise, totalReste, totalMoisCibles, nbMoisPayes };
+    return { totalDu, totalVerse, totalRemise: 0, totalReste, totalMoisCibles, nbMoisPayes };
   }, [filtered]);
 
   const activeFiltersCount = useMemo(() => {
@@ -165,8 +164,8 @@ export default function PaymentListScreen({ navigation }) {
       });
 
       const rowsHtml = filtered.map((p, index) => {
-        const netDu = (p.montantDu || 0) - (p.remiseMontant || 0);
-        const reste = Math.max(0, netDu - (p.montantPaye || 0));
+        const du = p.montantDu || 0;
+        const reste = Math.max(0, du - (p.montantPaye || 0));
 
         let statusColor = '#3B82F6';
         let statusBadgeText = getStatusLabel(p.statut);

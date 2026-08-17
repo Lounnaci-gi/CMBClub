@@ -12,9 +12,9 @@ function PaymentCard({ paiement, onPress, showAdherent = false }) {
   const statusColor = getStatusColor(paiement.statut);
   const statusLabel = getStatusLabel(paiement.statut);
   const statusIcon = getStatusIcon(paiement.statut);
-  const netAmount = (paiement.montantDu || 0) - (paiement.remiseMontant || 0);
+  const amountDu = paiement.montantDu || 0;
   const paidAmount = paiement.montantPaye || 0;
-  const resteAmount = Math.max(0, netAmount - paidAmount);
+  const resteAmount = Math.max(0, amountDu - paidAmount);
 
   const displayStatusLabel = (paiement.statut !== 'paye' && paidAmount > 0)
     ? 'Partiel'
@@ -51,16 +51,8 @@ function PaymentCard({ paiement, onPress, showAdherent = false }) {
       <View style={styles.amounts}>
         <View style={styles.amountItem}>
           <Text style={styles.amountLabel}>Montant dû</Text>
-          <Text style={styles.amountValue}>{netAmount.toLocaleString()} DA</Text>
+          <Text style={styles.amountValue}>{amountDu.toLocaleString()} DA</Text>
         </View>
-        {(paiement.remiseMontant || 0) > 0 && (
-          <View style={styles.amountItem}>
-            <Text style={styles.amountLabel}>Remise</Text>
-            <Text style={[styles.amountValue, { color: COLORS.success }]}>
-              -{paiement.remiseMontant.toLocaleString()} DA
-            </Text>
-          </View>
-        )}
         <View style={styles.amountItem}>
           <Text style={styles.amountLabel}>Montant versé</Text>
           <Text style={[styles.amountValue, { color: displayStatusColor }]}>

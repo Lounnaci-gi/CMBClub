@@ -76,14 +76,7 @@ CREATE TABLE IF NOT EXISTS paiements (
   FOREIGN KEY (saisonId) REFERENCES saisons(id) ON DELETE CASCADE
 );
 
--- 6. Remises
-CREATE TABLE IF NOT EXISTS remises (
-  id TEXT PRIMARY KEY,
-  label TEXT NOT NULL,
-  pourcentage REAL NOT NULL,
-  actif INTEGER DEFAULT 1,
-  createdAt TEXT NOT NULL
-);
+-- 6. Users (Authentification)
 
 -- 6b. Portefeuille & créances
 CREATE TABLE IF NOT EXISTS creances (
@@ -228,13 +221,6 @@ CREATE TABLE IF NOT EXISTS presences (
 INSERT OR IGNORE INTO config (key, value) VALUES ('fraisInscription', '2000');
 INSERT OR IGNORE INTO config (key, value) VALUES ('fraisMensuel', '1500');
 INSERT OR IGNORE INTO config (key, value) VALUES ('fraisAssurance', '500');
-
--- Remises par défaut
-INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) 
-VALUES ('remise-famille', 'Remise Famille', 10, 1, datetime('now'));
-
-INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) 
-VALUES ('remise-fidelite', 'Remise Fidélité', 5, 1, datetime('now'));
 
 -- Disciplines par défaut
 INSERT OR IGNORE INTO disciplines (id, nom, createdAt) 

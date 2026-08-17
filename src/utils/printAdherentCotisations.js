@@ -66,9 +66,7 @@ export async function printAdherentCotisations({ adherent, saison, paiements = [
     const rowsHtml = sortedPaiements.map((p, index) => {
       const montantDu = Number(p.montantDu) || 0;
       const montantPaye = Number(p.montantPaye) || 0;
-      const remiseMontant = Number(p.remiseMontant) || 0;
-      const netDu = Math.max(0, montantDu - remiseMontant);
-      const reste = Math.max(0, netDu - montantPaye);
+      const reste = Math.max(0, montantDu - montantPaye);
 
       // Déterminer si c'est un mois futur
       const isFutureMonth = p.type === 'mensualite' && p.annee && p.mois && (Number(p.annee) * 100 + Number(p.mois) > currentYm);
@@ -77,11 +75,11 @@ export async function printAdherentCotisations({ adherent, saison, paiements = [
       let avance = 0;
       if (isFutureMonth && montantPaye > 0) {
         avance = montantPaye;
-      } else if (montantPaye > netDu) {
-        avance = montantPaye - netDu;
+      } else if (montantPaye > montantDu) {
+        avance = montantPaye - montantDu;
       }
 
-      totalDu += netDu;
+      totalDu += montantDu;
       totalPaye += montantPaye;
       totalAvance += avance;
       totalReste += reste;

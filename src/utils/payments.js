@@ -19,16 +19,16 @@ export const PAYMENT_STATUS = {
  * Détermine le statut d'un paiement à partir des montants et de l'échéance
  */
 export function computePaymentStatus(paiement) {
-  const net = (paiement.montantDu || 0) - (paiement.remiseMontant || 0);
+  const du = paiement.montantDu || 0;
   const paye = paiement.montantPaye || 0;
 
   // Totalement payé
-  if (paye >= net && net >= 0) {
+  if (paye >= du && du >= 0) {
     return PAYMENT_STATUS.PAYE;
   }
 
   // Partiellement payé (avance)
-  if (paye > 0 && paye < net) {
+  if (paye > 0 && paye < du) {
     return PAYMENT_STATUS.AVANCE;
   }
 
@@ -55,8 +55,7 @@ export function computePaymentStatus(paiement) {
 export function calculateBalance(paiements = []) {
   const totalDu = paiements.reduce((sum, p) => sum + (p.montantDu || 0), 0);
   const totalPaye = paiements.reduce((sum, p) => sum + (p.montantPaye || 0), 0);
-  const totalRemise = paiements.reduce((sum, p) => sum + (p.remiseMontant || 0), 0);
-  const resteAVerser = Math.max(0, totalDu - totalPaye - totalRemise);
+  const resteAVerser = Math.max(0, totalDu - totalPaye);
 
   const mensualites = paiements.filter(p => p.type === PAYMENT_TYPES.MENSUALITE || p.type === 'mensualite');
   const totalMoisCibles = mensualites.length;
@@ -67,8 +66,8 @@ export function calculateBalance(paiements = []) {
     totalDu,
     totalPaye,
     montantVerse: totalPaye,
-    totalRemise,
-    solde: totalDu - totalPaye - totalRemise,
+    totalRemise: 0,
+    solde: totalDu - totalPaye,
     resteAVerser,
     totalMoisCibles,
     nbMoisPayes,

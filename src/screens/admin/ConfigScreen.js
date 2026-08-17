@@ -11,7 +11,6 @@ import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
 import { THEME_OPTIONS } from '../../theme/themes';
 import { CloudflareAPI } from '../../services/api';
-import { resetDatabase } from '../../database/database';
 import {
   getPaliersReduction,
   createPalierReduction,
@@ -22,7 +21,6 @@ import {
 export default function ConfigScreen() {
   const {
     config, updateConfig, setCloudflareUrl, isCloudflare,
-    remises, loadRemises, createRemise, updateRemise, deleteRemise,
     disciplines, loadDisciplines, createDiscipline, updateDiscipline, deleteDiscipline,
     loadAdminUser, updateAdminCredentials,
     logout,
@@ -36,13 +34,7 @@ export default function ConfigScreen() {
   const [cloudflareUrl, setCloudflareUrlInput] = useState(config.cloudflareApiUrl || '');
   const [cloudflareTesting, setCloudflareTesting] = useState(false);
   const [cloudflareStatus, setCloudflareStatus] = useState(null); // { success: boolean, msg: string }
-  const [resetLoading, setResetLoading] = useState(false);
   const [cloudflareSaved, setCloudflareSaved] = useState(false);
-
-  const [showRemiseModal, setShowRemiseModal] = useState(false);
-  const [editingRemise, setEditingRemise] = useState(null);
-  const [remiseLabel, setRemiseLabel] = useState('');
-  const [remisePct, setRemisePct] = useState('');
   const [configSaved, setConfigSaved] = useState(false);
 
   const [paliers, setPaliers] = useState([]);
@@ -62,7 +54,6 @@ export default function ConfigScreen() {
   const [adminSaved, setAdminSaved] = useState(false);
 
   useFocusEffect(useCallback(() => {
-    loadRemises();
     loadDisciplines();
     getPaliersReduction().then(setPaliers).catch(() => setPaliers([]));
     loadAdminUser().then(admin => {
@@ -136,33 +127,7 @@ export default function ConfigScreen() {
     ]);
   };
 
-  const openRemiseModal = (remise = null) => {
-    setEditingRemise(remise);
-    setRemiseLabel(remise?.label || '');
-    setRemisePct(String(remise?.pourcentage || ''));
-    setShowRemiseModal(true);
-  };
 
-  const handleSaveRemise = async () => {
-    const pct = parseFloat(remisePct);
-    if (!remiseLabel.trim() || isNaN(pct) || pct <= 0 || pct >= 100) {
-      Alert.alert('Erreur', 'Nom requis et pourcentage entre 1 et 99');
-      return;
-    }
-    if (editingRemise) {
-      await updateRemise({ ...editingRemise, label: remiseLabel, pourcentage: pct });
-    } else {
-      await createRemise({ id: uuidv4(), label: remiseLabel, pourcentage: pct });
-    }
-    setShowRemiseModal(false);
-  };
-
-  const handleDeleteRemise = (id) => {
-    Alert.alert('Supprimer la remise', 'Confirmer la suppression ?', [
-      { text: 'Annuler', style: 'cancel' },
-      { text: 'Supprimer', style: 'destructive', onPress: () => deleteRemise(id) },
-    ]);
-  };
 
   const handleThemeChange = async (id) => {
     if (id !== themeId) await setTheme(id);
@@ -435,41 +400,7 @@ export default function ConfigScreen() {
         )}
       </View>
 
-      {/* Remises */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="percent" size={20} color={COLORS.secondary} />
-          <Text style={styles.sectionTitle}>Remises</Text>
-          <TouchableOpacity style={styles.addRemiseBtn} onPress={() => openRemiseModal()}>
-            <MaterialCommunityIcons name="plus" size={18} color={COLORS.primary} />
-            <Text style={styles.addRemiseText}>Ajouter</Text>
-          </TouchableOpacity>
-        </View>
 
-        {remises.length === 0 ? (
-          <Text style={styles.emptyText}>Aucune remise configurée</Text>
-        ) : (
-          remises.map(r => (
-            <View key={r.id} style={styles.remiseCard}>
-              <View style={styles.remisePctBox}>
-                <Text style={styles.remisePct}>{r.pourcentage}%</Text>
-              </View>
-              <View style={styles.remiseInfo}>
-                <Text style={styles.remiseLabel}>{r.label}</Text>
-                <Text style={styles.remiseSub}>Remise de {r.pourcentage}% sur le montant dû</Text>
-              </View>
-              <View style={styles.remiseActions}>
-                <TouchableOpacity onPress={() => openRemiseModal(r)} style={styles.iconBtn}>
-                  <MaterialCommunityIcons name="pencil" size={18} color={COLORS.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDeleteRemise(r.id)} style={styles.iconBtn}>
-                  <MaterialCommunityIcons name="trash-can" size={18} color={COLORS.danger} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))
-        )}
-      </View>
 
       {/* Base de données Cloudflare D1 */}
       <View style={styles.section}>
@@ -529,48 +460,7 @@ export default function ConfigScreen() {
         </View>
       </View>
 
-      {/* ── Danger Zone ─────────────────────────────────────────────────────── */}
-      <View style={[styles.section, { borderColor: COLORS.danger + '40', borderWidth: 1 }]}>
-        <View style={styles.sectionHeader}>
-          <MaterialCommunityIcons name="delete-sweep" size={20} color={COLORS.danger} />
-          <Text style={[styles.sectionTitle, { color: COLORS.danger }]}>Réinitialisation de la base de données</Text>
-        </View>
-        <Text style={styles.sectionHint}>
-          Supprime tous les adhérents, paiements et présences enregistrés.{`\n`}
-          Le compte administrateur et la configuration sont conservés.
-        </Text>
-        <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: resetLoading ? COLORS.textMuted : COLORS.danger, marginTop: 12 }]}
-          onPress={() => {
-            Alert.alert(
-              '⚠️ Réinitialisation',
-              'Cette action supprimera TOUS les adhérents, paiements et présences de façon irréversible.\n\nÊtes-vous certain ?',
-              [
-                { text: 'Annuler', style: 'cancel' },
-                {
-                  text: 'Oui, tout effacer',
-                  style: 'destructive',
-                  onPress: async () => {
-                    setResetLoading(true);
-                    try {
-                      await resetDatabase();
-                      Alert.alert('✅ Terminé', 'La base de données a été réinitialisée. Seul le compte administrateur est conservé.');
-                    } catch (e) {
-                      Alert.alert('Erreur', e.message);
-                    } finally {
-                      setResetLoading(false);
-                    }
-                  },
-                },
-              ],
-            );
-          }}
-          disabled={resetLoading}
-        >
-          <MaterialCommunityIcons name={resetLoading ? 'loading' : 'delete-forever'} size={18} color="#fff" />
-          <Text style={styles.saveBtnText}>{resetLoading ? 'Suppression...' : 'Réinitialiser la BDD'}</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* Compte Administrateur Unique */}
       <View style={styles.section}>
@@ -670,44 +560,7 @@ export default function ConfigScreen() {
         </View>
       </Modal>
 
-      {/* Remise Modal */}
-      <Modal visible={showRemiseModal} transparent animationType="slide" onRequestClose={() => setShowRemiseModal(false)}>
-        <View style={styles.modalBg}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>{editingRemise ? 'Modifier la remise' : 'Nouvelle remise'}</Text>
 
-            <Text style={styles.fieldLabel}>Nom de la remise</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={remiseLabel}
-              onChangeText={setRemiseLabel}
-              placeholder="Ex: Remise famille, Fidélité..."
-              placeholderTextColor={COLORS.textMuted}
-            />
-
-            <Text style={styles.fieldLabel}>Pourcentage (%)</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={remisePct}
-              onChangeText={setRemisePct}
-              keyboardType="numeric"
-              placeholder="Ex: 10"
-              placeholderTextColor={COLORS.textMuted}
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowRemiseModal(false)}>
-                <Text style={styles.cancelText}>Annuler</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSaveRemise}>
-                <MaterialCommunityIcons name="content-save" size={18} color="#fff" />
-                <Text style={styles.saveBtnText}>Enregistrer</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* Palier multi-mois Modal */}
       <Modal visible={showPalierModal} transparent animationType="slide" onRequestClose={() => setShowPalierModal(false)}>

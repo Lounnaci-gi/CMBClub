@@ -108,13 +108,7 @@ async function initDatabase(database) {
       FOREIGN KEY (saisonId) REFERENCES saisons(id)
     );
 
-    CREATE TABLE IF NOT EXISTS remises (
-      id TEXT PRIMARY KEY,
-      label TEXT NOT NULL,
-      pourcentage REAL NOT NULL,
-      actif INTEGER DEFAULT 1,
-      createdAt TEXT NOT NULL
-    );
+
 
     -- Portefeuille : créances, versements, imputations, tarifs & paliers
     CREATE TABLE IF NOT EXISTS creances (
@@ -298,7 +292,8 @@ async function initDatabase(database) {
     `INSERT OR IGNORE INTO config (key, value) VALUES ('fraisAssurance', '500')`,
   );
   await database.runAsync(
-    `INSERT OR IGNORE INTO config (key, value) VALUES ('cloudflareApiUrl', 'https://cmbclub-api.ahmedlounnaci.workers.dev')`,
+    `INSERT OR IGNORE INTO config (key, value) VALUES ('cloudflareApiUrl', ?)`,
+    [process.env.EXPO_PUBLIC_CLOUDFLARE_API_URL || ''],
   );
 
   // Seed single admin user (identifiant chiffré & mot de passe haché)
@@ -348,13 +343,7 @@ async function initDatabase(database) {
     [saisonLabel, yearNow, `${yearNow}-01-01`, `${yearNow}-12-31`],
   );
 
-  // Seed remises par défaut
-  await database.runAsync(
-    `INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) VALUES ('remise-famille', 'Remise Famille', 10, 1, datetime('now'))`,
-  );
-  await database.runAsync(
-    `INSERT OR IGNORE INTO remises (id, label, pourcentage, actif, createdAt) VALUES ('remise-fidelite', 'Remise Fidélité', 5, 1, datetime('now'))`,
-  );
+
 
   // Disciplines par défaut
   const defaultDisciplines = ['KickBoxing', 'Natation'];
@@ -517,25 +506,7 @@ async function initDatabase(database) {
 }
 
 
-// ──────────────── RESET BDD ────────────────
-// Efface toutes les données sauf l'utilisateur admin
 
-export async function resetDatabase() {
-  const db = await getDatabase();
-  await db.withTransactionAsync(async () => {
-    // Supprimer les données transactionnelles
-    await db.runAsync('DELETE FROM imputation_versements');
-    await db.runAsync('DELETE FROM versements');
-    await db.runAsync('DELETE FROM creances');
-    await db.runAsync('DELETE FROM tarifs_personnalises');
-    await db.runAsync('DELETE FROM reductions_adherent');
-    await db.runAsync('DELETE FROM presences');
-    await db.runAsync('DELETE FROM paiements');
-    await db.runAsync('DELETE FROM adherent_saisons');
-    await db.runAsync('DELETE FROM adherents');
-    // Conserver : users (admin), config, saisons, remises, paliers_reduction, disciplines, creneaux
-  });
-}
 
 
 // ──────────────── CONFIG ────────────────
@@ -1251,54 +1222,7 @@ export async function getStatsBySaison(saisonId) {
   };
 }
 
-// ──────────────── REMISES ────────────────
 
-export async function getRemises() {
-  if (isCloudflareEnabled()) {
-    try {
-      return await CloudflareAPI.getRemises();
-    } catch (e) {
-      console.warn('Cloudflare getRemises fallback:', e.message);
-    }
-  }
-  const db = await getDatabase();
-  return await db.getAllAsync('SELECT * FROM remises WHERE actif = 1 ORDER BY label');
-}
-
-export async function createRemise(remise) {
-  if (isCloudflareEnabled()) {
-    try {
-      await CloudflareAPI.createRemise(remise);
-    } catch (e) {
-      console.warn('Cloudflare createRemise fallback:', e.message);
-    }
-  }
-  const db = await getDatabase();
-  await db.runAsync(
-    `INSERT INTO remises (id, label, pourcentage, actif, createdAt) VALUES (?, ?, ?, 1, datetime('now'))`,
-    [remise.id, remise.label, remise.pourcentage],
-  );
-}
-
-export async function updateRemise(remise) {
-  const db = await getDatabase();
-  await db.runAsync(
-    'UPDATE remises SET label=?, pourcentage=?, actif=? WHERE id=?',
-    [remise.label, remise.pourcentage, remise.actif ? 1 : 0, remise.id],
-  );
-}
-
-export async function deleteRemise(id) {
-  if (isCloudflareEnabled()) {
-    try {
-      await CloudflareAPI.deleteRemise(id);
-    } catch (e) {
-      console.warn('Cloudflare deleteRemise fallback:', e.message);
-    }
-  }
-  const db = await getDatabase();
-  await db.runAsync('UPDATE remises SET actif = 0 WHERE id = ?', [id]);
-}
 
 // ──────────────── USERS ────────────────
 

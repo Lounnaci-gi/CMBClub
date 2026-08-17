@@ -10,7 +10,6 @@ import {
   enrollAdherentInSaison,
   getPaiementsByAdherent,
   createPaiement, updatePaiement,
-  getRemises, createRemise, updateRemise, deleteRemise,
   getDisciplines, createDiscipline, updateDiscipline, deleteDiscipline,
   getCreneaux, createCreneau, updateCreneau, deleteCreneau,
   getPresencesBySeance, getEligibleAdherentsForCreneau, savePresencesSeance, getPresencesByAdherent,
@@ -57,7 +56,7 @@ const useStore = create((set, get) => ({
   },
 
   // ── Config ──
-  config: { fraisInscription: 2000, fraisMensuel: 1500, fraisAssurance: 500, cloudflareApiUrl: 'https://cmbclub-api.ahmedlounnaci.workers.dev' },
+  config: { fraisInscription: 2000, fraisMensuel: 1500, fraisAssurance: 500, cloudflareApiUrl: process.env.EXPO_PUBLIC_CLOUDFLARE_API_URL || '' },
   themeId: THEME_IDS.DARK,
   loadConfig: async () => {
     const config = await getConfig();
@@ -171,24 +170,7 @@ const useStore = create((set, get) => ({
     await updatePaiement(paiement);
   },
 
-  // ── Remises ──
-  remises: [],
-  loadRemises: async () => {
-    const remises = await getRemises();
-    set({ remises });
-  },
-  createRemise: async (remise) => {
-    await createRemise(remise);
-    await get().loadRemises();
-  },
-  updateRemise: async (remise) => {
-    await updateRemise(remise);
-    await get().loadRemises();
-  },
-  deleteRemise: async (id) => {
-    await deleteRemise(id);
-    await get().loadRemises();
-  },
+
 
   // ── Disciplines ──
   disciplines: [],

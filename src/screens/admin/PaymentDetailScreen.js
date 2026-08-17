@@ -17,12 +17,11 @@ export default function PaymentDetailScreen({ route }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const { adherentId } = route.params;
-  const { adherents, saisonActive, remises, loadRemises, updatePaiement, config } = useStore();
+  const { adherents, saisonActive, updatePaiement, config } = useStore();
   const [paiements, setPaiements] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [montantPaye, setMontantPaye] = useState('');
-  const [selectedRemise, setSelectedRemise] = useState(null);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -36,9 +35,8 @@ export default function PaymentDetailScreen({ route }) {
       await refreshPaymentStatuses(saisonActive.id);
       const p = await getPaiementsByAdherent(adherent.id, saisonActive.id);
       setPaiements(p);
-      await loadRemises();
     }
-  }, [adherent, saisonActive, loadRemises]);
+  }, [adherent, saisonActive]);
 
   const handlePrint = async () => {
     if (!adherent || !saisonActive) return;
@@ -67,14 +65,9 @@ export default function PaymentDetailScreen({ route }) {
       return;
     }
     setSelected(p);
-    const remise = remises.find(r => r.id === p.remiseId);
-    const remiseM = remise
-      ? Math.round(p.montantDu * remise.pourcentage / 100)
-      : (p.remiseMontant || 0);
-    const net = (p.montantDu || 0) - remiseM;
-    const reste = Math.max(0, net - (p.montantPaye || 0));
-    setMontantPaye(String(reste > 0 ? reste : net));
-    setSelectedRemise(remise || null);
+    const du = p.montantDu || 0;
+    const reste = Math.max(0, du - (p.montantPaye || 0));
+    setMontantPaye(String(reste > 0 ? reste : du));
     setNotes(p.notes || '');
     setShowModal(true);
   };
@@ -87,26 +80,23 @@ export default function PaymentDetailScreen({ route }) {
     }
     setSaving(true);
     try {
-      const remiseMontant = selectedRemise
-        ? Math.round(selected.montantDu * selectedRemise.pourcentage / 100)
-        : (selected.remiseMontant || 0);
-      const net = selected.montantDu - remiseMontant;
+      const du = selected.montantDu || 0;
       const currentPaid = selected.montantPaye || 0;
       const cashEntered = parseFloat(montantPaye) || 0;
       const totalPaidForSelected = currentPaid + cashEntered;
 
       const todayIso = new Date().toISOString();
 
-      if (totalPaidForSelected <= net) {
+      if (totalPaidForSelected <= du) {
         let statut = PAYMENT_STATUS.A_PAYER;
-        if (totalPaidForSelected >= net && net >= 0) statut = PAYMENT_STATUS.PAYE;
+        if (totalPaidForSelected >= du && du >= 0) statut = PAYMENT_STATUS.PAYE;
         else if (totalPaidForSelected > 0) statut = PAYMENT_STATUS.AVANCE;
 
         await updatePaiement({
           ...selected,
           montantPaye: totalPaidForSelected,
-          remisePct: selectedRemise?.pourcentage || 0,
-          remiseMontant,
+          remisePct: 0,
+          remiseMontant: 0,
           datePaiement: totalPaidForSelected > 0 ? todayIso : selected.datePaiement,
           statut,
           notes,
@@ -117,14 +107,14 @@ export default function PaymentDetailScreen({ route }) {
         Alert.alert('✅ Versement enregistré', `Montant encaissé : ${cashEntered.toLocaleString()} DA`);
       } else {
         // Le montant encaissé dépasse le reste à payer sur cet élément -> Avance automatique sur les mois suivants
-        let surplus = totalPaidForSelected - net;
+        let surplus = totalPaidForSelected - du;
 
         // 1. Solder l'élément en cours
         await updatePaiement({
           ...selected,
-          montantPaye: net,
-          remisePct: selectedRemise?.pourcentage || 0,
-          remiseMontant,
+          montantPaye: du,
+          remisePct: 0,
+          remiseMontant: 0,
           datePaiement: todayIso,
           statut: PAYMENT_STATUS.PAYE,
           notes,
@@ -132,7 +122,7 @@ export default function PaymentDetailScreen({ route }) {
 
         // 2. Allouer le surplus sur les mois suivants de la saison
         const otherUnpaid = paiements
-          .filter(p => p.id !== selected.id && ((p.montantDu || 0) - (p.remiseMontant || 0) - (p.montantPaye || 0)) > 0)
+          .filter(p => p.id !== selected.id && ((p.montantDu || 0) - (p.montantPaye || 0)) > 0)
           .sort((a, b) => {
             if (a.type === 'inscription') return -1;
             if (b.type === 'inscription') return 1;
@@ -145,9 +135,9 @@ export default function PaymentDetailScreen({ route }) {
         let extraMonthsCount = 0;
         for (const item of otherUnpaid) {
           if (surplus <= 0) break;
-          const itemNet = (item.montantDu || 0) - (item.remiseMontant || 0);
+          const itemDu = item.montantDu || 0;
           const itemCurrentPaye = item.montantPaye || 0;
-          const itemRemaining = Math.max(0, itemNet - itemCurrentPaye);
+          const itemRemaining = Math.max(0, itemDu - itemCurrentPaye);
 
           const allocated = Math.min(surplus, itemRemaining);
           const itemNewPaye = itemCurrentPaye + allocated;
@@ -155,7 +145,7 @@ export default function PaymentDetailScreen({ route }) {
           extraMonthsCount++;
 
           let itemStatut = PAYMENT_STATUS.A_PAYER;
-          if (itemNewPaye >= itemNet && itemNet >= 0) itemStatut = PAYMENT_STATUS.PAYE;
+          if (itemNewPaye >= itemDu && itemDu >= 0) itemStatut = PAYMENT_STATUS.PAYE;
           else if (itemNewPaye > 0) itemStatut = PAYMENT_STATUS.AVANCE;
 
           await updatePaiement({
@@ -185,7 +175,6 @@ export default function PaymentDetailScreen({ route }) {
   const [showMultiModal, setShowMultiModal] = useState(false);
   const [nbMoisMulti, setNbMoisMulti] = useState(1);
   const [montantAvanceMulti, setMontantAvanceMulti] = useState('');
-  const [selectedRemiseMulti, setSelectedRemiseMulti] = useState(null);
   const [notesMulti, setNotesMulti] = useState('');
   const [savingMulti, setSavingMulti] = useState(false);
   const [isCustomMontant, setIsCustomMontant] = useState(false);
@@ -193,8 +182,8 @@ export default function PaymentDetailScreen({ route }) {
   const unpaidPaiements = useMemo(() => {
     return paiements
       .filter(p => {
-        const net = (p.montantDu || 0) - (p.remiseMontant || 0);
-        return (p.montantPaye || 0) < net;
+        const du = p.montantDu || 0;
+        return (p.montantPaye || 0) < du;
       })
       .sort((a, b) => {
         if (a.type === 'inscription') return -1;
@@ -214,13 +203,11 @@ export default function PaymentDetailScreen({ route }) {
 
   const totalDuMulti = useMemo(() => {
     return selectedMultiItems.reduce((sum, item) => {
-      const remisePct = selectedRemiseMulti ? selectedRemiseMulti.pourcentage : (item.remisePct || 0);
-      const remiseMontant = Math.round((item.montantDu || 0) * remisePct / 100);
-      const net = (item.montantDu || 0) - remiseMontant;
-      const remaining = Math.max(0, net - (item.montantPaye || 0));
+      const du = item.montantDu || 0;
+      const remaining = Math.max(0, du - (item.montantPaye || 0));
       return sum + remaining;
     }, 0);
-  }, [selectedMultiItems, selectedRemiseMulti]);
+  }, [selectedMultiItems]);
 
   const openMultiModal = () => {
     if (!canManagePayments) {
@@ -233,14 +220,13 @@ export default function PaymentDetailScreen({ route }) {
     }
     const defaultMois = Math.min(1, unpaidPaiements.length);
     setNbMoisMulti(defaultMois);
-    setSelectedRemiseMulti(null);
     setNotesMulti('');
     setIsCustomMontant(false);
     
     const firstItems = unpaidPaiements.slice(0, defaultMois);
     const initialTotal = firstItems.reduce((sum, item) => {
-      const net = (item.montantDu || 0) - (item.remiseMontant || 0);
-      return sum + Math.max(0, net - (item.montantPaye || 0));
+      const du = item.montantDu || 0;
+      return sum + Math.max(0, du - (item.montantPaye || 0));
     }, 0);
     
     setMontantAvanceMulti(String(initialTotal));
@@ -253,25 +239,8 @@ export default function PaymentDetailScreen({ route }) {
     if (!isCustomMontant) {
       const items = unpaidPaiements.slice(0, validN);
       const total = items.reduce((sum, item) => {
-        const remisePct = selectedRemiseMulti ? selectedRemiseMulti.pourcentage : (item.remisePct || 0);
-        const remiseMontant = Math.round((item.montantDu || 0) * remisePct / 100);
-        const net = (item.montantDu || 0) - remiseMontant;
-        return sum + Math.max(0, net - (item.montantPaye || 0));
-      }, 0);
-      setMontantAvanceMulti(String(total));
-    }
-  };
-
-  const handleRemiseMultiChange = (remise) => {
-    const nextRemise = selectedRemiseMulti?.id === remise?.id ? null : remise;
-    setSelectedRemiseMulti(nextRemise);
-    if (!isCustomMontant) {
-      const items = unpaidPaiements.slice(0, nbMoisMulti);
-      const total = items.reduce((sum, item) => {
-        const remisePct = nextRemise ? nextRemise.pourcentage : (item.remisePct || 0);
-        const remiseMontant = Math.round((item.montantDu || 0) * remisePct / 100);
-        const net = (item.montantDu || 0) - remiseMontant;
-        return sum + Math.max(0, net - (item.montantPaye || 0));
+        const du = item.montantDu || 0;
+        return sum + Math.max(0, du - (item.montantPaye || 0));
       }, 0);
       setMontantAvanceMulti(String(total));
     }
@@ -312,18 +281,16 @@ export default function PaymentDetailScreen({ route }) {
       const todayIso = new Date().toISOString();
 
       for (const item of selectedMultiItems) {
-        const remisePct = selectedRemiseMulti ? selectedRemiseMulti.pourcentage : (item.remisePct || 0);
-        const remiseMontant = Math.round((item.montantDu || 0) * remisePct / 100);
-        const net = (item.montantDu || 0) - remiseMontant;
+        const du = item.montantDu || 0;
         const currentPaye = item.montantPaye || 0;
-        const netRemaining = Math.max(0, net - currentPaye);
+        const duRemaining = Math.max(0, du - currentPaye);
 
-        const allocated = Math.min(remainingCash, netRemaining);
+        const allocated = Math.min(remainingCash, duRemaining);
         const newPaye = currentPaye + allocated;
         remainingCash -= allocated;
 
         let statut = PAYMENT_STATUS.A_PAYER;
-        if (newPaye >= net && net >= 0) {
+        if (newPaye >= du && du >= 0) {
           statut = PAYMENT_STATUS.PAYE;
         } else if (newPaye > 0) {
           statut = PAYMENT_STATUS.AVANCE;
@@ -337,8 +304,8 @@ export default function PaymentDetailScreen({ route }) {
         await updatePaiement({
           ...item,
           montantPaye: newPaye,
-          remisePct,
-          remiseMontant,
+          remisePct: 0,
+          remiseMontant: 0,
           datePaiement: allocated > 0 ? todayIso : item.datePaiement,
           statut,
           notes: item.notes ? `${item.notes} ${noteText}`.trim() : noteText,
@@ -486,44 +453,12 @@ export default function PaymentDetailScreen({ route }) {
             </Text>
             <Text style={styles.modalSubtitle}>{selected?.label}</Text>
 
-            {/* Remise selector */}
-            <Text style={styles.modalLabel}>Remise applicable</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity
-                  style={[styles.remiseChip, !selectedRemise && styles.remiseChipActive]}
-                  onPress={() => setSelectedRemise(null)}
-                >
-                  <Text style={[styles.remiseText, !selectedRemise && { color: COLORS.primary }]}>Aucune</Text>
-                </TouchableOpacity>
-                {remises.map(r => (
-                  <TouchableOpacity
-                    key={r.id}
-                    style={[styles.remiseChip, selectedRemise?.id === r.id && styles.remiseChipActive]}
-                    onPress={() => setSelectedRemise(selectedRemise?.id === r.id ? null : r)}
-                  >
-                    <Text style={[styles.remiseText, selectedRemise?.id === r.id && { color: COLORS.primary }]}>
-                      {r.label} ({r.pourcentage}%)
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-
             {/* Amounts */}
             <View style={styles.amountSummary}>
               <View style={styles.amtRow}>
-                <Text style={styles.amtLabel}>Montant de base</Text>
+                <Text style={styles.amtLabel}>Montant dû</Text>
                 <Text style={styles.amtValue}>{selected?.montantDu?.toLocaleString()} DA</Text>
               </View>
-              {selectedRemise && (
-                <View style={styles.amtRow}>
-                  <Text style={styles.amtLabel}>Remise ({selectedRemise.pourcentage}%)</Text>
-                  <Text style={[styles.amtValue, { color: COLORS.success }]}>
-                    -{Math.round((selected?.montantDu || 0) * selectedRemise.pourcentage / 100).toLocaleString()} DA
-                  </Text>
-                </View>
-              )}
               <View style={styles.amtRow}>
                 <Text style={styles.amtLabel}>Déjà versé</Text>
                 <Text style={[styles.amtValue, { color: COLORS.primary }]}>{(selected?.montantPaye || 0).toLocaleString()} DA</Text>
@@ -531,9 +466,7 @@ export default function PaymentDetailScreen({ route }) {
               <View style={[styles.amtRow, styles.amtTotal]}>
                 <Text style={[styles.amtLabel, { color: COLORS.textPrimary, fontWeight: '700' }]}>Reste à payer sur ce mois</Text>
                 <Text style={[styles.amtValue, { color: COLORS.danger, fontSize: 17 }]}>
-                  {Math.max(0,
-                    (selected ? selected.montantDu - (selectedRemise ? Math.round(selected.montantDu * selectedRemise.pourcentage / 100) : (selected.remiseMontant || 0)) : 0) - (selected?.montantPaye || 0)
-                  ).toLocaleString()} DA
+                  {Math.max(0, (selected?.montantDu || 0) - (selected?.montantPaye || 0)).toLocaleString()} DA
                 </Text>
               </View>
             </View>
@@ -642,29 +575,7 @@ export default function PaymentDetailScreen({ route }) {
                 ))}
               </View>
 
-              {/* Remise Multi */}
-              <Text style={styles.modalLabel}>Remise globale (optionnelle)</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity
-                    style={[styles.remiseChip, !selectedRemiseMulti && styles.remiseChipActive]}
-                    onPress={() => handleRemiseMultiChange(null)}
-                  >
-                    <Text style={[styles.remiseText, !selectedRemiseMulti && { color: COLORS.primary }]}>Aucune</Text>
-                  </TouchableOpacity>
-                  {remises.map(r => (
-                    <TouchableOpacity
-                      key={r.id}
-                      style={[styles.remiseChip, selectedRemiseMulti?.id === r.id && styles.remiseChipActive]}
-                      onPress={() => handleRemiseMultiChange(r)}
-                    >
-                      <Text style={[styles.remiseText, selectedRemiseMulti?.id === r.id && { color: COLORS.primary }]}>
-                        {r.label} ({r.pourcentage}%)
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+
 
               {/* Montant Avancé Input */}
               <View style={styles.inputHeaderRow}>

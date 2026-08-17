@@ -3,7 +3,11 @@
 
 const SALT_PREFIX = 'cmb_slt_v1:';
 const ENC_PREFIX = 'cmb_enc_u1:';
-const SECRET_KEY = 'CMBClub@SecureKey#2026_AuthVault';
+// Clé lue depuis .env (EXPO_PUBLIC_USERNAME_CIPHER_KEY).
+// Le fallback conserve la rétrocompatibilité avec les noms d'utilisateur
+// déjà chiffrés en base SQLite locale si la variable n'est pas définie.
+const SECRET_KEY =
+  process.env.EXPO_PUBLIC_USERNAME_CIPHER_KEY || 'CMBClub@SecureKey#2026_AuthVault';
 
 /**
  * Calcul d'empreinte SHA-256 standard en pur JS compatible React Native, Web, Node et Workers

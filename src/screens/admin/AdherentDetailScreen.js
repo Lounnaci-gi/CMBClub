@@ -356,10 +356,6 @@ export default function AdherentDetailScreen({ navigation, route }) {
                 <Text style={styles.balanceValue}>{balance.totalDu.toLocaleString()} DA</Text>
               </View>
               <View style={styles.balanceItem}>
-                <Text style={styles.balanceLabel}>Remises</Text>
-                <Text style={[styles.balanceValue, { color: COLORS.success }]}>-{balance.totalRemise.toLocaleString()} DA</Text>
-              </View>
-              <View style={styles.balanceItem}>
                 <Text style={styles.balanceLabel}>Montant versé</Text>
                 <Text style={[styles.balanceValue, { color: COLORS.primary }]}>{balance.montantVerse.toLocaleString()} DA</Text>
               </View>

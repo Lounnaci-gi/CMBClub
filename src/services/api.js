@@ -242,18 +242,6 @@ export const CloudflareAPI = {
       body: JSON.stringify(paiement),
     }),
 
-  // ── Remises ──
-  getRemises: () => request('/api/remises'),
-  createRemise: (remise) =>
-    request('/api/remises', {
-      method: 'POST',
-      body: JSON.stringify(remise),
-    }),
-  deleteRemise: (id) =>
-    request(`/api/remises/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }),
-
   // ── Disciplines ──
   getDisciplines: () => request('/api/disciplines'),
   createDiscipline: (discipline) =>

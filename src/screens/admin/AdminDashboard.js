@@ -19,14 +19,14 @@ export default function AdminDashboard({ navigation }) {
     () => createStyles(COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding),
     [COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding],
   );
-  const { user, stats, saisons, saisonActive, loadStats, loadSaisons, loadAdherents, loadRemises, loadConfig, logout } = useStore();
+  const { user, stats, saisons, saisonActive, loadStats, loadSaisons, loadAdherents, loadConfig, logout } = useStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([loadSaisons(), loadAdherents(), loadRemises(), loadConfig()]);
+    await Promise.all([loadSaisons(), loadAdherents(), loadConfig()]);
     const saison = useStore.getState().saisonActive;
     if (saison) await loadStats(saison.id);
-  }, [loadSaisons, loadAdherents, loadRemises, loadConfig, loadStats]);
+  }, [loadSaisons, loadAdherents, loadConfig, loadStats]);
 
   useFocusEffect(useCallback(() => { loadAll(); }, [loadAll]));
 
@@ -48,7 +48,6 @@ export default function AdminDashboard({ navigation }) {
   const saisonOuverte = saisons.find((saison) => saison.statut !== 'fermé');
   const saisonAffichee = saisonOuverte || saisonActive || saisons[0];
   const afficheSaisonFermee = Boolean(saisonAffichee && saisonAffichee.statut === 'fermé' && !saisonOuverte);
-
   // Calcul dynamique de la largeur des cartes d'action
   const actionCardWidth = dashboardActionCols === 6 ? '15.3%' : dashboardActionCols === 4 ? '23.5%' : dashboardActionCols === 3 ? '31%' : '48%';
 
@@ -136,7 +135,7 @@ export default function AdminDashboard({ navigation }) {
               { icon: 'clipboard-check', label: 'Gestion des présences', sub: 'Appel par créneau & suivi d\'assiduité', screen: 'Presences', color: COLORS.success },
               { icon: 'calendar-clock', label: 'Planning & Créneaux', sub: 'Horaires par discipline et catégorie', screen: 'Creneaux', color: COLORS.secondary },
               { icon: 'calendar-month', label: 'Gestion des saisons', sub: 'Créer et activer des saisons', screen: 'Seasons', color: COLORS.catCadet },
-              { icon: 'tune', label: 'Configuration', sub: 'Tarifs, remises, paramètres', screen: 'Config', color: COLORS.catMinime },
+              { icon: 'tune', label: 'Configuration', sub: 'Tarifs, paramètres', screen: 'Config', color: COLORS.catMinime },
             ].map((item) => (
               <TouchableOpacity
                 key={item.label}
