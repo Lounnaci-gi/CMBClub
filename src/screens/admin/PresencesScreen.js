@@ -49,12 +49,31 @@ const getDateForJour = (jourName, baseDate = new Date()) => {
   const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
   const targetIdx = JOURS_FR.indexOf(jourName);
   if (targetIdx === -1) return getLocalDateString(baseDate);
-
   const currentIdx = baseDate.getDay();
   let diffDays = (targetIdx - currentIdx + 7) % 7;
+  if (diffDays > 0) diffDays -= 7; // occurrence la plus récente (passé ou aujourd'hui)
   const d = new Date(baseDate);
   d.setDate(d.getDate() + diffDays);
   return getLocalDateString(d);
+};
+
+// Calcule la prochaine occurrence future d'un créneau (semaine suivante si aujourd'hui)
+const getNextOccurrenceDateTime = (jourName, heureDebutStr) => {
+  const JOURS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+  const targetIdx = JOURS.indexOf(jourName);
+  if (targetIdx === -1) return null;
+  const match = String(heureDebutStr).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const base = new Date();
+  const currentIdx = base.getDay();
+  let diffDays = (targetIdx - currentIdx + 7) % 7;
+  if (diffDays === 0) diffDays = 7; // toujours la prochaine semaine si même jour
+  const d = new Date(base);
+  d.setDate(d.getDate() + diffDays);
+  d.setHours(h, m, 0, 0);
+  return d;
 };
 
 const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
@@ -111,42 +130,62 @@ export default function PresencesScreen({ route }) {
     return creneaux.filter(c => c.jour === activeJour);
   }, [creneaux, activeJour]);
 
-  // Calcul du temps restant jusqu'au début du créneau sélectionné
-  const slotStartDateTime = useMemo(() => {
+  // Statut du créneau : 'not_started' | 'open' | 'ended' | null
+  // - 'not_started' : aujourd'hui est le bon jour, mais l'heure n'est pas encore arrivée
+  // - 'open'        : on est dans la plage horaire du créneau → appel possible
+  // - 'ended'       : la plage est dépassée (heureFin) ou ce n'est pas le bon jour
+  const slotStatus = useMemo(() => {
     if (!selectedCreneau?.heureDebut || !selectedCreneau?.jour) return null;
-    const dateForSlot = getDateForJour(selectedCreneau.jour);
-    return getSlotStartDateTime(dateForSlot, selectedCreneau.heureDebut);
-  }, [selectedCreneau?.id, selectedCreneau?.heureDebut, selectedCreneau?.jour]);
-
-  // Horloge optimisée : 1s uniquement si un compte à rebours est en cours, 30s sinon
-  useEffect(() => {
-    if (!slotStartDateTime || Date.now() >= slotStartDateTime.getTime()) {
-      const slowTimer = setInterval(() => {
-        setNow(new Date());
-      }, 30000);
-      return () => clearInterval(slowTimer);
+    const todayJourName = JOURS_FR[now.getDay()];
+    // Pas le bon jour de la semaine → terminé
+    if (todayJourName !== selectedCreneau.jour) return 'ended';
+    const todayStr = getLocalDateString();
+    const startDT = getSlotStartDateTime(todayStr, selectedCreneau.heureDebut);
+    if (!startDT) return 'open';
+    const nowMs = now.getTime();
+    if (nowMs < startDT.getTime()) return 'not_started';
+    // Vérifier la fin si disponible
+    if (selectedCreneau.heureFin) {
+      const endDT = getSlotStartDateTime(todayStr, selectedCreneau.heureFin);
+      if (endDT && nowMs > endDT.getTime()) return 'ended';
     }
-    const timer = setInterval(() => {
-      setNow(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [slotStartDateTime]);
+    return 'open';
+  }, [selectedCreneau?.id, selectedCreneau?.heureDebut, selectedCreneau?.heureFin, selectedCreneau?.jour, now]);
 
-  const isNotStartedYet = useMemo(() => {
-    if (!slotStartDateTime) return false;
-    return now.getTime() < slotStartDateTime.getTime();
-  }, [now, slotStartDateTime]);
+  const isBlocked = !!slotStatus && slotStatus !== 'open';
+
+  // Cible du compte à rebours :
+  // - 'not_started' → aujourd'hui à heureDebut
+  // - 'ended'       → prochain créneau (semaine prochaine)
+  const countdownTarget = useMemo(() => {
+    if (!selectedCreneau?.heureDebut || !selectedCreneau?.jour || !isBlocked) return null;
+    if (slotStatus === 'not_started') {
+      return getSlotStartDateTime(getLocalDateString(), selectedCreneau.heureDebut);
+    }
+    if (slotStatus === 'ended') {
+      return getNextOccurrenceDateTime(selectedCreneau.jour, selectedCreneau.heureDebut);
+    }
+    return null;
+  }, [slotStatus, isBlocked, selectedCreneau?.heureDebut, selectedCreneau?.jour]);
+
+  // Horloge : 1s si bloqué (countdown actif), 30s pendant le créneau ou sans créneau
+  useEffect(() => {
+    const interval = isBlocked ? 1000 : 30000;
+    const timer = setInterval(() => setNow(new Date()), interval);
+    return () => clearInterval(timer);
+  }, [isBlocked]);
 
   const countdownFormatted = useMemo(() => {
-    if (!slotStartDateTime || !isNotStartedYet) return null;
-    const diffMs = slotStartDateTime.getTime() - now.getTime();
+    if (!countdownTarget || !isBlocked) return null;
+    const diffMs = countdownTarget.getTime() - now.getTime();
     if (diffMs <= 0) return null;
     const totalSec = Math.floor(diffMs / 1000);
     const hh = String(Math.floor(totalSec / 3600)).padStart(2, '0');
     const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
     const ss = String(totalSec % 60).padStart(2, '0');
     return { hh, mm, ss };
-  }, [slotStartDateTime, now, isNotStartedYet]);
+  }, [countdownTarget, now, isBlocked]);
+
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -242,8 +281,13 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleStatutChange = (adherentId, targetStatut) => {
-    if (isNotStartedYet) {
-      Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
+    if (isBlocked) {
+      Alert.alert(
+        slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté',
+        slotStatus === 'ended'
+          ? 'Ce créneau est terminé. L\'appel n\'est plus disponible.'
+          : 'L\'appel est bloqué jusqu\'au début du créneau.'
+      );
       return;
     }
     const currentNow = new Date();
@@ -293,8 +337,13 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleMarkAllPresent = () => {
-    if (isNotStartedYet) {
-      Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
+    if (isBlocked) {
+      Alert.alert(
+        slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté',
+        slotStatus === 'ended'
+          ? 'Ce créneau est terminé. L\'appel n\'est plus disponible.'
+          : 'L\'appel est bloqué jusqu\'au début du créneau.'
+      );
       return;
     }
     const currentNow = new Date();
@@ -323,8 +372,11 @@ export default function PresencesScreen({ route }) {
 
   // Traitement lors du scan QR Code d'un adhérent
   const handleQrAdherentScanned = (adherent) => {
-    if (isNotStartedYet) {
-      return { statutText: 'Créneau non débuté', timeStr: '' };
+    if (isBlocked) {
+      return {
+        statutText: slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté',
+        timeStr: '',
+      };
     }
     const currentNow = new Date();
     const timeStr = getCurrentTimeString(currentNow);
@@ -363,8 +415,13 @@ export default function PresencesScreen({ route }) {
   };
 
   const handleSave = async () => {
-    if (isNotStartedYet) {
-      Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
+    if (isBlocked) {
+      Alert.alert(
+        slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté',
+        slotStatus === 'ended'
+          ? 'Ce créneau est terminé. L\'appel n\'est plus disponible.'
+          : 'L\'appel est bloqué jusqu\'au début du créneau.'
+      );
       return;
     }
     if (!saisonActive) {
@@ -542,7 +599,11 @@ export default function PresencesScreen({ route }) {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={[styles.markAllBtn, (isFuture || noOpenSeason) && { opacity: 0.5 }]} onPress={handleMarkAllPresent} disabled={isFuture || noOpenSeason}>
+          <TouchableOpacity
+            style={[styles.markAllBtn, (isFuture || isBlocked || noOpenSeason) && { opacity: 0.5 }]}
+            onPress={handleMarkAllPresent}
+            disabled={isFuture || isBlocked || noOpenSeason}
+          >
             <MaterialCommunityIcons name="check-all" size={16} color={COLORS.success} />
             <Text style={styles.markAllText}>Tout présent</Text>
           </TouchableOpacity>
@@ -559,24 +620,42 @@ export default function PresencesScreen({ route }) {
         </View>
       )}
 
-      {/* Affichage du chrono si le créneau n'a pas encore débuté */}
-      {isNotStartedYet && countdownFormatted ? (
+      {/* Affichage du chrono si le créneau n'a pas encore débuté ou est terminé */}
+      {isBlocked && countdownFormatted ? (
         <View style={styles.countdownContainer}>
           <View style={styles.countdownCard}>
             <View style={styles.countdownIconBg}>
-              <MaterialCommunityIcons name="clock-start" size={40} color={COLORS.primary} />
+              <MaterialCommunityIcons
+                name={slotStatus === 'ended' ? 'clock-end' : 'clock-start'}
+                size={40}
+                color={slotStatus === 'ended' ? COLORS.danger : COLORS.primary}
+              />
             </View>
-            <Text style={styles.countdownTitle}>Créneau non débuté</Text>
+            <Text style={[styles.countdownTitle, slotStatus === 'ended' && { color: COLORS.danger }]}>
+              {slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté'}
+            </Text>
             <Text style={styles.countdownSubtitle}>
-              L'appel pour le créneau{' '}
-              <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>
-                {selectedCreneau?.discipline} ({selectedCreneau?.categorie})
-              </Text>{' '}
-              du <Text style={{ fontWeight: '700', color: COLORS.secondary }}>{selectedCreneau?.jour}</Text> à{' '}
-              <Text style={{ fontWeight: '800', color: COLORS.primary }}>
-                {selectedCreneau?.heureDebut}
-              </Text>{' '}
-              commencera dans :
+              {slotStatus === 'ended' ? (
+                <>Le créneau{' '}
+                  <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>
+                    {selectedCreneau?.discipline} ({selectedCreneau?.categorie})
+                  </Text>{' '}
+                  du <Text style={{ fontWeight: '700', color: COLORS.secondary }}>{selectedCreneau?.jour}</Text>{' '}
+                  est terminé. Prochain créneau dans :
+                </>
+              ) : (
+                <>L’appel pour le créneau{' '}
+                  <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>
+                    {selectedCreneau?.discipline} ({selectedCreneau?.categorie})
+                  </Text>{' '}
+                  du <Text style={{ fontWeight: '700', color: COLORS.secondary }}>{selectedCreneau?.jour}</Text>{' '}
+                  à{' '}
+                  <Text style={{ fontWeight: '800', color: COLORS.primary }}>
+                    {selectedCreneau?.heureDebut}
+                  </Text>{' '}
+                  commencera dans :
+                </>
+              )}
             </Text>
 
             <View style={styles.timerRow}>
@@ -599,7 +678,9 @@ export default function PresencesScreen({ route }) {
             <View style={styles.countdownNotice}>
               <MaterialCommunityIcons name="lock-clock" size={16} color={COLORS.warning} />
               <Text style={styles.countdownNoticeText}>
-                La saisie de l'appel se déverrouillera automatiquement dès {selectedCreneau?.heureDebut}.
+                {slotStatus === 'ended'
+                  ? `L’appel reprend à ${selectedCreneau?.heureDebut} lors du prochain ${selectedCreneau?.jour}.`
+                  : `La saisie se déverrouille automatiquement dès ${selectedCreneau?.heureDebut}.`}
               </Text>
             </View>
           </View>
@@ -629,13 +710,7 @@ export default function PresencesScreen({ route }) {
             {/* QR Scan Action Button */}
             <TouchableOpacity
               style={[styles.qrScanBtn, (isFuture || noOpenSeason) && { opacity: 0.5 }]}
-              onPress={() => {
-                if (isNotStartedYet) {
-                  Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
-                  return;
-                }
-                setQrScannerVisible(true);
-              }}
+              onPress={() => setQrScannerVisible(true)}
               disabled={isFuture || noOpenSeason}
               activeOpacity={0.8}
             >
@@ -786,17 +861,23 @@ export default function PresencesScreen({ route }) {
           {adherents.length > 0 && (
             <View style={styles.footer}>
               <TouchableOpacity
-                style={[styles.saveBtn, (isFuture || isNotStartedYet || noOpenSeason) && { backgroundColor: COLORS.textMuted }]}
+                style={[styles.saveBtn, (isFuture || isBlocked || noOpenSeason) && { backgroundColor: COLORS.textMuted }]}
                 onPress={handleSave}
-                disabled={saving || isFuture || isNotStartedYet || noOpenSeason}
+                disabled={saving || isFuture || isBlocked || noOpenSeason}
               >
-                <MaterialCommunityIcons name={isFuture || isNotStartedYet ? 'cancel' : 'content-save'} size={20} color="#FFF" />
+                <MaterialCommunityIcons
+                  name={isFuture || isBlocked ? 'cancel' : 'content-save'}
+                  size={20}
+                  color="#FFF"
+                />
                 <Text style={styles.saveBtnText}>
                   {noOpenSeason
                     ? 'Saison ouverte requise'
                     : isFuture
                     ? 'Date future (Saisie interdite)'
-                    : isNotStartedYet
+                    : slotStatus === 'ended'
+                    ? 'Créneau terminé'
+                    : slotStatus === 'not_started'
                     ? 'Créneau non débuté'
                     : saving
                     ? 'Enregistrement...'
