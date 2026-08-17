@@ -18,7 +18,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "CMBClub a besoin d'accéder à votre caméra pour prendre des photos d'adhérents."
+          "cameraPermission": "CMBClub a besoin d'accéder à votre caméra pour prendre des photos et scanner les QR codes d'appel et de présence.",
+          "barcodeScannerEnabled": true
         }
       ],
       [

@@ -7,7 +7,8 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
-import { CATEGORIES } from '../../utils/categories';
+import { CATEGORIES, getEffectiveCategory } from '../../utils/categories';
+import QrAttendanceScannerModal from '../../components/QrAttendanceScannerModal';
 
 const getLocalDateString = (d = new Date()) => {
   const year = d.getFullYear();
@@ -64,7 +65,8 @@ export default function PresencesScreen({ route }) {
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
 
   const {
-    creneaux, saisonActive, loadCreneaux, loadSaisons,
+    creneaux, adherents: storeAdherents, saisonActive,
+    loadCreneaux, loadSaisons, loadAdherents,
     getEligibleAdherents, getPresencesSeance, savePresencesSeance,
   } = useStore();
 
@@ -82,6 +84,7 @@ export default function PresencesScreen({ route }) {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(new Date());
+  const [qrScannerVisible, setQrScannerVisible] = useState(false);
 
   // Only show slots matching today's day of the week
   const todayJour = useMemo(() => getTodayJour(), []);
@@ -103,13 +106,12 @@ export default function PresencesScreen({ route }) {
     return selectedCreneau?.jour || todayJour;
   }, [selectedCreneau, todayJour]);
 
-  // Seuls les créneaux du jour du créneau sélectionné (ex: Mercredi uniquement)
+  // Seuls les créneaux du jour du créneau sélectionné
   const visibleSlots = useMemo(() => {
     return creneaux.filter(c => c.jour === activeJour);
   }, [creneaux, activeJour]);
 
   // Calcul du temps restant jusqu'au début du créneau sélectionné
-  // On utilise directement le jour du créneau (pas dateSeance qui peut être désync)
   const slotStartDateTime = useMemo(() => {
     if (!selectedCreneau?.heureDebut || !selectedCreneau?.jour) return null;
     const dateForSlot = getDateForJour(selectedCreneau.jour);
@@ -139,52 +141,27 @@ export default function PresencesScreen({ route }) {
     if (!slotStartDateTime || !isNotStartedYet) return null;
     const diffMs = slotStartDateTime.getTime() - now.getTime();
     if (diffMs <= 0) return null;
-
-    const totalSeconds = Math.floor(diffMs / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    const hh = String(hours).padStart(2, '0');
-    const mm = String(minutes).padStart(2, '0');
-    const ss = String(seconds).padStart(2, '0');
-
-    return { hh, mm, ss, totalSeconds };
-  }, [now, slotStartDateTime, isNotStartedYet]);
-
-  // Synchronisation lors de la navigation depuis "Horaires & Créneaux"
-  useEffect(() => {
-    const paramId = route?.params?.creneauId;
-    if (paramId) {
-      setSelectedCreneauId(paramId);
-      const target = creneaux.find(c => c.id === paramId);
-      if (target?.jour) {
-        setDateSeance(getDateForJour(target.jour));
-      }
-    }
-  }, [route?.params?.creneauId, creneaux]);
-
-  // Auto-select : seulement si aucun créneau n'est déjà sélectionné (ex: navigation depuis CreneauxScreen)
-  useEffect(() => {
-    if (route?.params?.creneauId) return; // créneau déjà choisi par navigation
-    if (selectedCreneauId) return;        // déjà sélectionné manuellement
-    if (creneauxDuJour.length > 0) {
-      setSelectedCreneauId(creneauxDuJour[0].id);
-    }
-  }, [creneauxDuJour]);
+    const totalSec = Math.floor(diffMs / 1000);
+    const hh = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+    const ss = String(totalSec % 60).padStart(2, '0');
+    return { hh, mm, ss };
+  }, [slotStartDateTime, now, isNotStartedYet]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      await loadSaisons();
-      await loadCreneaux();
-      const currentCreneaux = useStore.getState().creneaux;
-      const currentSaison = useStore.getState().saisonActive;
+      let currentCreneaux = creneaux;
+      let currentSaison = saisonActive;
 
+      if (!currentCreneaux || currentCreneaux.length === 0) {
+        currentCreneaux = await loadCreneaux();
+      }
       if (!currentSaison) {
-        setAdherents([]);
-        setPresenceMap({});
-        return;
+        currentSaison = await loadSaisons();
+      }
+      if (loadAdherents) {
+        await loadAdherents();
       }
 
       const targetCreneau = currentCreneaux.find(c => c.id === selectedCreneauId) || currentCreneaux[0] || null;
@@ -218,7 +195,7 @@ export default function PresencesScreen({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [selectedCreneauId, dateSeance, getEligibleAdherents, getPresencesSeance, loadCreneaux, loadSaisons]);
+  }, [selectedCreneauId, dateSeance, getEligibleAdherents, getPresencesSeance, loadCreneaux, loadSaisons, loadAdherents]);
 
   useEffect(() => {
     loadData();
@@ -269,10 +246,10 @@ export default function PresencesScreen({ route }) {
       Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
       return;
     }
-    const now = new Date();
-    const timeStr = getCurrentTimeString(now);
+    const currentNow = new Date();
+    const timeStr = getCurrentTimeString(currentNow);
     const startStr = selectedCreneau?.heureDebut;
-    const isLate = isLateBy20Min(startStr, now);
+    const isLate = isLateBy20Min(startStr, currentNow);
 
     let finalStatut = targetStatut;
     let autoText = '';
@@ -320,80 +297,119 @@ export default function PresencesScreen({ route }) {
       Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
       return;
     }
-    const now = new Date();
-    const timeStr = getCurrentTimeString(now);
+    const currentNow = new Date();
+    const timeStr = getCurrentTimeString(currentNow);
     const startStr = selectedCreneau?.heureDebut;
-    const isLate = isLateBy20Min(startStr, now);
+    const isLate = isLateBy20Min(startStr, currentNow);
     const finalStatut = isLate ? 'retard' : 'present';
     const autoText = isLate ? `Retard (${timeStr} - >20 min créneau ${startStr || ''})` : `Présent à ${timeStr}`;
 
     setPresenceMap(prev => {
-      const next = { ...prev };
-      Object.keys(next).forEach(id => {
-        next[id] = { ...next[id], statut: finalStatut, remarque: autoText };
+      const nextMap = { ...prev };
+      adherents.forEach(a => {
+        const existingRemarque = nextMap[a.id]?.remarque || '';
+        let newRemarque = autoText;
+        if (existingRemarque && !/^(Présent à|Absent \(|Retard \()/i.test(existingRemarque)) {
+          newRemarque = `${autoText} - ${existingRemarque}`;
+        }
+        nextMap[a.id] = {
+          statut: finalStatut,
+          remarque: newRemarque,
+        };
       });
-      return next;
+      return nextMap;
     });
   };
 
-  const handleSave = async () => {
-    if (!saisonActive) {
-      Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant de gérer les absences.');
-      return;
-    }
+  // Traitement lors du scan QR Code d'un adhérent
+  const handleQrAdherentScanned = (adherent) => {
     if (isNotStartedYet) {
-      Alert.alert('Action interdite', 'L\'enregistrement des présences est impossible avant le début du créneau.');
+      return { statutText: 'Créneau non débuté', timeStr: '' };
+    }
+    const currentNow = new Date();
+    const timeStr = getCurrentTimeString(currentNow);
+    const startStr = selectedCreneau?.heureDebut;
+    const isLate = isLateBy20Min(startStr, currentNow);
+    const finalStatut = isLate ? 'retard' : 'present';
+    const autoText = isLate
+      ? `Retard (${timeStr} - >20 min créneau ${startStr || ''} · QR Scan)`
+      : `Présent à ${timeStr} (QR Scan)`;
+
+    // S'assurer que l'adhérent fait partie de la liste affichée
+    setAdherents(prev => {
+      if (prev.some(a => a.id === adherent.id)) return prev;
+      return [...prev, adherent];
+    });
+
+    setPresenceMap(prev => {
+      const existingRemarque = prev[adherent.id]?.remarque || '';
+      let newRemarque = autoText;
+      if (existingRemarque && !/^(Présent à|Absent \(|Retard \()/i.test(existingRemarque)) {
+        newRemarque = `${autoText} - ${existingRemarque}`;
+      }
+      return {
+        ...prev,
+        [adherent.id]: {
+          statut: finalStatut,
+          remarque: newRemarque,
+        },
+      };
+    });
+
+    return {
+      statutText: isLate ? 'Retard ⏰ (>20 min)' : 'Présent ✅',
+      timeStr,
+    };
+  };
+
+  const handleSave = async () => {
+    if (isNotStartedYet) {
+      Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
       return;
     }
-    const todayStr = getLocalDateString();
-    if (dateSeance > todayStr) {
-      Alert.alert('Action interdite', 'L\'enregistrement des présences est strictement interdit pour les dates futures.');
+    if (!saisonActive) {
+      Alert.alert('Saison requise', 'Impossible d’enregistrer : aucune saison active n’est ouverte.');
       return;
     }
-    const targetCreneau = selectedCreneau || creneaux[0];
-    if (!targetCreneau) {
-      Alert.alert('Erreur', 'Aucun créneau sélectionné.');
-      return;
-    }
+    if (!selectedCreneau) return;
+
     setSaving(true);
     try {
-      const list = Object.entries(presenceMap).map(([adherentId, data]) => ({
-        adherentId,
-        statut: data.statut,
-        remarque: data.remarque,
+      const presencesToSave = adherents.map(a => ({
+        adherentId: a.id,
+        statut: presenceMap[a.id]?.statut || 'present',
+        remarque: presenceMap[a.id]?.remarque || null,
       }));
-      await savePresencesSeance(targetCreneau.id, dateSeance, saisonActive?.id, list);
 
-      const parts = dateSeance.split('-').map(Number);
-      let dateLabel = dateSeance;
-      if (parts.length === 3) {
-        const d = new Date(parts[0], parts[1] - 1, parts[2]);
-        dateLabel = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-      }
-
-      Alert.alert('Présences enregistrées', `Les présences pour la séance du ${dateLabel} ont été enregistrées avec succès.`);
+      await savePresencesSeance(selectedCreneau.id, dateSeance, presencesToSave);
+      Alert.alert('Succès', 'Présences de la séance enregistrées avec succès !');
     } catch (e) {
-      Alert.alert('Erreur', e.message || 'Impossible d’enregistrer.');
+      Alert.alert('Erreur', e.message || 'Impossible d’enregistrer les présences.');
     } finally {
       setSaving(false);
     }
   };
 
+  // Filter Adherents List
   const filteredAdherents = useMemo(() => {
-    const { getEffectiveCategory } = require('../../utils/categories');
+    const listToFilter = scopeFilter === 'tous' ? (storeAdherents && storeAdherents.length > 0 ? storeAdherents : adherents) : adherents;
+    return listToFilter.filter(a => {
+      const p = presenceMap[a.id] || { statut: 'present' };
 
-    return adherents.filter(a => {
-      // Status Filter
-      const matchesStatus = statusFilter === 'tous' || (presenceMap[a.id]?.statut || 'present') === statusFilter;
+      // Status filter
+      let matchesStatus = true;
+      if (statusFilter !== 'tous') {
+        matchesStatus = p.statut === statusFilter;
+      }
 
       // Search Query
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch = !q ||
-        a.nom.toLowerCase().includes(q) ||
-        a.prenom.toLowerCase().includes(q) ||
-        a.code.toLowerCase().includes(q);
+        (a.nom || '').toLowerCase().includes(q) ||
+        (a.prenom || '').toLowerCase().includes(q) ||
+        (a.code || '').toLowerCase().includes(q);
 
-      // Scope Filter (creneau vs tous)
+      // Scope filter
       let matchesScope = true;
       if (scopeFilter === 'creneau' && selectedCreneau) {
         const creneauDiscip = (selectedCreneau.discipline || '').trim().toLowerCase();
@@ -409,7 +425,6 @@ export default function PresencesScreen({ route }) {
           adhDiscip.includes(creneauDiscip) ||
           creneauDiscip.includes(adhDiscip);
 
-        // Respecter la catégorie forcée par l'admin (categorieOverride)
         const catObj = getEffectiveCategory(a);
         const catLabel = (catObj?.label || '').trim().toLowerCase();
         const matchCat = creneauCatList.length === 0 ||
@@ -422,7 +437,7 @@ export default function PresencesScreen({ route }) {
 
       return matchesStatus && matchesSearch && matchesScope;
     });
-  }, [adherents, presenceMap, statusFilter, searchQuery, scopeFilter, selectedCreneau]);
+  }, [adherents, storeAdherents, presenceMap, statusFilter, searchQuery, scopeFilter, selectedCreneau]);
 
   // Quick Stats
   const statsSummary = useMemo(() => {
@@ -435,8 +450,6 @@ export default function PresencesScreen({ route }) {
     });
     return { total: filteredAdherents.length, presents, absents, retards };
   }, [presenceMap, filteredAdherents]);
-
-  const catObj = selectedCreneau ? CATEGORIES.find(c => c.label === selectedCreneau.categorie) : null;
 
   const todayStr = getLocalDateString();
   const isToday = dateSeance === todayStr;
@@ -454,7 +467,7 @@ export default function PresencesScreen({ route }) {
         </View>
       )}
 
-      {/* Creneaux Selector - filtré uniquement par le jour sélectionné */}
+      {/* Creneaux Selector - filtré par le jour actif */}
       <View style={styles.selectorSection}>
         <View style={styles.selectorHeader}>
           <MaterialCommunityIcons name="calendar-clock" size={14} color={COLORS.primary} />
@@ -593,8 +606,8 @@ export default function PresencesScreen({ route }) {
         </View>
       ) : (
         <>
-          {/* Scope Filter & Search */}
-          <View style={styles.filterRow}>
+          {/* Action Toolbar with Scope switch and QR Scanner Button */}
+          <View style={styles.actionToolbar}>
             <View style={styles.scopeSwitch}>
               <TouchableOpacity
                 style={[styles.scopeBtn, scopeFilter === 'creneau' && styles.scopeBtnActive]}
@@ -612,6 +625,23 @@ export default function PresencesScreen({ route }) {
                 <Text style={[styles.scopeText, scopeFilter === 'tous' && styles.scopeTextActive]}>Tous les adhérents</Text>
               </TouchableOpacity>
             </View>
+
+            {/* QR Scan Action Button */}
+            <TouchableOpacity
+              style={[styles.qrScanBtn, (isFuture || noOpenSeason) && { opacity: 0.5 }]}
+              onPress={() => {
+                if (isNotStartedYet) {
+                  Alert.alert('Créneau non débuté', 'L\'appel est bloqué jusqu\'au début du créneau.');
+                  return;
+                }
+                setQrScannerVisible(true);
+              }}
+              disabled={isFuture || noOpenSeason}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="qrcode-scan" size={16} color="#FFF" />
+              <Text style={styles.qrScanBtnText}>Scanner QR</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Search Bar */}
@@ -709,7 +739,7 @@ export default function PresencesScreen({ route }) {
                       )}
                     </View>
 
-                    {/* Status Toggle Buttons - Seuls Présent et Absent */}
+                    {/* Status Toggle Buttons - Présent et Absent */}
                     <View style={styles.statusRow}>
                       <TouchableOpacity
                         style={[
@@ -738,7 +768,7 @@ export default function PresencesScreen({ route }) {
                       </TouchableOpacity>
                     </View>
 
-                    {/* Optional Note input */}
+                    {/* Note input */}
                     <TextInput
                       style={styles.remarqueInput}
                       value={current.remarque}
@@ -777,6 +807,15 @@ export default function PresencesScreen({ route }) {
           )}
         </>
       )}
+
+      {/* QR Code Attendance Scanner Modal */}
+      <QrAttendanceScannerModal
+        visible={qrScannerVisible}
+        onClose={() => setQrScannerVisible(false)}
+        allAdherents={storeAdherents && storeAdherents.length > 0 ? storeAdherents : adherents}
+        onAdherentScanned={handleQrAdherentScanned}
+        selectedCreneau={selectedCreneau}
+      />
     </View>
   );
 }
@@ -883,27 +922,27 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     gap: 6,
     backgroundColor: COLORS.bgInput,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: RADIUS.md,
+    paddingVertical: 6,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   dateInput: {
     color: COLORS.textPrimary,
     fontSize: 13,
-    fontWeight: '700',
-    minWidth: 95,
+    fontWeight: '600',
+    padding: 0,
+    width: 85,
   },
   dateShortcuts: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   shortcutChip: {
-    backgroundColor: COLORS.bgInput,
     paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.bgInput,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -918,17 +957,40 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   },
   shortcutTextActive: {
     color: COLORS.primary,
-    fontWeight: '800',
+    fontWeight: '700',
   },
-  filterRow: {
+  markAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.success + '15',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.success + '30',
+  },
+  markAllText: {
+    color: COLORS.success,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  actionToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 10,
+    paddingBottom: 4,
+    gap: 10,
   },
   scopeSwitch: {
+    flex: 1,
     flexDirection: 'row',
     backgroundColor: COLORS.bgInput,
-    borderRadius: RADIUS.md,
     padding: 3,
+    borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -953,13 +1015,29 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: '#FFF',
     fontWeight: '700',
   },
+  qrScanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    ...SHADOWS.button,
+  },
+  qrScanBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: 6,
+    marginBottom: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     backgroundColor: COLORS.bgCard,
@@ -973,37 +1051,25 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     fontSize: 13,
     padding: 0,
   },
-  markAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: COLORS.success + '15',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.success + '30',
-  },
-  markAllText: { color: COLORS.success, fontSize: 12, fontWeight: '700' },
 
   statsBar: {
     flexDirection: 'row',
+    gap: 8,
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 6,
+    marginBottom: 8,
   },
   statPill: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: 8,
     backgroundColor: COLORS.bgCard,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   statPillActive: {
-    backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary + '20',
   },
   statPillActiveSuccess: {
     backgroundColor: COLORS.success,
@@ -1017,15 +1083,11 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     backgroundColor: COLORS.warning,
     borderColor: COLORS.warning,
   },
-  statPillActiveSecondary: {
-    backgroundColor: COLORS.secondary,
-    borderColor: COLORS.secondary,
-  },
-  statVal: { fontSize: 14, fontWeight: '800' },
-  statLbl: { color: COLORS.textMuted, fontSize: 10, fontWeight: '600' },
+  statVal: { fontSize: 16, fontWeight: '800' },
+  statLbl: { color: COLORS.textMuted, fontSize: 10, fontWeight: '600', marginTop: 2 },
 
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 30, gap: 12 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 20, gap: 10 },
 
   emptyContainer: {
     alignItems: 'center',
@@ -1034,7 +1096,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     gap: 12,
   },
   emptyTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '700' },
-  emptyText: { color: COLORS.textMuted, fontSize: 13, textAlign: 'center' },
+  emptyText: { color: COLORS.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 18 },
 
   adherentCard: {
     backgroundColor: COLORS.bgCard,
@@ -1050,12 +1112,16 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  avatar: { width: 44, height: 44 },
-  photo: { width: 44, height: 44, borderRadius: 22 },
-  photoPlaceholder: {
+  avatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
+    overflow: 'hidden',
+  },
+  photo: { width: '100%', height: '100%' },
+  photoPlaceholder: {
+    width: '100%',
+    height: '100%',
     backgroundColor: COLORS.bgInput,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1063,46 +1129,54 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   photoIcon: { fontSize: 20 },
   adherentInfo: { flex: 1 },
   adherentName: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' },
-  adherentCode: { color: COLORS.primary, fontSize: 12, fontWeight: '600' },
+  adherentCode: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
   retardBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: COLORS.warning + '20',
-    borderColor: COLORS.warning,
-    borderWidth: 1,
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.warning,
   },
   retardBadgeText: {
     color: COLORS.warning,
-    fontSize: 10,
-    fontWeight: '800',
+    fontSize: 11,
+    fontWeight: '700',
   },
 
   statusRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
   },
   statusBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 6,
     paddingVertical: 8,
     borderRadius: RADIUS.md,
     backgroundColor: COLORS.bgInput,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  statusBtnText: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '700' },
-  textActive: { color: '#FFF' },
-  btnPresent: { backgroundColor: COLORS.success, borderColor: COLORS.success },
-  btnAbsent: { backgroundColor: COLORS.danger, borderColor: COLORS.danger },
-  btnRetard: { backgroundColor: COLORS.warning, borderColor: COLORS.warning },
-  btnExcuse: { backgroundColor: COLORS.secondary, borderColor: COLORS.secondary },
+  statusBtnText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
+  btnPresent: {
+    backgroundColor: COLORS.success,
+    borderColor: COLORS.success,
+  },
+  btnRetard: {
+    backgroundColor: COLORS.warning,
+    borderColor: COLORS.warning,
+  },
+  btnAbsent: {
+    backgroundColor: COLORS.danger,
+    borderColor: COLORS.danger,
+  },
+  textActive: { color: '#FFF', fontWeight: '800' },
 
   remarqueInput: {
     backgroundColor: COLORS.bgInput,
@@ -1116,7 +1190,8 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   },
 
   footer: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: COLORS.bgCard,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
