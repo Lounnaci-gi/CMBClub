@@ -1642,26 +1642,6 @@ function parseCreneauMinutes(timeStr) {
   return h * 60 + m;
 }
 
-async function checkCreneauOverlap(db, creneau) {
-  const existing = await db.getAllAsync(
-    'SELECT * FROM creneaux WHERE jour = ? AND LOWER(discipline) = LOWER(?) AND LOWER(categorie) = LOWER(?) AND id != ?',
-    [creneau.jour, creneau.discipline, creneau.categorie, creneau.id || '']
-  );
-
-  const newStart = parseCreneauMinutes(creneau.heureDebut);
-  const newEnd = parseCreneauMinutes(creneau.heureFin);
-
-  for (const item of existing) {
-    const itemStart = parseCreneauMinutes(item.heureDebut);
-    const itemEnd = parseCreneauMinutes(item.heureFin);
-    if (!isNaN(newStart) && !isNaN(newEnd) && !isNaN(itemStart) && !isNaN(itemEnd)) {
-      if (newStart < itemEnd && itemStart < newEnd) {
-        throw new Error(`Chevauchement interdit avec le créneau existant ${item.heureDebut} - ${item.heureFin}`);
-      }
-    }
-  }
-}
-
 export async function createCreneau(creneau) {
   if (isCloudflareEnabled()) {
     try {
@@ -1673,7 +1653,6 @@ export async function createCreneau(creneau) {
   }
   const db = await getDatabase();
   await requireOpenActiveSeason(db);
-  await checkCreneauOverlap(db, creneau);
 
   const createdAt = creneau.createdAt || new Date().toISOString();
   await db.runAsync(
@@ -1702,7 +1681,6 @@ export async function updateCreneau(creneau) {
     }
   }
   const db = await getDatabase();
-  await checkCreneauOverlap(db, creneau);
 
   await db.runAsync(
     `UPDATE creneaux SET discipline = ?, categorie = ?, jour = ?, heureDebut = ?, heureFin = ?, lieu = ?, remarque = ? WHERE id = ?`,
@@ -1764,7 +1742,10 @@ export async function getEligibleAdherentsForCreneau(creneauId, saisonId) {
   const { getCategoryByAge } = require('../utils/categories');
 
   const creneauDiscip = (creneau.discipline || '').trim().toLowerCase();
-  const creneauCat = (creneau.categorie || '').trim().toLowerCase();
+  const creneauCatList = (creneau.categorie || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
 
   const { CATEGORIES } = require('../utils/categories');
 
@@ -1781,9 +1762,10 @@ export async function getEligibleAdherentsForCreneau(creneauId, saisonId) {
       ? (CATEGORIES.find(c => c.label === a.categorieOverride) || getCategoryByAge(a.dateNaissance))
       : getCategoryByAge(a.dateNaissance);
     const catLabel = (catObj?.label || '').trim().toLowerCase();
-    const matchCat = !creneauCat ||
-      creneauCat.includes('tout') ||
-      catLabel === creneauCat;
+    const matchCat = creneauCatList.length === 0 ||
+      creneauCatList.includes('tout') ||
+      creneauCatList.includes('toutes') ||
+      creneauCatList.includes(catLabel);
 
     let score = 0;
     if (matchDisc && matchCat) score = 2;

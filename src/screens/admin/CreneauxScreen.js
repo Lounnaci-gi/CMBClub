@@ -29,7 +29,7 @@ export default function CreneauxScreen({ navigation }) {
 
   // Form State
   const [discipline, setDiscipline] = useState('');
-  const [categorie, setCategorie] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState([]);
   const [jour, setJour] = useState('Lundi');
   const [heureDebut, setHeureDebut] = useState('17:00');
   const [heureFin, setHeureFin] = useState('18:30');
@@ -63,7 +63,11 @@ export default function CreneauxScreen({ navigation }) {
     if (item) {
       setEditingCreneau(item);
       setDiscipline(item.discipline);
-      setCategorie(item.categorie);
+      const parsedCats = (item.categorie || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      setSelectedCategories(parsedCats.length > 0 ? parsedCats : [CATEGORIES[0]?.label || 'Poussin']);
       setJour(item.jour);
       setHeureDebut(item.heureDebut);
       setHeureFin(item.heureFin);
@@ -72,7 +76,7 @@ export default function CreneauxScreen({ navigation }) {
     } else {
       setEditingCreneau(null);
       setDiscipline(disciplineList[0] || 'KickBoxing');
-      setCategorie(CATEGORIES[0]?.label || 'Poussin');
+      setSelectedCategories([CATEGORIES[0]?.label || 'Poussin']);
       setJour('Lundi');
       setHeureDebut('17:00');
       setHeureFin('18:30');
@@ -80,6 +84,28 @@ export default function CreneauxScreen({ navigation }) {
       setRemarque('');
     }
     setModalVisible(true);
+  };
+
+  const toggleCategory = (catLabel) => {
+    setSelectedCategories(prev => {
+      if (prev.includes(catLabel)) {
+        if (prev.length === 1) {
+          Alert.alert('Information', 'Un créneau doit avoir au moins une catégorie.');
+          return prev;
+        }
+        return prev.filter(c => c !== catLabel);
+      } else {
+        return [...prev, catLabel];
+      }
+    });
+  };
+
+  const selectAllCategories = () => {
+    setSelectedCategories(CATEGORIES.map(c => c.label));
+  };
+
+  const clearAllCategories = () => {
+    setSelectedCategories([CATEGORIES[0]?.label || 'Poussin']);
   };
 
   const parseTimeToMinutes = (timeStr) => {
@@ -95,8 +121,8 @@ export default function CreneauxScreen({ navigation }) {
   };
 
   const handleSave = async () => {
-    if (!discipline || !categorie || !jour || !heureDebut || !heureFin) {
-      Alert.alert('Champs requis', 'Veuillez remplir tous les champs obligatoires.');
+    if (!discipline || selectedCategories.length === 0 || !jour || !heureDebut || !heureFin) {
+      Alert.alert('Champs requis', 'Veuillez sélectionner au moins une catégorie et remplir tous les champs obligatoires.');
       return;
     }
 
@@ -115,38 +141,7 @@ export default function CreneauxScreen({ navigation }) {
       return;
     }
 
-    // Vérification de chevauchement : même jour, même discipline, même catégorie
-    const conflictingSlot = creneaux.find(item => {
-      if (editingCreneau && item.id === editingCreneau.id) {
-        return false;
-      }
-      if (item.jour !== jour) {
-        return false;
-      }
-      if ((item.discipline || '').trim().toLowerCase() !== discipline.trim().toLowerCase()) {
-        return false;
-      }
-      if ((item.categorie || '').trim().toLowerCase() !== categorie.trim().toLowerCase()) {
-        return false;
-      }
-
-      const itemStart = parseTimeToMinutes(item.heureDebut);
-      const itemEnd = parseTimeToMinutes(item.heureFin);
-      if (isNaN(itemStart) || isNaN(itemEnd)) {
-        return false;
-      }
-
-      // Chevauchement si (start1 < end2) ET (start2 < end1)
-      return startMinutes < itemEnd && itemStart < endMinutes;
-    });
-
-    if (conflictingSlot) {
-      Alert.alert(
-        'Chevauchement interdit ⚠️',
-        `Un créneau existe déjà pour ${discipline} (${categorie}) le ${jour} entre ${conflictingSlot.heureDebut} et ${conflictingSlot.heureFin}.\n\nLes créneaux d'une même catégorie et discipline ne peuvent pas se chevaucher.`
-      );
-      return;
-    }
+    const categoriesString = selectedCategories.join(', ');
 
     setSubmitting(true);
     try {
@@ -154,7 +149,7 @@ export default function CreneauxScreen({ navigation }) {
         await updateCreneau({
           id: editingCreneau.id,
           discipline,
-          categorie,
+          categorie: categoriesString,
           jour,
           heureDebut: cleanStart,
           heureFin: cleanEnd,
@@ -165,7 +160,7 @@ export default function CreneauxScreen({ navigation }) {
         await createCreneau({
           id: `creneau-${Date.now()}`,
           discipline,
-          categorie,
+          categorie: categoriesString,
           jour,
           heureDebut: cleanStart,
           heureFin: cleanEnd,
@@ -205,7 +200,15 @@ export default function CreneauxScreen({ navigation }) {
   const filteredCreneaux = useMemo(() => {
     return creneaux.filter(item => {
       const matchDisc = selectedDisciplineFilter === 'Toutes' || item.discipline === selectedDisciplineFilter;
-      const matchCat = selectedCategoryFilter === 'Toutes' || item.categorie === selectedCategoryFilter;
+      
+      const itemCats = (item.categorie || '')
+        .split(',')
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      const matchCat = selectedCategoryFilter === 'Toutes' ||
+        itemCats.includes(selectedCategoryFilter.toLowerCase());
+
       const matchJour = selectedJourFilter === 'Tous' || item.jour === selectedJourFilter;
 
       const q = searchQuery.toLowerCase().trim();
@@ -234,7 +237,7 @@ export default function CreneauxScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Search Bar (Style identique à Présences) */}
+      {/* Search Bar */}
       <View style={styles.searchContainer}>
         <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
         <TextInput
@@ -251,7 +254,7 @@ export default function CreneauxScreen({ navigation }) {
         ) : null}
       </View>
 
-      {/* Selecteur par Jour (Style identique à Présences) */}
+      {/* Selecteur par Jour */}
       <View style={styles.selectorSection}>
         <View style={styles.selectorHeader}>
           <MaterialCommunityIcons name="calendar-today" size={14} color={COLORS.primary} />
@@ -336,7 +339,11 @@ export default function CreneauxScreen({ navigation }) {
           </View>
         ) : (
           filteredCreneaux.map((item) => {
-            const catObj = CATEGORIES.find(c => c.label === item.categorie);
+            const itemCats = (item.categorie || '')
+              .split(',')
+              .map(s => s.trim())
+              .filter(Boolean);
+
             return (
               <View key={item.id} style={styles.card}>
                 <View style={styles.cardHeader}>
@@ -345,9 +352,17 @@ export default function CreneauxScreen({ navigation }) {
                       <MaterialCommunityIcons name="run" size={14} color={COLORS.primary} />
                       <Text style={[styles.discBadgeText, { color: COLORS.primary }]}>{item.discipline}</Text>
                     </View>
-                    <View style={[styles.catBadge, { backgroundColor: (catObj?.color || COLORS.secondary) + '20' }]}>
-                      <Text style={{ fontSize: 11 }}>{catObj?.icon || '⭐'}</Text>
-                      <Text style={[styles.catBadgeText, { color: catObj?.color || COLORS.secondary }]}>{item.categorie}</Text>
+                    <View style={styles.catsBadgeWrap}>
+                      {itemCats.map(catName => {
+                        const catObj = CATEGORIES.find(c => c.label.toLowerCase() === catName.toLowerCase());
+                        const catColor = catObj?.color || COLORS.secondary;
+                        return (
+                          <View key={catName} style={[styles.catBadge, { backgroundColor: catColor + '20', borderColor: catColor + '40', borderWidth: 1 }]}>
+                            <Text style={{ fontSize: 11 }}>{catObj?.icon || '⭐'}</Text>
+                            <Text style={[styles.catBadgeText, { color: catColor }]}>{catName}</Text>
+                          </View>
+                        );
+                      })}
                     </View>
                   </View>
 
@@ -421,20 +436,53 @@ export default function CreneauxScreen({ navigation }) {
                 ))}
               </View>
 
-              {/* Category Selection */}
-              <Text style={styles.fieldLabel}>Catégorie d'adhérent *</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
-                {CATEGORIES.map(c => (
-                  <TouchableOpacity
-                    key={c.label}
-                    style={[styles.optionChip, categorie === c.label && styles.optionChipSelected]}
-                    onPress={() => setCategorie(c.label)}
-                  >
-                    <Text style={{ fontSize: 13 }}>{c.icon}</Text>
-                    <Text style={[styles.optionText, categorie === c.label && styles.optionTextSelected]}>{c.label}</Text>
+              {/* Category Multi-Selection */}
+              <View style={styles.catHeaderRow}>
+                <View>
+                  <Text style={styles.fieldLabel}>Catégories autorisées * ({selectedCategories.length})</Text>
+                  <Text style={styles.fieldHint}>Sélectionnez une ou plusieurs catégories</Text>
+                </View>
+                <View style={styles.catQuickActions}>
+                  <TouchableOpacity onPress={selectAllCategories} style={styles.quickActionBtn}>
+                    <Text style={styles.quickActionText}>Toutes</Text>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
+                  <TouchableOpacity onPress={clearAllCategories} style={styles.quickActionBtn}>
+                    <Text style={styles.quickActionText}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.optionsWrap}>
+                {CATEGORIES.map(c => {
+                  const isChecked = selectedCategories.includes(c.label);
+                  return (
+                    <TouchableOpacity
+                      key={c.label}
+                      style={[
+                        styles.catOptionChip,
+                        isChecked && { backgroundColor: c.color + '22', borderColor: c.color },
+                      ]}
+                      onPress={() => toggleCategory(c.label)}
+                      activeOpacity={0.7}
+                    >
+                      <MaterialCommunityIcons
+                        name={isChecked ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"}
+                        size={16}
+                        color={isChecked ? c.color : COLORS.textMuted}
+                      />
+                      <Text style={{ fontSize: 13 }}>{c.icon}</Text>
+                      <Text
+                        style={[
+                          styles.optionText,
+                          isChecked && { color: c.color, fontWeight: '700' },
+                        ]}
+                      >
+                        {c.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
               {/* Jour Selection */}
               <Text style={styles.fieldLabel}>Jour de la semaine *</Text>
@@ -643,8 +691,10 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     alignItems: 'center',
   },
   cardBadgeGroup: {
+    flex: 1,
     flexDirection: 'row',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 6,
     alignItems: 'center',
   },
   discBadge: {
@@ -656,19 +706,26 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderRadius: RADIUS.full,
   },
   discBadgeText: { fontSize: 12, fontWeight: '700' },
+  catsBadgeWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    alignItems: 'center',
+  },
   catBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: RADIUS.full,
   },
-  catBadgeText: { fontSize: 12, fontWeight: '700' },
+  catBadgeText: { fontSize: 11, fontWeight: '700' },
   actionBtns: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    marginLeft: 8,
   },
   appelBtn: {
     flexDirection: 'row',
@@ -723,7 +780,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     backgroundColor: COLORS.bgCard,
     borderTopLeftRadius: RADIUS.xl,
     borderTopRightRadius: RADIUS.xl,
-    maxHeight: '88%',
+    maxHeight: '90%',
     paddingBottom: 20,
   },
   modalHeader: {
@@ -745,6 +802,37 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     marginTop: 12,
     marginBottom: 6,
   },
+  fieldHint: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: -4,
+    marginBottom: 6,
+  },
+  catHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  catQuickActions: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 6,
+  },
+  quickActionBtn: {
+    backgroundColor: COLORS.bgInput,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  quickActionText: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
   optionsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -764,6 +852,17 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   optionChipSelected: {
     backgroundColor: COLORS.primary + '25',
     borderColor: COLORS.primary,
+  },
+  catOptionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.bgInput,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   optionText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
   optionTextSelected: { color: COLORS.primary, fontWeight: '700' },

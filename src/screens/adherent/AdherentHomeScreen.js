@@ -60,7 +60,12 @@ export default function AdherentHomeScreen() {
     if (!adherent) return [];
     return creneaux.filter(c => {
       const matchDisc = !adherent.discipline || c.discipline.toLowerCase() === adherent.discipline.toLowerCase();
-      const matchCat = !cat || c.categorie.toLowerCase() === cat.label.toLowerCase();
+      const slotCats = (c.categorie || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const matchCat = !cat ||
+        slotCats.length === 0 ||
+        slotCats.includes('tout') ||
+        slotCats.includes('toutes') ||
+        slotCats.includes(cat.label.toLowerCase());
       return matchDisc && matchCat;
     });
   }, [creneaux, adherent, cat]);

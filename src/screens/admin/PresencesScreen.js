@@ -380,7 +380,7 @@ export default function PresencesScreen({ route }) {
   };
 
   const filteredAdherents = useMemo(() => {
-    const { getEffectiveCategory, CATEGORIES } = require('../../utils/categories');
+    const { getEffectiveCategory } = require('../../utils/categories');
 
     return adherents.filter(a => {
       // Status Filter
@@ -397,7 +397,10 @@ export default function PresencesScreen({ route }) {
       let matchesScope = true;
       if (scopeFilter === 'creneau' && selectedCreneau) {
         const creneauDiscip = (selectedCreneau.discipline || '').trim().toLowerCase();
-        const creneauCat = (selectedCreneau.categorie || '').trim().toLowerCase();
+        const creneauCatList = (selectedCreneau.categorie || '')
+          .split(',')
+          .map(s => s.trim().toLowerCase())
+          .filter(Boolean);
 
         const adhDiscip = (a.discipline || '').trim().toLowerCase();
         const matchDisc = !adhDiscip ||
@@ -409,9 +412,10 @@ export default function PresencesScreen({ route }) {
         // Respecter la catégorie forcée par l'admin (categorieOverride)
         const catObj = getEffectiveCategory(a);
         const catLabel = (catObj?.label || '').trim().toLowerCase();
-        const matchCat = !creneauCat ||
-          creneauCat.includes('tout') ||
-          catLabel === creneauCat;
+        const matchCat = creneauCatList.length === 0 ||
+          creneauCatList.includes('tout') ||
+          creneauCatList.includes('toutes') ||
+          creneauCatList.includes(catLabel);
 
         matchesScope = matchDisc && matchCat;
       }
