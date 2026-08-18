@@ -17,6 +17,12 @@ import {
   computeCreanceStatus,
 } from '../services/portefeuilleService';
 
+function logCloudflareFallback(action, err) {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log(`[Cloudflare ${action} fallback]:`, err?.message || err);
+  }
+}
+
 let db = null;
 let dbInitPromise = null;
 
@@ -517,7 +523,7 @@ export async function getConfig() {
       const cfg = await CloudflareAPI.getConfig();
       if (cfg && Object.keys(cfg).length > 0) return cfg;
     } catch (e) {
-      console.warn('Cloudflare getConfig fallback:', e.message);
+      logCloudflareFallback('getConfig', e);
     }
   }
   const db = await getDatabase();
@@ -532,7 +538,7 @@ export async function setConfig(key, value) {
     try {
       await CloudflareAPI.setConfig(key, value);
     } catch (e) {
-      console.warn('Cloudflare setConfig fallback:', e.message);
+      logCloudflareFallback('setConfig', e);
     }
   }
   const db = await getDatabase();
@@ -549,7 +555,7 @@ export async function getSaisons() {
     try {
       return await CloudflareAPI.getSaisons();
     } catch (e) {
-      console.warn('Cloudflare getSaisons fallback:', e.message);
+      logCloudflareFallback('getSaisons', e);
     }
   }
   const db = await getDatabase();
@@ -562,7 +568,7 @@ export async function getSaisonActive() {
       const saison = await CloudflareAPI.getSaisonActive();
       return saison?.statut === 'ouvert' ? saison : null;
     } catch (e) {
-      console.warn('Cloudflare getSaisonActive fallback:', e.message);
+      logCloudflareFallback('getSaisonActive', e);
     }
   }
   const db = await getDatabase();
@@ -617,7 +623,7 @@ export async function createSaison(saison) {
     try {
       await CloudflareAPI.createSaison(saisonToCreate);
     } catch (e) {
-      console.warn('Cloudflare createSaison fallback:', e.message);
+      logCloudflareFallback('createSaison', e);
     }
   }
   const db = await getDatabase();
@@ -638,7 +644,7 @@ export async function activateSaison(saisonId) {
       await CloudflareAPI.activateSaison(saisonId);
     } catch (e) {
       rethrowOpenSeasonError(e);
-      console.warn('Cloudflare activateSaison fallback:', e.message);
+      logCloudflareFallback('activateSaison', e);
     }
   }
   const db = await getDatabase();
@@ -658,7 +664,7 @@ export async function updateSaison(saisonId, { dateDebut, dateFin }) {
     try {
       await CloudflareAPI.updateSaison(saisonId, { dateDebut, dateFin });
     } catch (e) {
-      console.warn('Cloudflare updateSaison fallback:', e.message);
+      logCloudflareFallback('updateSaison', e);
     }
   }
   const db = await getDatabase();
@@ -673,7 +679,7 @@ export async function deleteSaison(saisonId) {
     try {
       await CloudflareAPI.deleteSaison(saisonId);
     } catch (e) {
-      console.warn('Cloudflare deleteSaison fallback:', e.message);
+      logCloudflareFallback('deleteSaison', e);
     }
   }
   const db = await getDatabase();
@@ -719,7 +725,7 @@ export async function closeSaison(saisonId, credentials = {}) {
       if (e.message === 'Identifiants administrateur invalides.') {
         throw e;
       }
-      console.warn('Cloudflare closeSaison fallback:', e.message);
+      logCloudflareFallback('closeSaison', e);
     }
   }
   const newStatut = saison?.statut === 'ouvert' ? 'fermé' : 'ouvert';
@@ -748,7 +754,7 @@ export async function getAdherents(saisonId) {
     try {
       return await CloudflareAPI.getAdherents(saisonId);
     } catch (e) {
-      console.warn('Cloudflare getAdherents fallback:', e.message);
+      logCloudflareFallback('getAdherents', e);
     }
   }
   const db = await getDatabase();
@@ -776,7 +782,7 @@ export async function getAdherentById(id, saisonId) {
     try {
       return await CloudflareAPI.getAdherentById(id);
     } catch (e) {
-      console.warn('Cloudflare getAdherentById fallback:', e.message);
+      logCloudflareFallback('getAdherentById', e);
     }
   }
   const db = await getDatabase();
@@ -825,7 +831,7 @@ export async function createAdherent(adherent) {
       if (e.message && e.message.includes('existe déjà')) {
         throw e;
       }
-      console.warn('Cloudflare createAdherent fallback:', e.message);
+      logCloudflareFallback('createAdherent', e);
     }
   }
   const db = await getDatabase();
@@ -868,7 +874,7 @@ export async function updateAdherent(adherent) {
       if (e.message && e.message.includes('existe déjà')) {
         throw e;
       }
-      console.warn('Cloudflare updateAdherent fallback:', e.message);
+      logCloudflareFallback('updateAdherent', e);
     }
   }
   const db = await getDatabase();
@@ -904,7 +910,7 @@ export async function setAdherentAssure(id, assure, saisonId) {
     try {
       await CloudflareAPI.setAdherentAssure(id, assure, saisonId);
     } catch (e) {
-      console.warn('Cloudflare setAdherentAssure fallback:', e.message);
+      logCloudflareFallback('setAdherentAssure', e);
     }
   }
   const db = await getDatabase();
@@ -947,7 +953,7 @@ export async function deleteAdherent(id) {
     try {
       await CloudflareAPI.deleteAdherent(id);
     } catch (e) {
-      console.warn('Cloudflare deleteAdherent fallback:', e.message);
+      logCloudflareFallback('deleteAdherent', e);
     }
   }
   const db = await getDatabase();
@@ -974,7 +980,7 @@ export async function enrollAdherentInSaison(adherentId, saisonId, dateInscripti
     try {
       await CloudflareAPI.enrollAdherent(adherentId, saisonId, dateInscription, assure);
     } catch (e) {
-      console.warn('Cloudflare enrollAdherent fallback:', e.message);
+      logCloudflareFallback('enrollAdherent', e);
     }
   }
   const db = await getDatabase();
@@ -1103,7 +1109,7 @@ export async function getPaiementsByAdherent(adherentId, saisonId) {
     try {
       return await CloudflareAPI.getPaiements(adherentId, saisonId);
     } catch (e) {
-      console.warn('Cloudflare getPaiements fallback:', e.message);
+      logCloudflareFallback('getPaiements', e);
     }
   }
   if (!adherentId || !saisonId) return [];
@@ -1120,7 +1126,7 @@ export async function getAllPaiementsBySaison(saisonId) {
     try {
       return await CloudflareAPI.getPaiements(null, saisonId);
     } catch (e) {
-      console.warn('Cloudflare getAllPaiementsBySaison fallback:', e.message);
+      logCloudflareFallback('getAllPaiementsBySaison', e);
     }
   }
   const db = await getDatabase();
@@ -1138,7 +1144,7 @@ export async function createPaiement(paiement) {
       await CloudflareAPI.createPaiement(paiement);
     } catch (e) {
       rethrowOpenSeasonError(e);
-      console.warn('Cloudflare createPaiement fallback:', e.message);
+      logCloudflareFallback('createPaiement', e);
     }
   }
   const db = await getDatabase();
@@ -1163,7 +1169,7 @@ export async function updatePaiement(paiement) {
       await CloudflareAPI.updatePaiement(paiement);
     } catch (e) {
       rethrowOpenSeasonError(e);
-      console.warn('Cloudflare updatePaiement fallback:', e.message);
+      logCloudflareFallback('updatePaiement', e);
     }
   }
   const db = await getDatabase();
@@ -1198,7 +1204,7 @@ export async function getStatsBySaison(saisonId) {
     try {
       return await CloudflareAPI.getStats(saisonId);
     } catch (e) {
-      console.warn('Cloudflare getStats fallback:', e.message);
+      logCloudflareFallback('getStats', e);
     }
   }
   const db = await getDatabase();
@@ -1232,7 +1238,7 @@ export async function getUserByCredentials(username, password) {
       const res = await CloudflareAPI.login(username, password);
       if (res?.user) return res.user;
     } catch (e) {
-      console.warn('Cloudflare login fallback to local DB:', e.message);
+      logCloudflareFallback('login', e);
     }
   }
   const db = await getDatabase();
@@ -1302,7 +1308,7 @@ export async function getAdminUser() {
       const admin = await CloudflareAPI.getAdminUser();
       if (admin) return { ...admin, username: decryptUsername(admin.username) };
     } catch (e) {
-      console.warn('Cloudflare getAdminUser fallback:', e.message);
+      logCloudflareFallback('getAdminUser', e);
     }
   }
   const db = await getDatabase();
@@ -1351,7 +1357,7 @@ export async function updateAdminCredentials(newUsername, newPassword) {
     try {
       return await CloudflareAPI.updateAdminCredentials(newUsername, newPassword);
     } catch (e) {
-      console.warn('Cloudflare updateAdminCredentials fallback:', e.message);
+      logCloudflareFallback('updateAdminCredentials', e);
     }
   }
   const db = await getDatabase();
@@ -1544,7 +1550,7 @@ export async function getDisciplines() {
     try {
       return await CloudflareAPI.getDisciplines();
     } catch (e) {
-      console.warn('Cloudflare getDisciplines fallback:', e.message);
+      logCloudflareFallback('getDisciplines', e);
     }
   }
   const db = await getDatabase();
@@ -1556,7 +1562,7 @@ export async function createDiscipline(discipline) {
     try {
       await CloudflareAPI.createDiscipline(discipline);
     } catch (e) {
-      console.warn('Cloudflare createDiscipline fallback:', e.message);
+      logCloudflareFallback('createDiscipline', e);
     }
   }
   const db = await getDatabase();
@@ -1601,7 +1607,7 @@ export async function deleteDiscipline(id) {
     try {
       await CloudflareAPI.deleteDiscipline(id);
     } catch (e) {
-      console.warn('Cloudflare deleteDiscipline fallback:', e.message);
+      logCloudflareFallback('deleteDiscipline', e);
     }
   }
   const db = await getDatabase();
@@ -1625,7 +1631,7 @@ export async function getCreneaux() {
     try {
       return await CloudflareAPI.getCreneaux();
     } catch (e) {
-      console.warn('Cloudflare getCreneaux fallback:', e.message);
+      logCloudflareFallback('getCreneaux', e);
     }
   }
   const db = await getDatabase();
@@ -1648,7 +1654,7 @@ export async function createCreneau(creneau) {
       await CloudflareAPI.createCreneau(creneau);
     } catch (e) {
       rethrowOpenSeasonError(e);
-      console.warn('Cloudflare createCreneau fallback:', e.message);
+      logCloudflareFallback('createCreneau', e);
     }
   }
   const db = await getDatabase();
@@ -1677,7 +1683,7 @@ export async function updateCreneau(creneau) {
     try {
       await CloudflareAPI.updateCreneau(creneau);
     } catch (e) {
-      console.warn('Cloudflare updateCreneau fallback:', e.message);
+      logCloudflareFallback('updateCreneau', e);
     }
   }
   const db = await getDatabase();
@@ -1702,7 +1708,7 @@ export async function deleteCreneau(id) {
     try {
       await CloudflareAPI.deleteCreneau(id);
     } catch (e) {
-      console.warn('Cloudflare deleteCreneau fallback:', e.message);
+      logCloudflareFallback('deleteCreneau', e);
     }
   }
   const db = await getDatabase();
@@ -1717,7 +1723,7 @@ export async function getPresencesBySeance(creneauId, dateSeance) {
     try {
       return await CloudflareAPI.getPresencesBySeance(creneauId, dateSeance);
     } catch (e) {
-      console.warn('Cloudflare getPresencesBySeance fallback:', e.message);
+      logCloudflareFallback('getPresencesBySeance', e);
     }
   }
   const db = await getDatabase();
@@ -1787,7 +1793,7 @@ export async function savePresencesSeance(creneauId, dateSeance, saisonIdOrPrese
       await CloudflareAPI.savePresencesSeance(creneauId, dateSeance, saisonId, presencesList);
     } catch (e) {
       rethrowOpenSeasonError(e);
-      console.warn('Cloudflare savePresencesSeance fallback:', e.message);
+      logCloudflareFallback('savePresencesSeance', e);
     }
   }
   const db = await getDatabase();
@@ -1843,7 +1849,7 @@ export async function getPresencesByAdherent(adherentId, saisonId) {
         return { list: res, total, nbPresents, nbAbsents, nbRetards, nbExcuses, tauxPresence };
       }
     } catch (e) {
-      console.warn('Cloudflare getPresencesByAdherent fallback:', e.message);
+      logCloudflareFallback('getPresencesByAdherent', e);
     }
   }
   const db = await getDatabase();

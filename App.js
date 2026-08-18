@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
 import 'react-native-get-random-values';
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, ActivityIndicator, StyleSheet, Text, StatusBar, Image } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Text, StatusBar, Image, LogBox } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { getDatabase } from './src/database/database';
@@ -9,6 +9,12 @@ import AppNavigator from './src/navigation/AppNavigator';
 import useStore from './src/store/useStore';
 import useTheme from './src/theme/useTheme';
 import { THEME_IDS } from './src/theme/themes';
+
+LogBox.ignoreLogs([
+  'Cloudflare',
+  'Unable to resolve host',
+  'fetch failed',
+]);
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -60,7 +66,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar barStyle={statusBarStyle} backgroundColor={COLORS.bg} />
+        <StatusBar barStyle={statusBarStyle} />
         <AppNavigator />
       </SafeAreaProvider>
     </GestureHandlerRootView>
@@ -73,19 +79,18 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     backgroundColor: COLORS.bg,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
     padding: 24,
+    gap: 16,
   },
   logo: {
     width: 96,
     height: 96,
-    borderRadius: 48,
     marginBottom: 8,
   },
   loadingText: {
-    color: COLORS.textSecondary,
+    color: COLORS.textMuted,
     fontSize: 14,
-    marginTop: 8,
+    fontWeight: '500',
   },
   errorTitle: {
     color: COLORS.danger,

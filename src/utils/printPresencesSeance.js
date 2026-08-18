@@ -41,7 +41,13 @@ export function parsePresenceDetails(statut, remarque = '') {
   let statutBg = '#DCFCE7';
   let statutBorder = '#86EFAC';
 
-  if (statut === 'retard') {
+  if (!statut || statut === 'non_pointe') {
+    statutLabel = 'Non pointé';
+    statutColor = '#64748B';
+    statutBg = '#F1F5F9';
+    statutBorder = '#CBD5E1';
+    time = '-';
+  } else if (statut === 'retard') {
     statutLabel = 'En retard';
     statutColor = '#D97706'; // Ambre
     statutBg = '#FEF3C7';

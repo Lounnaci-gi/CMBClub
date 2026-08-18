@@ -45,5 +45,12 @@ describe('printPresencesSeance utils', () => {
       expect(res.time).toBe('-');
       expect(res.statutLabel).toBe('Présent');
     });
+
+    it('handles null status as non pointé', () => {
+      const res = parsePresenceDetails(null, '');
+      expect(res.time).toBe('-');
+      expect(res.statutLabel).toBe('Non pointé');
+      expect(res.statutColor).toBe('#64748B');
+    });
   });
 });

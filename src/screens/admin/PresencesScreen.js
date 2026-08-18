@@ -44,7 +44,7 @@ export default function PresencesScreen({ route, navigation }) {
   const [selectedJour, setSelectedJour] = useState(todayJour);
   const [selectedCreneauId, setSelectedCreneauId] = useState(initialCreneauId);
   const [dateSeance, setDateSeance] = useState(initialDateSeance);
-  const [statusFilter, setStatusFilter] = useState('tous'); // 'tous' | 'present' | 'absent' | 'retard' | 'excuse'
+  const [statusFilter, setStatusFilter] = useState('tous'); // 'tous' | 'present' | 'absent' | 'retard' | 'non_pointe'
   const [scopeFilter, setScopeFilter] = useState('creneau'); // 'creneau' | 'tous'
   const [searchQuery, setSearchQuery] = useState('');
   const [adherents, setAdherents] = useState([]);
@@ -52,6 +52,8 @@ export default function PresencesScreen({ route, navigation }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [qrScannerVisible, setQrScannerVisible] = useState(false);
 
@@ -133,6 +135,9 @@ export default function PresencesScreen({ route, navigation }) {
       if (loadAdherents) {
         await loadAdherents();
       }
+      if (loadConfig && !config) {
+        await loadConfig();
+      }
 
       // 1. Si un créneau spécifique est déjà sélectionné
       let targetCreneau = null;
@@ -153,6 +158,8 @@ export default function PresencesScreen({ route, navigation }) {
       if (!targetCreneau) {
         setAdherents([]);
         setPresenceMap({});
+        setIsSaved(false);
+        setHasUnsavedChanges(false);
         return;
       }
 
@@ -161,22 +168,27 @@ export default function PresencesScreen({ route, navigation }) {
 
       const existing = await getPresencesSeance(targetCreneau.id, dateSeance);
       const map = {};
+      const hasSavedRecords = existing && existing.length > 0;
 
       eligible.forEach(a => {
         const found = existing.find(p => p.adherentId === a.id);
         if (found) {
           map[a.id] = { statut: found.statut, remarque: found.remarque || '' };
         } else {
-          map[a.id] = { statut: 'present', remarque: '' };
+          // Statut null par défaut au début tant qu'il n'est pas pointé
+          map[a.id] = { statut: null, remarque: '' };
         }
       });
+
       setPresenceMap(map);
+      setIsSaved(hasSavedRecords);
+      setHasUnsavedChanges(false);
     } catch (e) {
       Alert.alert('Erreur', e.message || 'Impossible de charger les présences.');
     } finally {
       setLoading(false);
     }
-  }, [selectedCreneauId, initialCreneauId, dateSeance, getEligibleAdherents, getPresencesSeance, loadCreneaux, loadSaisons, loadAdherents]);
+  }, [selectedCreneauId, initialCreneauId, dateSeance, getEligibleAdherents, getPresencesSeance, loadCreneaux, loadSaisons, loadAdherents, loadConfig, config]);
 
   useEffect(() => {
     loadData();
@@ -193,7 +205,6 @@ export default function PresencesScreen({ route, navigation }) {
     setDateSeance(getDateForJour(day));
     const daySlots = (creneaux || []).filter(c => c.jour === day);
     if (daySlots.length > 0) {
-      // Si aujourd'hui, tenter de sélectionner le créneau en cours / à venir
       if (day === todayJour) {
         const res = findActiveOrUpcomingSlotToday(creneaux, new Date());
         if (res.slot) {
@@ -262,45 +273,54 @@ export default function PresencesScreen({ route, navigation }) {
     const startStr = selectedCreneau?.heureDebut;
     const isLate = isLateBy20Min(startStr, currentNow);
 
-    let finalStatut = targetStatut;
-    let autoText = '';
-
-    if (targetStatut === 'present') {
-      if (isLate) {
-        finalStatut = 'retard';
-        autoText = `Retard (${timeStr} - >20 min créneau ${startStr || ''})`;
-      } else {
-        finalStatut = 'present';
-        autoText = `Présent à ${timeStr}`;
-      }
-    } else if (targetStatut === 'absent') {
-      finalStatut = 'absent';
-      autoText = `Absent (${timeStr})`;
-    }
-
     setPresenceMap(prev => {
-      const existingRemarque = prev[adherentId]?.remarque || '';
+      const currentEntry = prev[adherentId] || { statut: null, remarque: '' };
+      let finalStatut = targetStatut;
+      let autoText = '';
+
+      // Si on reclique sur le statut déjà actif, on le désélectionne (remise à null)
+      if (currentEntry.statut === targetStatut || (targetStatut === 'present' && currentEntry.statut === 'retard')) {
+        finalStatut = null;
+        autoText = '';
+      } else if (targetStatut === 'present') {
+        if (isLate) {
+          finalStatut = 'retard';
+          autoText = `Retard (${timeStr} - >20 min créneau ${startStr || ''})`;
+        } else {
+          finalStatut = 'present';
+          autoText = `Présent à ${timeStr}`;
+        }
+      } else if (targetStatut === 'absent') {
+        finalStatut = 'absent';
+        autoText = `Absent (${timeStr})`;
+      }
+
       let newRemarque = autoText;
+      const existingRemarque = currentEntry.remarque || '';
       if (existingRemarque && !/^(Présent à|Absent \(|Retard \()/i.test(existingRemarque)) {
-        newRemarque = `${autoText} - ${existingRemarque}`;
+        newRemarque = autoText ? `${autoText} - ${existingRemarque}` : existingRemarque;
       }
 
       return {
         ...prev,
         [adherentId]: {
-          ...prev[adherentId],
           statut: finalStatut,
           remarque: newRemarque,
         },
       };
     });
+
+    setIsSaved(false);
+    setHasUnsavedChanges(true);
   };
 
   const handleRemarqueChange = (adherentId, remarque) => {
     setPresenceMap(prev => ({
       ...prev,
-      [adherentId]: { ...prev[adherentId], remarque },
+      [adherentId]: { ...(prev[adherentId] || { statut: null }), remarque },
     }));
+    setIsSaved(false);
+    setHasUnsavedChanges(true);
   };
 
   const handleMarkAllPresent = () => {
@@ -335,6 +355,9 @@ export default function PresencesScreen({ route, navigation }) {
       });
       return nextMap;
     });
+
+    setIsSaved(false);
+    setHasUnsavedChanges(true);
   };
 
   const handleQrAdherentScanned = (adherent) => {
@@ -373,6 +396,9 @@ export default function PresencesScreen({ route, navigation }) {
       };
     });
 
+    setIsSaved(false);
+    setHasUnsavedChanges(true);
+
     return {
       statutText: isLate ? 'Retard ⏰ (>20 min)' : 'Présent ✅',
       timeStr,
@@ -397,14 +423,24 @@ export default function PresencesScreen({ route, navigation }) {
 
     setSaving(true);
     try {
-      const presencesToSave = adherents.map(a => ({
-        adherentId: a.id,
-        statut: presenceMap[a.id]?.statut || 'present',
-        remarque: presenceMap[a.id]?.remarque || null,
-      }));
+      const presencesToSave = adherents
+        .map(a => ({
+          adherentId: a.id,
+          statut: presenceMap[a.id]?.statut || null,
+          remarque: presenceMap[a.id]?.remarque || null,
+        }))
+        .filter(p => p.statut !== null);
+
+      if (presencesToSave.length === 0) {
+        Alert.alert('Pointage requis', 'Veuillez pointer au moins un adhérent (Présent ou Absent) avant d’enregistrer.');
+        setSaving(false);
+        return;
+      }
 
       await savePresencesSeance(selectedCreneau.id, dateSeance, saisonActive.id, presencesToSave);
-      Alert.alert('Succès', 'Présences de la séance enregistrées avec succès !');
+      setIsSaved(true);
+      setHasUnsavedChanges(false);
+      Alert.alert('Succès', 'Présences de la séance enregistrées avec succès ! Vous pouvez maintenant imprimer la feuille d’appel.');
     } catch (e) {
       Alert.alert('Erreur', e.message || 'Impossible d’enregistrer les présences.');
     } finally {
@@ -417,6 +453,19 @@ export default function PresencesScreen({ route, navigation }) {
       Alert.alert('Erreur', 'Veuillez sélectionner un créneau à imprimer.');
       return;
     }
+
+    if (!isSaved || hasUnsavedChanges) {
+      Alert.alert(
+        'Enregistrement requis',
+        'Vous devez d’abord enregistrer l’appel de la séance avant de pouvoir imprimer la feuille d’appel.',
+        [
+          { text: 'Enregistrer maintenant', onPress: handleSave },
+          { text: 'Annuler', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
     const adherentsToPrint = filteredAdherents.length > 0 ? filteredAdherents : adherents;
     setPrinting(true);
     try {
@@ -437,11 +486,15 @@ export default function PresencesScreen({ route, navigation }) {
   const filteredAdherents = useMemo(() => {
     const listToFilter = scopeFilter === 'tous' ? (storeAdherents && storeAdherents.length > 0 ? storeAdherents : adherents) : adherents;
     return listToFilter.filter(a => {
-      const p = presenceMap[a.id] || { statut: 'present' };
+      const p = presenceMap[a.id];
 
       let matchesStatus = true;
       if (statusFilter !== 'tous') {
-        matchesStatus = p.statut === statusFilter;
+        if (statusFilter === 'non_pointe') {
+          matchesStatus = !p || p.statut === null;
+        } else {
+          matchesStatus = p?.statut === statusFilter;
+        }
       }
 
       const q = searchQuery.toLowerCase().trim();
@@ -480,14 +533,15 @@ export default function PresencesScreen({ route, navigation }) {
   }, [adherents, storeAdherents, presenceMap, statusFilter, searchQuery, scopeFilter, selectedCreneau]);
 
   const statsSummary = useMemo(() => {
-    let presents = 0, absents = 0, retards = 0;
+    let presents = 0, absents = 0, retards = 0, nonPointes = 0;
     filteredAdherents.forEach(a => {
-      const p = presenceMap[a.id] || { statut: 'present' };
-      if (p.statut === 'present') presents++;
-      else if (p.statut === 'absent') absents++;
-      else if (p.statut === 'retard') retards++;
+      const p = presenceMap[a.id];
+      if (p?.statut === 'present') presents++;
+      else if (p?.statut === 'retard') retards++;
+      else if (p?.statut === 'absent') absents++;
+      else nonPointes++;
     });
-    return { total: filteredAdherents.length, presents, absents, retards };
+    return { total: filteredAdherents.length, presents, absents, retards, nonPointes };
   }, [presenceMap, filteredAdherents]);
 
   const todayStr = getLocalDateString();
@@ -745,12 +799,19 @@ export default function PresencesScreen({ route, navigation }) {
 
                 {/* Bouton d'impression lorsque le créneau est terminé */}
                 <TouchableOpacity
-                  style={styles.countdownPrintBtn}
+                  style={[
+                    styles.countdownPrintBtn,
+                    (!isSaved || hasUnsavedChanges) && styles.countdownPrintBtnUnsaved,
+                  ]}
                   onPress={handlePrint}
                   disabled={printing}
                   activeOpacity={0.8}
                 >
-                  <MaterialCommunityIcons name="printer" size={18} color="#FFF" />
+                  <MaterialCommunityIcons
+                    name={!isSaved || hasUnsavedChanges ? "printer-alert" : "printer"}
+                    size={18}
+                    color="#FFF"
+                  />
                   <Text style={styles.countdownPrintBtnText}>
                     {printing ? 'Génération du document...' : 'Imprimer la feuille d’appel'}
                   </Text>
@@ -792,12 +853,20 @@ export default function PresencesScreen({ route, navigation }) {
 
                 {/* Print Action Button */}
                 <TouchableOpacity
-                  style={[styles.printBtn, printing && { opacity: 0.6 }]}
+                  style={[
+                    styles.printBtn,
+                    (!isSaved || hasUnsavedChanges) && styles.printBtnUnsaved,
+                    printing && { opacity: 0.6 },
+                  ]}
                   onPress={handlePrint}
                   disabled={printing}
                   activeOpacity={0.8}
                 >
-                  <MaterialCommunityIcons name="printer" size={16} color="#FFF" />
+                  <MaterialCommunityIcons
+                    name={!isSaved || hasUnsavedChanges ? "printer-alert" : "printer"}
+                    size={16}
+                    color="#FFF"
+                  />
                   <Text style={styles.printBtnText}>{printing ? '...' : 'Imprimer'}</Text>
                 </TouchableOpacity>
               </View>
@@ -852,6 +921,16 @@ export default function PresencesScreen({ route, navigation }) {
                   <Text style={[styles.statVal, { color: COLORS.warning }, statusFilter === 'retard' && { color: '#FFF' }]}>{statsSummary.retards}</Text>
                   <Text style={[styles.statLbl, statusFilter === 'retard' && { color: '#FFF' }]}>Retards</Text>
                 </TouchableOpacity>
+
+                {statsSummary.nonPointes > 0 && (
+                  <TouchableOpacity
+                    style={[styles.statPill, { backgroundColor: COLORS.textMuted + '15' }, statusFilter === 'non_pointe' && styles.statPillActiveMuted]}
+                    onPress={() => setStatusFilter('non_pointe')}
+                  >
+                    <Text style={[styles.statVal, { color: COLORS.textMuted }, statusFilter === 'non_pointe' && { color: '#FFF' }]}>{statsSummary.nonPointes}</Text>
+                    <Text style={[styles.statLbl, statusFilter === 'non_pointe' && { color: '#FFF' }]}>En attente</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* Main List */}
@@ -867,12 +946,14 @@ export default function PresencesScreen({ route, navigation }) {
                     <Text style={styles.emptyText}>
                       {statusFilter === 'tous'
                         ? `Aucun adhérent inscrit ne correspond à ce créneau.`
+                        : statusFilter === 'non_pointe'
+                        ? `Tous les adhérents ont déjà été pointés pour cette séance.`
                         : `Aucun adhérent avec le statut "${statusFilter}" pour cette séance.`}
                     </Text>
                   </View>
                 ) : (
                   filteredAdherents.map(adherent => {
-                    const current = presenceMap[adherent.id] || { statut: 'present', remarque: '' };
+                    const current = presenceMap[adherent.id] || { statut: null, remarque: '' };
                     return (
                       <View key={adherent.id} style={styles.adherentCard}>
                         <View style={styles.cardHeader}>
@@ -893,6 +974,11 @@ export default function PresencesScreen({ route, navigation }) {
                             <View style={styles.retardBadge}>
                               <MaterialCommunityIcons name="clock-alert" size={12} color={COLORS.warning} />
                               <Text style={styles.retardBadgeText}>Retard (&gt;20 min)</Text>
+                            </View>
+                          )}
+                          {current.statut === null && (
+                            <View style={styles.nonPointeBadge}>
+                              <Text style={styles.nonPointeBadgeText}>En attente</Text>
                             </View>
                           )}
                         </View>
@@ -929,7 +1015,7 @@ export default function PresencesScreen({ route, navigation }) {
                         {/* Note input */}
                         <TextInput
                           style={styles.remarqueInput}
-                          value={current.remarque}
+                          value={current.remarque || ''}
                           onChangeText={(val) => handleRemarqueChange(adherent.id, val)}
                           placeholder="Remarque (ex: Arrivé à 18h15, Justificatif médical)"
                           placeholderTextColor={COLORS.textMuted}
@@ -944,12 +1030,16 @@ export default function PresencesScreen({ route, navigation }) {
               {adherents.length > 0 && (
                 <View style={styles.footer}>
                   <TouchableOpacity
-                    style={[styles.saveBtn, (isFuture || isBlocked || noOpenSeason) && { backgroundColor: COLORS.textMuted }]}
+                    style={[
+                      styles.saveBtn,
+                      (isFuture || isBlocked || noOpenSeason) && { backgroundColor: COLORS.textMuted },
+                      isSaved && !hasUnsavedChanges && { backgroundColor: COLORS.success },
+                    ]}
                     onPress={handleSave}
                     disabled={saving || isFuture || isBlocked || noOpenSeason}
                   >
                     <MaterialCommunityIcons
-                      name={isFuture || isBlocked ? 'cancel' : 'content-save'}
+                      name={isFuture || isBlocked ? 'cancel' : isSaved && !hasUnsavedChanges ? 'check-circle' : 'content-save'}
                       size={20}
                       color="#FFF"
                     />
@@ -964,6 +1054,8 @@ export default function PresencesScreen({ route, navigation }) {
                         ? 'Créneau non débuté'
                         : saving
                         ? 'Enregistrement...'
+                        : isSaved && !hasUnsavedChanges
+                        ? 'Séance enregistrée ✓'
                         : 'Enregistrer la séance'}
                     </Text>
                   </TouchableOpacity>
@@ -1244,7 +1336,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 4,
-    gap: 10,
+    gap: 8,
   },
   scopeSwitch: {
     flex: 1,
@@ -1269,7 +1361,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   },
   scopeText: {
     color: COLORS.textMuted,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   scopeTextActive: {
@@ -1279,31 +1371,34 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   qrScanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: COLORS.secondary,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: RADIUS.md,
     ...SHADOWS.button,
   },
   qrScanBtnText: {
     color: '#FFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
   printBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: COLORS.primary,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: RADIUS.md,
     ...SHADOWS.button,
   },
+  printBtnUnsaved: {
+    backgroundColor: '#64748B',
+  },
   printBtnText: {
     color: '#FFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
 
@@ -1330,7 +1425,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
 
   statsBar: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
     paddingHorizontal: 16,
     marginBottom: 8,
   },
@@ -1359,8 +1454,12 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     backgroundColor: COLORS.warning,
     borderColor: COLORS.warning,
   },
-  statVal: { fontSize: 16, fontWeight: '800' },
-  statLbl: { color: COLORS.textMuted, fontSize: 10, fontWeight: '600', marginTop: 2 },
+  statPillActiveMuted: {
+    backgroundColor: COLORS.textMuted,
+    borderColor: COLORS.textMuted,
+  },
+  statVal: { fontSize: 15, fontWeight: '800' },
+  statLbl: { color: COLORS.textMuted, fontSize: 9.5, fontWeight: '600', marginTop: 2 },
 
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 20, gap: 10 },
@@ -1421,6 +1520,19 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: COLORS.warning,
     fontSize: 11,
     fontWeight: '700',
+  },
+  nonPointeBadge: {
+    backgroundColor: COLORS.bgInput,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  nonPointeBadgeText: {
+    color: COLORS.textMuted,
+    fontSize: 10.5,
+    fontWeight: '600',
   },
 
   statusRow: {
@@ -1603,6 +1715,9 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     marginTop: 6,
     width: '100%',
     ...SHADOWS.button,
+  },
+  countdownPrintBtnUnsaved: {
+    backgroundColor: '#64748B',
   },
   countdownPrintBtnText: {
     color: '#FFF',
