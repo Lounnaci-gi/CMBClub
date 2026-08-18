@@ -8,14 +8,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
-import PaymentCard from '../../components/PaymentCard';
-import CategoryBadge from '../../components/CategoryBadge';
 import useTheme, { useResponsive } from '../../theme/useTheme';
-import { getCategoryByAge, getEffectiveCategory, calculateAge } from '../../utils/categories';
-import { calculateBalance, PAYMENT_STATUS } from '../../utils/payments';
-import { getAdherentById, getPaiementsByAdherent } from '../../database/database';
+import { getEffectiveCategory, calculateAge } from '../../utils/categories';
+import { calculateBalance } from '../../utils/payments';
+import { getAdherentById, getPaiementsByAdherent, getPresencesByAdherent } from '../../database/database';
+import CategoryBadge from '../../components/CategoryBadge';
+import AdherentCardModal from '../../components/AdherentCardModal';
 
-export default function AdherentHomeScreen() {
+export default function AdherentHomeScreen({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const { isSmall, isTablet, isDesktop, horizontalPadding } = useResponsive();
   const isLarge = isTablet || isDesktop;
@@ -23,12 +23,14 @@ export default function AdherentHomeScreen() {
     () => createStyles(COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding),
     [COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding],
   );
-  const { user, saisonActive, creneaux, loadSaisons, loadCreneaux, getPresencesAdherent, logout } = useStore();
-  const [adherent, setAdherent] = useState(null);
-  const [paiements, setPaiements] = useState([]);
+
+  const { user, saisonActive, creneaux, loadSaisons, loadCreneaux, logout } = useStore();
+
+  const [adherent, setAdherent]         = useState(null);
+  const [paiements, setPaiements]       = useState([]);
   const [presencesData, setPresencesData] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [showAllCreneaux, setShowAllCreneaux] = useState(false);
+  const [refreshing, setRefreshing]     = useState(false);
+  const [showCard, setShowCard]         = useState(false);
 
   const load = useCallback(async () => {
     await Promise.all([loadSaisons(), loadCreneaux()]);
@@ -37,12 +39,14 @@ export default function AdherentHomeScreen() {
     const a = await getAdherentById(user.adherentId);
     setAdherent(a);
     if (a) {
-      const p = saison ? await getPaiementsByAdherent(a.id, saison.id) : [];
+      const [p, pres] = await Promise.all([
+        saison ? getPaiementsByAdherent(a.id, saison.id) : Promise.resolve([]),
+        getPresencesByAdherent(a.id, saison?.id),
+      ]);
       setPaiements(p);
-      const pres = await getPresencesAdherent(a.id, saison?.id);
       setPresencesData(pres);
     }
-  }, [user?.adherentId, loadSaisons, loadCreneaux, getPresencesAdherent]);
+  }, [user?.adherentId, loadSaisons, loadCreneaux]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -52,42 +56,27 @@ export default function AdherentHomeScreen() {
     setRefreshing(false);
   };
 
-  const cat = adherent ? getEffectiveCategory(adherent) : null;
+  const cat     = adherent ? getEffectiveCategory(adherent) : null;
   const balance = calculateBalance(paiements);
-  const retards = paiements.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD);
+  const tauxColor = presencesData
+    ? (presencesData.tauxPresence >= 80 ? COLORS.success
+        : presencesData.tauxPresence >= 50 ? COLORS.warning
+        : COLORS.danger)
+    : COLORS.textMuted;
 
-  const myCreneaux = useMemo(() => {
-    if (!adherent) return [];
-    return creneaux.filter(c => {
-      const matchDisc = !adherent.discipline || c.discipline.toLowerCase() === adherent.discipline.toLowerCase();
-      const slotCats = (c.categorie || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-      const matchCat = !cat ||
-        slotCats.length === 0 ||
-        slotCats.includes('tout') ||
-        slotCats.includes('toutes') ||
-        slotCats.includes(cat.label.toLowerCase());
-      return matchDisc && matchCat;
-    });
-  }, [creneaux, adherent, cat]);
-
-  const displayedCreneaux = showAllCreneaux ? creneaux : myCreneaux;
-
-  const JOURS_ORDER = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
-
-  const groupedCreneaux = useMemo(() => {
-    const map = {};
-    displayedCreneaux.forEach(c => {
-      if (!map[c.jour]) map[c.jour] = [];
-      map[c.jour].push(c);
-    });
-    return JOURS_ORDER
-      .filter(j => map[j] && map[j].length > 0)
-      .map(j => ({ jour: j, list: map[j] }));
-  }, [displayedCreneaux]);
+  // Créneaux du jour
+  const today = new Date().toLocaleDateString('fr-FR', { weekday: 'long' });
+  const todayStr = today.charAt(0).toUpperCase() + today.slice(1);
+  const todayCreneaux = useMemo(() =>
+    creneaux.filter(c => c.jour === todayStr),
+    [creneaux, todayStr]
+  );
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+
+      {/* Header gradient */}
       <LinearGradient colors={[COLORS.bg, COLORS.bgCard]} style={styles.header}>
         <View style={styles.headerInner}>
           <View style={styles.headerTop}>
@@ -118,265 +107,164 @@ export default function AdherentHomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.bodyWrapper}>
-        {!user?.adherentId ? (
-          <View style={styles.empty}>
-            <MaterialCommunityIcons name="account-off" size={48} color={COLORS.textMuted} />
-            <Text style={styles.emptyTitle}>Compte non lié</Text>
-            <Text style={styles.emptyText}>
-              Aucun profil adhérent n'est associé à ce compte. Contactez l'administrateur.
-            </Text>
-          </View>
-        ) : (
-          <>
-            {/* Profile card */}
-            {adherent && (
-              <View style={styles.profileCard}>
-                <View style={styles.avatar}>
-                  {adherent.photo ? (
-                    <Image source={{ uri: adherent.photo }} style={styles.photo} />
-                  ) : (
-                    <View style={[styles.photoPlaceholder, { backgroundColor: (cat?.color || COLORS.primary) + '25' }]}>
-                      <Text style={{ fontSize: 28 }}>{cat?.icon || '👤'}</Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.profileInfo}>
-                  <Text style={styles.profileCode}>{adherent.code}</Text>
-                  {cat && <CategoryBadge category={cat.label} />}
-                  <Text style={styles.profileMeta}>
-                    {calculateAge(adherent.dateNaissance)} ans
-                    {adherent.discipline ? ` · ${adherent.discipline}` : ''}
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Schedule Section */}
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitleNoMargin}>
-                {showAllCreneaux ? 'Tous les créneaux du club' : 'Mes horaires d\'entraînement'}
+          {!user?.adherentId ? (
+            <View style={styles.empty}>
+              <MaterialCommunityIcons name="account-off" size={48} color={COLORS.textMuted} />
+              <Text style={styles.emptyTitle}>Compte non lié</Text>
+              <Text style={styles.emptyText}>
+                Aucun profil adhérent n'est associé à ce compte. Contactez l'administrateur.
               </Text>
-              <TouchableOpacity
-                style={styles.toggleBtn}
-                onPress={() => setShowAllCreneaux(!showAllCreneaux)}
-              >
-                <Text style={styles.toggleBtnText}>
-                  {showAllCreneaux ? 'Mon planning' : 'Tout voir'}
-                </Text>
-              </TouchableOpacity>
             </View>
-
-            <View style={styles.creneauxContainer}>
-              {groupedCreneaux.length === 0 ? (
-                <View style={styles.emptyCreneauxCard}>
-                  <MaterialCommunityIcons name="calendar-clock" size={32} color={COLORS.textMuted} />
-                  <Text style={styles.emptyCreneauxText}>
-                    {showAllCreneaux
-                      ? 'Aucun créneau configuré au club'
-                      : `Aucun créneau programmé pour ${adherent?.discipline || 'votre discipline'} (${cat?.label || 'votre catégorie'})`}
-                  </Text>
-                </View>
-              ) : (
-                groupedCreneaux.map((group) => (
-                  <View key={group.jour} style={styles.dayGroupCard}>
-                    <View style={styles.dayGroupHeader}>
-                      <MaterialCommunityIcons name="calendar-today" size={16} color={COLORS.primary} />
-                      <Text style={styles.dayGroupTitle}>{group.jour}</Text>
-                      <View style={styles.dayGroupCountBadge}>
-                        <Text style={styles.dayGroupCountText}>
-                          {group.list.length} créneau{group.list.length > 1 ? 'x' : ''}
-                        </Text>
+          ) : (
+            <>
+              {/* ── Carte profil ── */}
+              {adherent && (
+                <View style={styles.profileCard}>
+                  <TouchableOpacity onPress={() => setShowCard(true)} activeOpacity={0.85}>
+                    {adherent.photo ? (
+                      <Image source={{ uri: adherent.photo }} style={styles.photo} />
+                    ) : (
+                      <View style={[styles.photoPlaceholder, { backgroundColor: (cat?.color || COLORS.primary) + '25' }]}>
+                        <Text style={{ fontSize: 32 }}>{cat?.icon || '👤'}</Text>
                       </View>
+                    )}
+                    <View style={styles.cardIconBadge}>
+                      <MaterialCommunityIcons name="card-account-details" size={13} color="#fff" />
                     </View>
+                  </TouchableOpacity>
 
-                    <View style={styles.dayGroupList}>
-                      {group.list.map((c, index) => (
-                        <View key={c.id} style={styles.creneauCardItem}>
-                          <View style={styles.creneauIconBox}>
-                            <MaterialCommunityIcons name="clock-outline" size={20} color={COLORS.secondary} />
-                          </View>
-                          <View style={styles.creneauInfo}>
-                            <View style={styles.creneauTitleRow}>
-                              <Text style={styles.creneauTime}>{c.heureDebut} - {c.heureFin}</Text>
-                              {group.list.length > 1 && (
-                                <Text style={styles.seanceTag}>Séance {index + 1}</Text>
-                              )}
-                            </View>
-                            <Text style={styles.creneauMeta}>
-                              {c.discipline} · {c.categorie}
-                              {c.lieu ? ` · 📍 ${c.lieu}` : ''}
-                            </Text>
-                            {c.remarque ? (
-                              <Text style={styles.creneauRemarque}>💡 {c.remarque}</Text>
-                            ) : null}
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                ))
-              )}
-            </View>
-
-            {/* Attendance & Assiduité Section */}
-            {presencesData && (
-              <View style={styles.attendanceCard}>
-                <View style={styles.attendanceHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.sectionLabel}>Mon Assiduité & Présences</Text>
-                    <Text style={styles.attendanceSub}>Relevé des séances cette saison</Text>
-                  </View>
-                  <View style={[
-                    styles.tauxBadge,
-                    { backgroundColor: (presencesData.tauxPresence >= 80 ? COLORS.success : presencesData.tauxPresence >= 50 ? COLORS.warning : COLORS.danger) + '20' }
-                  ]}>
-                    <Text style={[
-                      styles.tauxText,
-                      { color: presencesData.tauxPresence >= 80 ? COLORS.success : presencesData.tauxPresence >= 50 ? COLORS.warning : COLORS.danger }
-                    ]}>
-                      {presencesData.tauxPresence}%
+                  <View style={styles.profileInfo}>
+                    <Text style={styles.profileName}>{adherent.prenom} {adherent.nom}</Text>
+                    <Text style={styles.profileCode}>{adherent.code}</Text>
+                    {cat && <CategoryBadge category={cat.label} />}
+                    <Text style={styles.profileMeta}>
+                      {calculateAge(adherent.dateNaissance)} ans
+                      {adherent.discipline ? ` · ${adherent.discipline}` : ''}
                     </Text>
                   </View>
                 </View>
+              )}
 
-                <View style={styles.attendanceRow}>
-                  <View style={styles.attCol}>
-                    <Text style={[styles.attAmt, { color: COLORS.success }]}>{presencesData.nbPresents}</Text>
-                    <Text style={styles.attLbl}>Présent(s)</Text>
+              {/* ── 3 tuiles de résumé ── */}
+              <View style={styles.tilesRow}>
+                {/* Présences */}
+                <TouchableOpacity
+                  style={styles.tile}
+                  onPress={() => navigation.navigate('MesPresences')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="clipboard-check-outline" size={24} color={tauxColor} />
+                  <Text style={[styles.tilePct, { color: tauxColor }]}>
+                    {presencesData ? `${presencesData.tauxPresence}%` : '—'}
+                  </Text>
+                  <Text style={styles.tileLbl}>Assiduité</Text>
+                </TouchableOpacity>
+
+                {/* Paiements */}
+                <TouchableOpacity
+                  style={styles.tile}
+                  onPress={() => navigation.navigate('MesPaiements')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons
+                    name="cash-check"
+                    size={24}
+                    color={balance.resteAVerser > 0 ? COLORS.warning : COLORS.success}
+                  />
+                  <Text style={[styles.tilePct, { color: balance.resteAVerser > 0 ? COLORS.warning : COLORS.success }]}>
+                    {balance.nbMoisPayes}/{balance.totalMoisCibles}
+                  </Text>
+                  <Text style={styles.tileLbl}>Mois payés</Text>
+                </TouchableOpacity>
+
+                {/* Créneaux aujourd'hui */}
+                <TouchableOpacity
+                  style={styles.tile}
+                  onPress={() => navigation.navigate('MesCreneaux')}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="calendar-today" size={24} color={COLORS.primary} />
+                  <Text style={[styles.tilePct, { color: COLORS.primary }]}>
+                    {todayCreneaux.length}
+                  </Text>
+                  <Text style={styles.tileLbl}>Séance(s) auj.</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* ── Créneaux du jour ── */}
+              {todayCreneaux.length > 0 && (
+                <View style={styles.sectionCard}>
+                  <View style={styles.sectionHeader}>
+                    <MaterialCommunityIcons name="calendar-today" size={16} color={COLORS.primary} />
+                    <Text style={styles.sectionTitle}>Séances aujourd'hui — {todayStr}</Text>
                   </View>
-                  <View style={styles.vDivider} />
-                  <View style={styles.attCol}>
-                    <Text style={[styles.attAmt, { color: COLORS.danger }]}>{presencesData.nbAbsents}</Text>
-                    <Text style={styles.attLbl}>Absent(s)</Text>
-                  </View>
-                  <View style={styles.vDivider} />
-                  <View style={styles.attCol}>
-                    <Text style={[styles.attAmt, { color: COLORS.warning }]}>{presencesData.nbRetards}</Text>
-                    <Text style={styles.attLbl}>Retard(s)</Text>
-                  </View>
-                  <View style={styles.vDivider} />
-                  <View style={styles.attCol}>
-                    <Text style={[styles.attAmt, { color: COLORS.secondary }]}>{presencesData.nbExcuses}</Text>
-                    <Text style={styles.attLbl}>Excusé(s)</Text>
-                  </View>
+                  {todayCreneaux.map(c => (
+                    <View key={c.id} style={styles.creneauRow}>
+                      <MaterialCommunityIcons name="clock-outline" size={16} color={COLORS.secondary} />
+                      <Text style={styles.creneauTime}>{c.heureDebut} – {c.heureFin}</Text>
+                      <Text style={styles.creneauMeta}>{c.discipline}{c.lieu ? ` · 📍 ${c.lieu}` : ''}</Text>
+                    </View>
+                  ))}
+                  <TouchableOpacity onPress={() => navigation.navigate('MesCreneaux')} style={styles.voirToutBtn}>
+                    <Text style={styles.voirToutText}>Voir tous mes créneaux →</Text>
+                  </TouchableOpacity>
                 </View>
+              )}
 
-                {/* History List */}
-                {presencesData.list.length > 0 && (
-                  <View style={styles.historyList}>
-                    <Text style={styles.historyTitle}>Dernières séances enregistrées :</Text>
-                    {presencesData.list.slice(0, 4).map(p => {
-                      const isPresent = p.statut === 'present';
-                      const isAbsent = p.statut === 'absent';
-                      const isRetard = p.statut === 'retard';
-                      const color = isPresent ? COLORS.success : isAbsent ? COLORS.danger : isRetard ? COLORS.warning : COLORS.secondary;
-                      const label = isPresent ? 'Présent' : isAbsent ? 'Absent' : isRetard ? 'Retard' : 'Excusé';
-
-                      return (
-                        <View key={p.id} style={styles.historyItem}>
-                          <View style={styles.historyLeft}>
-                            <MaterialCommunityIcons
-                              name={isPresent ? 'check-circle' : isAbsent ? 'close-circle' : isRetard ? 'clock-alert' : 'account-check'}
-                              size={18}
-                              color={color}
-                            />
-                            <Text style={styles.historyDate}>{p.dateSeance}</Text>
-                            <Text style={styles.historyJour}>({p.jour})</Text>
-                          </View>
-                          <View style={[styles.historyBadge, { backgroundColor: color + '20' }]}>
-                            <Text style={[styles.historyBadgeText, { color }]}>{label}</Text>
-                          </View>
+              {/* ── Dernière présence ── */}
+              {presencesData?.list?.length > 0 && (
+                <View style={styles.sectionCard}>
+                  <View style={styles.sectionHeader}>
+                    <MaterialCommunityIcons name="clipboard-check-outline" size={16} color={COLORS.primary} />
+                    <Text style={styles.sectionTitle}>Dernières séances</Text>
+                  </View>
+                  {presencesData.list.slice(0, 3).map(p => {
+                    const isPresent = p.statut === 'present';
+                    const isAbsent  = p.statut === 'absent';
+                    const isRetard  = p.statut === 'retard';
+                    const color = isPresent ? COLORS.success : isAbsent ? COLORS.danger : isRetard ? COLORS.warning : COLORS.secondary;
+                    const label = isPresent ? 'Présent' : isAbsent ? 'Absent' : isRetard ? 'Retard' : 'Excusé';
+                    return (
+                      <View key={p.id} style={styles.presRow}>
+                        <MaterialCommunityIcons
+                          name={isPresent ? 'check-circle' : isAbsent ? 'close-circle' : isRetard ? 'clock-alert' : 'account-check'}
+                          size={16}
+                          color={color}
+                        />
+                        <Text style={styles.presDate}>{p.dateSeance}</Text>
+                        <View style={[styles.presBadge, { backgroundColor: color + '20' }]}>
+                          <Text style={[styles.presBadgeText, { color }]}>{label}</Text>
                         </View>
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Balance */}
-            <View style={styles.balanceCard}>
-              <Text style={styles.sectionLabel}>Bilan financier saison</Text>
-              <View style={styles.balanceRow}>
-                <View style={styles.balanceCol}>
-                  <Text style={styles.balanceAmt}>{balance.totalDu.toLocaleString()}</Text>
-                  <Text style={styles.balanceLbl}>Total dû (DA)</Text>
-                </View>
-                <View style={styles.vDivider} />
-                <View style={styles.balanceCol}>
-                  <Text style={[styles.balanceAmt, { color: COLORS.success }]}>
-                    {balance.montantVerse.toLocaleString()}
-                  </Text>
-                  <Text style={styles.balanceLbl}>Montant versé (DA)</Text>
-                </View>
-                <View style={styles.vDivider} />
-                <View style={styles.balanceCol}>
-                  <Text style={[styles.balanceAmt, { color: balance.resteAVerser > 0 ? COLORS.danger : COLORS.success }]}>
-                    {balance.resteAVerser.toLocaleString()}
-                  </Text>
-                  <Text style={styles.balanceLbl}>Reste à verser (DA)</Text>
-                </View>
-              </View>
-
-              <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: COLORS.border + '50', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: COLORS.textMuted, fontWeight: '500' }}>
-                  Mois ciblés par versement :
-                </Text>
-                <View style={{ backgroundColor: COLORS.primary + '15', paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.full }}>
-                  <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '700' }}>
-                    {balance.nbMoisPayes} / {balance.totalMoisCibles} mois
-                  </Text>
-                </View>
-              </View>
-
-              {retards.length > 0 && (
-                <View style={styles.alertBox}>
-                  <MaterialCommunityIcons name="alert-circle" size={16} color={COLORS.danger} />
-                  <Text style={styles.alertText}>
-                    {retards.length} paiement{retards.length > 1 ? 's' : ''} en retard
-                  </Text>
+                      </View>
+                    );
+                  })}
+                  <TouchableOpacity onPress={() => navigation.navigate('MesPresences')} style={styles.voirToutBtn}>
+                    <Text style={styles.voirToutText}>Voir toutes mes présences →</Text>
+                  </TouchableOpacity>
                 </View>
               )}
-            </View>
-
-            {/* Payments */}
-            <Text style={styles.sectionTitle}>Mes paiements</Text>
-            <View style={styles.list}>
-              {paiements.length === 0 ? (
-                <Text style={styles.emptyText}>Aucun paiement pour cette saison</Text>
-              ) : (
-                paiements.map(p => (
-                  <PaymentCard key={p.id} paiement={p} />
-                ))
-              )}
-            </View>
-          </>
-        )}
+            </>
+          )}
           <View style={{ height: 40 }} />
         </View>
       </ScrollView>
+
+      {adherent && (
+        <AdherentCardModal
+          visible={showCard}
+          adherent={adherent}
+          onClose={() => setShowCard(false)}
+        />
+      )}
     </View>
   );
 }
 
 const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: {
-    paddingTop: 56,
-    paddingHorizontal: horizontalPadding,
-    paddingBottom: 20,
-  },
-  headerInner: {
-    width: '100%',
-    maxWidth: 840,
-    alignSelf: 'center',
-    gap: 10,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
+  header: { paddingTop: 56, paddingHorizontal: horizontalPadding, paddingBottom: 20 },
+  headerInner: { width: '100%', maxWidth: 840, alignSelf: 'center', gap: 10 },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   greeting: { color: COLORS.textSecondary, fontSize: 14 },
   userName: { color: COLORS.textPrimary, fontSize: isSmall ? 20 : isLarge ? 26 : 24, fontWeight: '800' },
   logoutBtn: {
@@ -387,320 +275,76 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     borderColor: COLORS.border,
   },
   saisonBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: COLORS.secondary + '15',
     borderRadius: RADIUS.full,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 12, paddingVertical: 6,
     alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: COLORS.secondary + '30',
+    borderWidth: 1, borderColor: COLORS.secondary + '30',
   },
   saisonText: { color: COLORS.secondary, fontSize: 13, fontWeight: '600' },
   scroll: { flex: 1 },
-  scrollContent: {
-    alignItems: 'center',
-  },
-  bodyWrapper: {
-    width: '100%',
-    maxWidth: 840,
-  },
+  scrollContent: { alignItems: 'center' },
+  bodyWrapper: { width: '100%', maxWidth: 840, padding: 16, gap: 14 },
+
+  /* Profil */
   profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginHorizontal: 16,
-    marginTop: 20,
+    flexDirection: 'row', alignItems: 'center', gap: 16,
     backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    borderRadius: RADIUS.lg, padding: 16,
+    borderWidth: 1, borderColor: COLORS.border,
     ...SHADOWS.card,
   },
-  avatar: { width: 72, height: 72 },
   photo: { width: 72, height: 72, borderRadius: 36 },
   photoPlaceholder: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 72, height: 72, borderRadius: 36,
+    alignItems: 'center', justifyContent: 'center',
   },
-  profileInfo: { flex: 1, gap: 6 },
-  profileCode: {
-    color: COLORS.primary,
-    fontWeight: '700',
-    fontSize: 14,
+  cardIconBadge: {
+    position: 'absolute', bottom: 0, right: 0,
+    backgroundColor: COLORS.primary,
+    borderRadius: 10, width: 20, height: 20,
+    alignItems: 'center', justifyContent: 'center',
   },
+  profileInfo: { flex: 1, gap: 4 },
+  profileName: { color: COLORS.textPrimary, fontSize: 17, fontWeight: '800' },
+  profileCode: { color: COLORS.primary, fontWeight: '700', fontSize: 13 },
   profileMeta: { color: COLORS.textMuted, fontSize: 13 },
-  balanceCard: {
-    marginHorizontal: 16,
-    marginTop: 16,
-    backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    gap: 12,
-    ...SHADOWS.card,
-  },
-  sectionLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
-  balanceRow: { flexDirection: 'row', alignItems: 'center' },
-  balanceCol: { flex: 1, alignItems: 'center', gap: 4 },
-  balanceAmt: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '800' },
-  balanceLbl: { color: COLORS.textMuted, fontSize: 12 },
-  vDivider: { width: 1, height: 36, backgroundColor: COLORS.border },
-  alertBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: COLORS.danger + '15',
-    borderRadius: RADIUS.sm,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: COLORS.danger + '30',
-  },
-  alertText: { color: COLORS.danger, fontSize: 13, fontWeight: '600' },
-  sectionTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 17,
-    fontWeight: '700',
-    paddingHorizontal: 20,
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  sectionTitleNoMargin: {
-    color: COLORS.textPrimary,
-    fontSize: 17,
-    fontWeight: '700',
-    flex: 1,
-  },
-  toggleBtn: {
-    backgroundColor: COLORS.bgInput,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: RADIUS.full,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  toggleBtnText: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  dayGroupCard: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.lg,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    gap: 10,
-    ...SHADOWS.card,
-  },
-  dayGroupHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border + '60',
-    paddingBottom: 8,
-  },
-  dayGroupTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  dayGroupCountBadge: {
-    marginLeft: 'auto',
-    backgroundColor: COLORS.primary + '15',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: RADIUS.full,
-  },
-  dayGroupCountText: {
-    color: COLORS.primary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  dayGroupList: {
-    gap: 8,
-  },
-  creneauCardItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: COLORS.bgInput,
-    borderRadius: RADIUS.md,
-    padding: 12,
-    gap: 10,
-  },
-  seanceTag: {
-    color: COLORS.primary,
-    fontSize: 11,
-    fontWeight: '700',
-    backgroundColor: COLORS.primary + '20',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: RADIUS.sm,
-  },
-  creneauIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.secondary + '20',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  creneauInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  creneauTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  creneauTime: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  creneauMeta: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  creneauRemarque: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  emptyCreneauxCard: {
-    alignItems: 'center',
-    backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.md,
-    padding: 20,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  emptyCreneauxText: {
-    color: COLORS.textMuted,
-    fontSize: 13,
-    textAlign: 'center',
-  },
 
-  /* Attendance styles */
-  attendanceCard: {
-    marginHorizontal: 16,
-    marginTop: 16,
+  /* Tuiles */
+  tilesRow: { flexDirection: 'row', gap: 10 },
+  tile: {
+    flex: 1, alignItems: 'center', gap: 4,
     backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.lg,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    gap: 12,
+    borderRadius: RADIUS.lg, padding: 14,
+    borderWidth: 1, borderColor: COLORS.border,
     ...SHADOWS.card,
   },
-  attendanceHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  attendanceSub: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  tauxBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: RADIUS.full,
-  },
-  tauxText: {
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  attendanceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    backgroundColor: COLORS.bgInput,
-    borderRadius: RADIUS.md,
-  },
-  attCol: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-  },
-  attAmt: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  attLbl: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  historyList: {
-    marginTop: 4,
-    gap: 6,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border + '60',
-    paddingTop: 10,
-  },
-  historyTitle: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  historyItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.bgInput,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: RADIUS.sm,
-  },
-  historyLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  historyDate: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  historyJour: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-  },
-  historyBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: RADIUS.sm,
-  },
-  historyBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  tilePct: { fontSize: 20, fontWeight: '900' },
+  tileLbl: { color: COLORS.textMuted, fontSize: 10, fontWeight: '600', textAlign: 'center' },
 
-  list: { paddingHorizontal: 16, gap: 10 },
+  /* Section cards */
+  sectionCard: {
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.lg, padding: 14,
+    borderWidth: 1, borderColor: COLORS.border,
+    gap: 10, ...SHADOWS.card,
+  },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sectionTitle: { color: COLORS.textPrimary, fontSize: 14, fontWeight: '700', flex: 1 },
+  creneauRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+  creneauTime: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' },
+  creneauMeta: { color: COLORS.textMuted, fontSize: 12, flex: 1 },
+  voirToutBtn: { paddingTop: 6, borderTopWidth: 1, borderTopColor: COLORS.border + '50' },
+  voirToutText: { color: COLORS.primary, fontSize: 12, fontWeight: '700' },
+
+  /* Présences résumé */
+  presRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  presDate: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '600', flex: 1 },
+  presBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.sm },
+  presBadgeText: { fontSize: 11, fontWeight: '700' },
+
+  /* Empty */
   empty: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 32, gap: 12 },
   emptyTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '700' },
   emptyText: { color: COLORS.textMuted, fontSize: 14, textAlign: 'center' },
