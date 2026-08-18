@@ -9,166 +9,98 @@ import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
 import { CATEGORIES, getEffectiveCategory } from '../../utils/categories';
 import QrAttendanceScannerModal from '../../components/QrAttendanceScannerModal';
+import {
+  JOURS_FR,
+  JOURS_SEMAINE,
+  getTodayJour,
+  getLocalDateString,
+  getCurrentTimeString,
+  isLateBy20Min,
+  getSlotStartDateTime,
+  getDateForJour,
+  getNextOccurrenceDateTime,
+  getSlotStatus,
+  findActiveOrUpcomingSlotToday,
+} from '../../utils/creneaux';
+import { printPresencesSeance } from '../../utils/printPresencesSeance';
 
-const getLocalDateString = (d = new Date()) => {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const getCurrentTimeString = (now = new Date()) => {
-  const h = String(now.getHours()).padStart(2, '0');
-  const m = String(now.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
-};
-
-const isLateBy20Min = (heureDebutStr, now = new Date()) => {
-  if (!heureDebutStr) return false;
-  const match = String(heureDebutStr).trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return false;
-  const slotHours = parseInt(match[1], 10);
-  const slotMinutes = parseInt(match[2], 10);
-  const slotTotalMinutes = slotHours * 60 + slotMinutes;
-  const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
-  return currentTotalMinutes > slotTotalMinutes + 20;
-};
-
-const getSlotStartDateTime = (dateStr, heureDebutStr) => {
-  if (!dateStr || !heureDebutStr) return null;
-  const parts = dateStr.split('-').map(Number);
-  if (parts.length !== 3) return null;
-  const match = String(heureDebutStr).trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  const hours = parseInt(match[1], 10);
-  const minutes = parseInt(match[2], 10);
-  return new Date(parts[0], parts[1] - 1, parts[2], hours, minutes, 0);
-};
-
-const getDateForJour = (jourName, baseDate = new Date()) => {
-  const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-  const targetIdx = JOURS_FR.indexOf(jourName);
-  if (targetIdx === -1) return getLocalDateString(baseDate);
-  const currentIdx = baseDate.getDay();
-  let diffDays = (targetIdx - currentIdx + 7) % 7;
-  if (diffDays > 0) diffDays -= 7; // occurrence la plus récente (passé ou aujourd'hui)
-  const d = new Date(baseDate);
-  d.setDate(d.getDate() + diffDays);
-  return getLocalDateString(d);
-};
-
-// Calcule la prochaine occurrence future d'un créneau (semaine suivante si aujourd'hui)
-const getNextOccurrenceDateTime = (jourName, heureDebutStr) => {
-  const JOURS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-  const targetIdx = JOURS.indexOf(jourName);
-  if (targetIdx === -1) return null;
-  const match = String(heureDebutStr).trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  const h = parseInt(match[1], 10);
-  const m = parseInt(match[2], 10);
-  const base = new Date();
-  const currentIdx = base.getDay();
-  let diffDays = (targetIdx - currentIdx + 7) % 7;
-  if (diffDays === 0) diffDays = 7; // toujours la prochaine semaine si même jour
-  const d = new Date(base);
-  d.setDate(d.getDate() + diffDays);
-  d.setHours(h, m, 0, 0);
-  return d;
-};
-
-const JOURS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-const getTodayJour = () => JOURS_FR[new Date().getDay()];
-
-export default function PresencesScreen({ route }) {
+export default function PresencesScreen({ route, navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
 
   const {
-    creneaux, adherents: storeAdherents, saisonActive,
-    loadCreneaux, loadSaisons, loadAdherents,
+    creneaux, adherents: storeAdherents, saisonActive, config,
+    loadCreneaux, loadSaisons, loadAdherents, loadConfig,
     getEligibleAdherents, getPresencesSeance, savePresencesSeance,
   } = useStore();
 
   const initialCreneauId = route?.params?.creneauId || null;
+  const initialDateSeance = route?.params?.dateSeance || getLocalDateString();
+
+  const [now, setNow] = useState(new Date());
+  const todayJour = useMemo(() => getTodayJour(now), [now]);
 
   // Selected state
+  const [selectedJour, setSelectedJour] = useState(todayJour);
   const [selectedCreneauId, setSelectedCreneauId] = useState(initialCreneauId);
-  const [dateSeance, setDateSeance] = useState(getLocalDateString());
+  const [dateSeance, setDateSeance] = useState(initialDateSeance);
   const [statusFilter, setStatusFilter] = useState('tous'); // 'tous' | 'present' | 'absent' | 'retard' | 'excuse'
-  const [scopeFilter, setScopeFilter] = useState('creneau'); // 'creneau' (créneau & discipline) | 'tous' (tous les adhérents)
+  const [scopeFilter, setScopeFilter] = useState('creneau'); // 'creneau' | 'tous'
   const [searchQuery, setSearchQuery] = useState('');
   const [adherents, setAdherents] = useState([]);
   const [presenceMap, setPresenceMap] = useState({}); // adherentId -> { statut, remarque }
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [now, setNow] = useState(new Date());
   const [qrScannerVisible, setQrScannerVisible] = useState(false);
 
-  // Only show slots matching today's day of the week
-  const todayJour = useMemo(() => getTodayJour(), []);
-  const creneauxDuJour = useMemo(
-    () => creneaux.filter(c => c.jour === todayJour),
-    [creneaux, todayJour],
-  );
+  // Synchronise selectedJour si un initialCreneauId est reçu
+  useEffect(() => {
+    if (initialCreneauId && creneaux && creneaux.length > 0) {
+      const found = creneaux.find(c => c.id === initialCreneauId);
+      if (found && found.jour) {
+        setSelectedJour(found.jour);
+        setSelectedCreneauId(found.id);
+      }
+    }
+  }, [initialCreneauId, creneaux]);
 
+  // Créneaux visibles pour le jour sélectionné
+  const visibleSlots = useMemo(() => {
+    return (creneaux || []).filter(c => c.jour === selectedJour);
+  }, [creneaux, selectedJour]);
+
+  // Créneau actuellement sélectionné
   const selectedCreneau = useMemo(() => {
     if (selectedCreneauId) {
-      const found = creneaux.find(c => c.id === selectedCreneauId);
+      const found = (creneaux || []).find(c => c.id === selectedCreneauId);
       if (found) return found;
     }
-    return creneauxDuJour[0] || creneaux[0] || null;
-  }, [creneaux, creneauxDuJour, selectedCreneauId]);
+    return null;
+  }, [creneaux, selectedCreneauId]);
 
-  // Jour actif basé sur le créneau sélectionné
-  const activeJour = useMemo(() => {
-    return selectedCreneau?.jour || todayJour;
-  }, [selectedCreneau, todayJour]);
-
-  // Seuls les créneaux du jour du créneau sélectionné
-  const visibleSlots = useMemo(() => {
-    return creneaux.filter(c => c.jour === activeJour);
-  }, [creneaux, activeJour]);
-
-  // Statut du créneau : 'not_started' | 'open' | 'ended' | null
-  // - 'not_started' : aujourd'hui est le bon jour, mais l'heure n'est pas encore arrivée
-  // - 'open'        : on est dans la plage horaire du créneau → appel possible
-  // - 'ended'       : la plage est dépassée (heureFin) ou ce n'est pas le bon jour
+  // Statut du créneau sélectionné : 'ongoing' | 'upcoming' | 'ended' | 'not_today'
   const slotStatus = useMemo(() => {
-    if (!selectedCreneau?.heureDebut || !selectedCreneau?.jour) return null;
-    const todayJourName = JOURS_FR[now.getDay()];
-    // Pas le bon jour de la semaine → terminé
-    if (todayJourName !== selectedCreneau.jour) return 'ended';
-    const todayStr = getLocalDateString();
-    const startDT = getSlotStartDateTime(todayStr, selectedCreneau.heureDebut);
-    if (!startDT) return 'open';
-    const nowMs = now.getTime();
-    if (nowMs < startDT.getTime()) return 'not_started';
-    // Vérifier la fin si disponible
-    if (selectedCreneau.heureFin) {
-      const endDT = getSlotStartDateTime(todayStr, selectedCreneau.heureFin);
-      if (endDT && nowMs > endDT.getTime()) return 'ended';
-    }
-    return 'open';
-  }, [selectedCreneau?.id, selectedCreneau?.heureDebut, selectedCreneau?.heureFin, selectedCreneau?.jour, now]);
+    if (!selectedCreneau) return null;
+    return getSlotStatus(selectedCreneau, now);
+  }, [selectedCreneau, now]);
 
-  const isBlocked = !!slotStatus && slotStatus !== 'open';
+  const isBlocked = slotStatus === 'upcoming' || slotStatus === 'ended' || slotStatus === 'not_today';
 
   // Cible du compte à rebours :
-  // - 'not_started' → aujourd'hui à heureDebut
-  // - 'ended'       → prochain créneau (semaine prochaine)
   const countdownTarget = useMemo(() => {
     if (!selectedCreneau?.heureDebut || !selectedCreneau?.jour || !isBlocked) return null;
-    if (slotStatus === 'not_started') {
+    if (slotStatus === 'upcoming') {
       return getSlotStartDateTime(getLocalDateString(), selectedCreneau.heureDebut);
     }
-    if (slotStatus === 'ended') {
+    if (slotStatus === 'ended' || slotStatus === 'not_today') {
       return getNextOccurrenceDateTime(selectedCreneau.jour, selectedCreneau.heureDebut);
     }
     return null;
   }, [slotStatus, isBlocked, selectedCreneau?.heureDebut, selectedCreneau?.jour]);
 
-  // Horloge : 1s si bloqué (countdown actif), 30s pendant le créneau ou sans créneau
+  // Horloge de rafraîchissement
   useEffect(() => {
     const interval = isBlocked ? 1000 : 30000;
     const timer = setInterval(() => setNow(new Date()), interval);
@@ -186,7 +118,6 @@ export default function PresencesScreen({ route }) {
     return { hh, mm, ss };
   }, [countdownTarget, now, isBlocked]);
 
-
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -203,9 +134,20 @@ export default function PresencesScreen({ route }) {
         await loadAdherents();
       }
 
-      const targetCreneau = currentCreneaux.find(c => c.id === selectedCreneauId) || currentCreneaux[0] || null;
-      if (!selectedCreneauId && targetCreneau) {
-        setSelectedCreneauId(targetCreneau.id);
+      // 1. Si un créneau spécifique est déjà sélectionné
+      let targetCreneau = null;
+      if (selectedCreneauId) {
+        targetCreneau = (currentCreneaux || []).find(c => c.id === selectedCreneauId) || null;
+      }
+
+      // 2. Sinon, auto-sélection intelligente pour aujourd'hui
+      if (!targetCreneau && !initialCreneauId) {
+        const resolution = findActiveOrUpcomingSlotToday(currentCreneaux || [], new Date());
+        if (resolution.slot) {
+          targetCreneau = resolution.slot;
+          setSelectedCreneauId(resolution.slot.id);
+          setSelectedJour(resolution.todayJour);
+        }
       }
 
       if (!targetCreneau) {
@@ -234,7 +176,7 @@ export default function PresencesScreen({ route }) {
     } finally {
       setLoading(false);
     }
-  }, [selectedCreneauId, dateSeance, getEligibleAdherents, getPresencesSeance, loadCreneaux, loadSaisons, loadAdherents]);
+  }, [selectedCreneauId, initialCreneauId, dateSeance, getEligibleAdherents, getPresencesSeance, loadCreneaux, loadSaisons, loadAdherents]);
 
   useEffect(() => {
     loadData();
@@ -244,6 +186,25 @@ export default function PresencesScreen({ route }) {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
+  };
+
+  const handleSelectDay = (day) => {
+    setSelectedJour(day);
+    setDateSeance(getDateForJour(day));
+    const daySlots = (creneaux || []).filter(c => c.jour === day);
+    if (daySlots.length > 0) {
+      // Si aujourd'hui, tenter de sélectionner le créneau en cours / à venir
+      if (day === todayJour) {
+        const res = findActiveOrUpcomingSlotToday(creneaux, new Date());
+        if (res.slot) {
+          setSelectedCreneauId(res.slot.id);
+          return;
+        }
+      }
+      setSelectedCreneauId(daySlots[0].id);
+    } else {
+      setSelectedCreneauId(null);
+    }
   };
 
   const handlePrevDay = () => {
@@ -272,19 +233,25 @@ export default function PresencesScreen({ route }) {
 
   const handleToday = () => {
     setDateSeance(getLocalDateString());
+    setSelectedJour(todayJour);
+    const res = findActiveOrUpcomingSlotToday(creneaux, new Date());
+    if (res.slot) {
+      setSelectedCreneauId(res.slot.id);
+    }
   };
 
   const handleYesterday = () => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
     setDateSeance(getLocalDateString(d));
+    setSelectedJour(JOURS_FR[d.getDay()]);
   };
 
   const handleStatutChange = (adherentId, targetStatut) => {
     if (isBlocked) {
       Alert.alert(
-        slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté',
-        slotStatus === 'ended'
+        slotStatus === 'ended' || slotStatus === 'not_today' ? 'Créneau terminé' : 'Créneau non débuté',
+        slotStatus === 'ended' || slotStatus === 'not_today'
           ? 'Ce créneau est terminé. L\'appel n\'est plus disponible.'
           : 'L\'appel est bloqué jusqu\'au début du créneau.'
       );
@@ -339,8 +306,8 @@ export default function PresencesScreen({ route }) {
   const handleMarkAllPresent = () => {
     if (isBlocked) {
       Alert.alert(
-        slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté',
-        slotStatus === 'ended'
+        slotStatus === 'ended' || slotStatus === 'not_today' ? 'Créneau terminé' : 'Créneau non débuté',
+        slotStatus === 'ended' || slotStatus === 'not_today'
           ? 'Ce créneau est terminé. L\'appel n\'est plus disponible.'
           : 'L\'appel est bloqué jusqu\'au début du créneau.'
       );
@@ -370,11 +337,10 @@ export default function PresencesScreen({ route }) {
     });
   };
 
-  // Traitement lors du scan QR Code d'un adhérent
   const handleQrAdherentScanned = (adherent) => {
     if (isBlocked) {
       return {
-        statutText: slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté',
+        statutText: slotStatus === 'ended' || slotStatus === 'not_today' ? 'Créneau terminé' : 'Créneau non débuté',
         timeStr: '',
       };
     }
@@ -387,7 +353,6 @@ export default function PresencesScreen({ route }) {
       ? `Retard (${timeStr} - >20 min créneau ${startStr || ''} · QR Scan)`
       : `Présent à ${timeStr} (QR Scan)`;
 
-    // S'assurer que l'adhérent fait partie de la liste affichée
     setAdherents(prev => {
       if (prev.some(a => a.id === adherent.id)) return prev;
       return [...prev, adherent];
@@ -417,8 +382,8 @@ export default function PresencesScreen({ route }) {
   const handleSave = async () => {
     if (isBlocked) {
       Alert.alert(
-        slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté',
-        slotStatus === 'ended'
+        slotStatus === 'ended' || slotStatus === 'not_today' ? 'Créneau terminé' : 'Créneau non débuté',
+        slotStatus === 'ended' || slotStatus === 'not_today'
           ? 'Ce créneau est terminé. L\'appel n\'est plus disponible.'
           : 'L\'appel est bloqué jusqu\'au début du créneau.'
       );
@@ -438,7 +403,7 @@ export default function PresencesScreen({ route }) {
         remarque: presenceMap[a.id]?.remarque || null,
       }));
 
-      await savePresencesSeance(selectedCreneau.id, dateSeance, presencesToSave);
+      await savePresencesSeance(selectedCreneau.id, dateSeance, saisonActive.id, presencesToSave);
       Alert.alert('Succès', 'Présences de la séance enregistrées avec succès !');
     } catch (e) {
       Alert.alert('Erreur', e.message || 'Impossible d’enregistrer les présences.');
@@ -447,26 +412,44 @@ export default function PresencesScreen({ route }) {
     }
   };
 
-  // Filter Adherents List
+  const handlePrint = async () => {
+    if (!selectedCreneau) {
+      Alert.alert('Erreur', 'Veuillez sélectionner un créneau à imprimer.');
+      return;
+    }
+    const adherentsToPrint = filteredAdherents.length > 0 ? filteredAdherents : adherents;
+    setPrinting(true);
+    try {
+      await printPresencesSeance({
+        creneau: selectedCreneau,
+        dateSeance,
+        saison: saisonActive,
+        adherents: adherentsToPrint,
+        presenceMap,
+        config: config || {},
+      });
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  // Filtrage des adhérents
   const filteredAdherents = useMemo(() => {
     const listToFilter = scopeFilter === 'tous' ? (storeAdherents && storeAdherents.length > 0 ? storeAdherents : adherents) : adherents;
     return listToFilter.filter(a => {
       const p = presenceMap[a.id] || { statut: 'present' };
 
-      // Status filter
       let matchesStatus = true;
       if (statusFilter !== 'tous') {
         matchesStatus = p.statut === statusFilter;
       }
 
-      // Search Query
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch = !q ||
         (a.nom || '').toLowerCase().includes(q) ||
         (a.prenom || '').toLowerCase().includes(q) ||
         (a.code || '').toLowerCase().includes(q);
 
-      // Scope filter
       let matchesScope = true;
       if (scopeFilter === 'creneau' && selectedCreneau) {
         const creneauDiscip = (selectedCreneau.discipline || '').trim().toLowerCase();
@@ -496,7 +479,6 @@ export default function PresencesScreen({ route }) {
     });
   }, [adherents, storeAdherents, presenceMap, statusFilter, searchQuery, scopeFilter, selectedCreneau]);
 
-  // Quick Stats
   const statsSummary = useMemo(() => {
     let presents = 0, absents = 0, retards = 0;
     filteredAdherents.forEach(a => {
@@ -524,23 +506,49 @@ export default function PresencesScreen({ route }) {
         </View>
       )}
 
-      {/* Creneaux Selector - filtré par le jour actif */}
+      {/* Sélecteur de jour de la semaine */}
+      <View style={styles.daySelectorSection}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.jourScroll}>
+          {JOURS_SEMAINE.map(j => {
+            const isSelected = j === selectedJour;
+            const isTodayDay = j === todayJour;
+            return (
+              <TouchableOpacity
+                key={j}
+                style={[
+                  styles.jourChip,
+                  isSelected && styles.jourChipActive,
+                  isTodayDay && !isSelected && styles.jourChipToday,
+                ]}
+                onPress={() => handleSelectDay(j)}
+              >
+                <Text style={[
+                  styles.jourChipText,
+                  isSelected && styles.jourChipTextActive,
+                  isTodayDay && !isSelected && { color: COLORS.primary },
+                ]}>
+                  {j} {isTodayDay ? '•' : ''}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Section des Créneaux du jour */}
       <View style={styles.selectorSection}>
         <View style={styles.selectorHeader}>
           <MaterialCommunityIcons name="calendar-clock" size={14} color={COLORS.primary} />
           <Text style={styles.sectionLabel}>
-            Créneaux du {activeJour} :
+            Créneaux du {selectedJour} ({visibleSlots.length}) :
           </Text>
         </View>
-        {visibleSlots.length === 0 ? (
-          <View style={styles.noSlotToday}>
-            <MaterialCommunityIcons name="calendar-remove" size={20} color={COLORS.textMuted} />
-            <Text style={styles.noSlotTodayText}>Aucun créneau prévu pour le {activeJour}</Text>
-          </View>
-        ) : (
+
+        {visibleSlots.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.creneauScroll}>
             {visibleSlots.map(c => {
               const isSelected = c.id === selectedCreneau?.id;
+              const status = getSlotStatus(c, now);
               return (
                 <TouchableOpacity
                   key={c.id}
@@ -552,9 +560,26 @@ export default function PresencesScreen({ route }) {
                     }
                   }}
                 >
-                  <Text style={[styles.creneauChipText, isSelected && styles.creneauChipTextSelected]}>
-                    {c.discipline} · {c.heureDebut}
-                  </Text>
+                  <View style={styles.creneauChipHeader}>
+                    <Text style={[styles.creneauChipText, isSelected && styles.creneauChipTextSelected]}>
+                      {c.discipline} · {c.heureDebut}
+                    </Text>
+                    {status === 'ongoing' && (
+                      <View style={styles.slotBadgeOngoing}>
+                        <Text style={styles.slotBadgeOngoingText}>En cours</Text>
+                      </View>
+                    )}
+                    {status === 'upcoming' && (
+                      <View style={styles.slotBadgeUpcoming}>
+                        <Text style={styles.slotBadgeUpcomingText}>À venir</Text>
+                      </View>
+                    )}
+                    {status === 'ended' && (
+                      <View style={styles.slotBadgeEnded}>
+                        <Text style={styles.slotBadgeEndedText}>Terminé</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={[styles.creneauChipCat, isSelected && { color: COLORS.primary }]}>
                     {c.categorie}
                   </Text>
@@ -565,326 +590,386 @@ export default function PresencesScreen({ route }) {
         )}
       </View>
 
-      {/* Date & Quick Shortcuts */}
-      {selectedCreneau && (
-        <View style={styles.dateBar}>
-          <View style={styles.dateControlRow}>
-            <TouchableOpacity onPress={handlePrevDay} style={styles.dateNavBtn}>
-              <MaterialCommunityIcons name="chevron-left" size={20} color={COLORS.primary} />
-            </TouchableOpacity>
-
-            <View style={styles.dateBox}>
-              <MaterialCommunityIcons name="calendar" size={16} color={COLORS.secondary} />
-              <TextInput
-                style={styles.dateInput}
-                value={dateSeance}
-                onChangeText={setDateSeance}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={COLORS.textMuted}
-              />
-            </View>
-
-            <TouchableOpacity onPress={handleNextDay} style={styles.dateNavBtn}>
-              <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.primary} />
-            </TouchableOpacity>
+      {/* État vide : Aucun créneau programmé ou aucun créneau sélectionné */}
+      {visibleSlots.length === 0 ? (
+        <View style={styles.emptySlotCard}>
+          <View style={styles.emptySlotIconBg}>
+            <MaterialCommunityIcons name="calendar-blank-outline" size={42} color={COLORS.textMuted} />
           </View>
-
-          {/* Quick Date Presets */}
-          <View style={styles.dateShortcuts}>
-            <TouchableOpacity onPress={handleYesterday} style={styles.shortcutChip}>
-              <Text style={styles.shortcutText}>Hier</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleToday} style={[styles.shortcutChip, isToday && styles.shortcutChipActive]}>
-              <Text style={[styles.shortcutText, isToday && styles.shortcutTextActive]}>Auj.</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.markAllBtn, (isFuture || isBlocked || noOpenSeason) && { opacity: 0.5 }]}
-            onPress={handleMarkAllPresent}
-            disabled={isFuture || isBlocked || noOpenSeason}
-          >
-            <MaterialCommunityIcons name="check-all" size={16} color={COLORS.success} />
-            <Text style={styles.markAllText}>Tout présent</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Warning Banner if Future Date */}
-      {isFuture && (
-        <View style={styles.futureWarningBox}>
-          <MaterialCommunityIcons name="alert-decagram" size={18} color={COLORS.danger} />
-          <Text style={styles.futureWarningText}>
-            Saisie interdite : La date sélectionnée ({dateSeance}) est dans le futur.
+          <Text style={styles.emptySlotTitle}>
+            {selectedJour === todayJour ? "Aucun créneau aujourd'hui" : `Aucun créneau le ${selectedJour}`}
           </Text>
+          <Text style={styles.emptySlotSubtitle}>
+            {selectedJour === todayJour
+              ? `Il n'y a aucun créneau d'entraînement programmé pour aujourd'hui (${selectedJour}).`
+              : `Aucun créneau d'entraînement n'est programmé le ${selectedJour}.`}
+          </Text>
+          {navigation && (
+            <TouchableOpacity
+              style={styles.emptySlotPrimaryBtn}
+              onPress={() => navigation.navigate('Creneaux')}
+            >
+              <MaterialCommunityIcons name="calendar-clock" size={18} color="#FFF" />
+              <Text style={styles.emptySlotPrimaryBtnText}>Consulter le planning</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      )}
-
-      {/* Affichage du chrono si le créneau n'a pas encore débuté ou est terminé */}
-      {isBlocked && countdownFormatted ? (
-        <View style={styles.countdownContainer}>
-          <View style={styles.countdownCard}>
-            <View style={styles.countdownIconBg}>
-              <MaterialCommunityIcons
-                name={slotStatus === 'ended' ? 'clock-end' : 'clock-start'}
-                size={40}
-                color={slotStatus === 'ended' ? COLORS.danger : COLORS.primary}
-              />
-            </View>
-            <Text style={[styles.countdownTitle, slotStatus === 'ended' && { color: COLORS.danger }]}>
-              {slotStatus === 'ended' ? 'Créneau terminé' : 'Créneau non débuté'}
-            </Text>
-            <Text style={styles.countdownSubtitle}>
-              {slotStatus === 'ended' ? (
-                <>Le créneau{' '}
-                  <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>
-                    {selectedCreneau?.discipline} ({selectedCreneau?.categorie})
-                  </Text>{' '}
-                  du <Text style={{ fontWeight: '700', color: COLORS.secondary }}>{selectedCreneau?.jour}</Text>{' '}
-                  est terminé. Prochain créneau dans :
-                </>
-              ) : (
-                <>L’appel pour le créneau{' '}
-                  <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>
-                    {selectedCreneau?.discipline} ({selectedCreneau?.categorie})
-                  </Text>{' '}
-                  du <Text style={{ fontWeight: '700', color: COLORS.secondary }}>{selectedCreneau?.jour}</Text>{' '}
-                  à{' '}
-                  <Text style={{ fontWeight: '800', color: COLORS.primary }}>
-                    {selectedCreneau?.heureDebut}
-                  </Text>{' '}
-                  commencera dans :
-                </>
-              )}
-            </Text>
-
-            <View style={styles.timerRow}>
-              <View style={styles.timerBlock}>
-                <Text style={styles.timerNum}>{countdownFormatted.hh}</Text>
-                <Text style={styles.timerUnit}>HEURES</Text>
-              </View>
-              <Text style={styles.timerColon}>:</Text>
-              <View style={styles.timerBlock}>
-                <Text style={styles.timerNum}>{countdownFormatted.mm}</Text>
-                <Text style={styles.timerUnit}>MINUTES</Text>
-              </View>
-              <Text style={styles.timerColon}>:</Text>
-              <View style={styles.timerBlock}>
-                <Text style={styles.timerNum}>{countdownFormatted.ss}</Text>
-                <Text style={styles.timerUnit}>SECONDES</Text>
-              </View>
-            </View>
-
-            <View style={styles.countdownNotice}>
-              <MaterialCommunityIcons name="lock-clock" size={16} color={COLORS.warning} />
-              <Text style={styles.countdownNoticeText}>
-                {slotStatus === 'ended'
-                  ? `L’appel reprend à ${selectedCreneau?.heureDebut} lors du prochain ${selectedCreneau?.jour}.`
-                  : `La saisie se déverrouille automatiquement dès ${selectedCreneau?.heureDebut}.`}
-              </Text>
-            </View>
+      ) : !selectedCreneau ? (
+        <View style={styles.emptySlotCard}>
+          <View style={styles.emptySlotIconBg}>
+            <MaterialCommunityIcons name="gesture-tap" size={42} color={COLORS.primary} />
           </View>
+          <Text style={styles.emptySlotTitle}>Sélectionnez un créneau</Text>
+          <Text style={styles.emptySlotSubtitle}>
+            Veuillez choisir l'un des créneaux du {selectedJour} ci-dessus pour faire l'appel.
+          </Text>
         </View>
       ) : (
         <>
-          {/* Action Toolbar with Scope switch and QR Scanner Button */}
-          <View style={styles.actionToolbar}>
-            <View style={styles.scopeSwitch}>
-              <TouchableOpacity
-                style={[styles.scopeBtn, scopeFilter === 'creneau' && styles.scopeBtnActive]}
-                onPress={() => setScopeFilter('creneau')}
-              >
-                <MaterialCommunityIcons name="filter" size={14} color={scopeFilter === 'creneau' ? '#FFF' : COLORS.textMuted} />
-                <Text style={[styles.scopeText, scopeFilter === 'creneau' && styles.scopeTextActive]}>Ce créneau</Text>
+          {/* Date & Raccourcis */}
+          <View style={styles.dateBar}>
+            <View style={styles.dateControlRow}>
+              <TouchableOpacity onPress={handlePrevDay} style={styles.dateNavBtn}>
+                <MaterialCommunityIcons name="chevron-left" size={20} color={COLORS.primary} />
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.scopeBtn, scopeFilter === 'tous' && styles.scopeBtnActive]}
-                onPress={() => setScopeFilter('tous')}
-              >
-                <MaterialCommunityIcons name="account-group" size={14} color={scopeFilter === 'tous' ? '#FFF' : COLORS.textMuted} />
-                <Text style={[styles.scopeText, scopeFilter === 'tous' && styles.scopeTextActive]}>Tous les adhérents</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* QR Scan Action Button */}
-            <TouchableOpacity
-              style={[styles.qrScanBtn, (isFuture || noOpenSeason) && { opacity: 0.5 }]}
-              onPress={() => setQrScannerVisible(true)}
-              disabled={isFuture || noOpenSeason}
-              activeOpacity={0.8}
-            >
-              <MaterialCommunityIcons name="qrcode-scan" size={16} color="#FFF" />
-              <Text style={styles.qrScanBtnText}>Scanner QR</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Search Bar */}
-          <View style={styles.searchContainer}>
-            <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Rechercher un adhérent par nom ou code..."
-              placeholderTextColor={COLORS.textMuted}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery ? (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-
-          {/* Stats Summary & Filter Bar */}
-          <View style={styles.statsBar}>
-            <TouchableOpacity
-              style={[styles.statPill, statusFilter === 'tous' && styles.statPillActive]}
-              onPress={() => setStatusFilter('tous')}
-            >
-              <Text style={[styles.statVal, { color: COLORS.textPrimary }]}>{statsSummary.total}</Text>
-              <Text style={styles.statLbl}>Tous</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.statPill, { backgroundColor: COLORS.success + '15' }, statusFilter === 'present' && styles.statPillActiveSuccess]}
-              onPress={() => setStatusFilter('present')}
-            >
-              <Text style={[styles.statVal, { color: COLORS.success }, statusFilter === 'present' && { color: '#FFF' }]}>{statsSummary.presents}</Text>
-              <Text style={[styles.statLbl, statusFilter === 'present' && { color: '#FFF' }]}>Présents</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.statPill, { backgroundColor: COLORS.danger + '15' }, statusFilter === 'absent' && styles.statPillActiveDanger]}
-              onPress={() => setStatusFilter('absent')}
-            >
-              <Text style={[styles.statVal, { color: COLORS.danger }, statusFilter === 'absent' && { color: '#FFF' }]}>{statsSummary.absents}</Text>
-              <Text style={[styles.statLbl, statusFilter === 'absent' && { color: '#FFF' }]}>Absents</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.statPill, { backgroundColor: COLORS.warning + '15' }, statusFilter === 'retard' && styles.statPillActiveWarning]}
-              onPress={() => setStatusFilter('retard')}
-            >
-              <Text style={[styles.statVal, { color: COLORS.warning }, statusFilter === 'retard' && { color: '#FFF' }]}>{statsSummary.retards}</Text>
-              <Text style={[styles.statLbl, statusFilter === 'retard' && { color: '#FFF' }]}>Retards</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Main List */}
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
-          >
-            {filteredAdherents.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <MaterialCommunityIcons name="account-search" size={48} color={COLORS.textMuted} />
-                <Text style={styles.emptyTitle}>Aucun adhérent dans cette liste</Text>
-                <Text style={styles.emptyText}>
-                  {statusFilter === 'tous'
-                    ? `Aucun adhérent inscrit ne correspond à ce créneau.`
-                    : `Aucun adhérent avec le statut "${statusFilter}" pour cette séance.`}
-                </Text>
-              </View>
-            ) : (
-              filteredAdherents.map(adherent => {
-                const current = presenceMap[adherent.id] || { statut: 'present', remarque: '' };
-                return (
-                  <View key={adherent.id} style={styles.adherentCard}>
-                    <View style={styles.cardHeader}>
-                      <View style={styles.avatar}>
-                        {adherent.photo ? (
-                          <Image source={{ uri: adherent.photo }} style={styles.photo} />
-                        ) : (
-                          <View style={styles.photoPlaceholder}>
-                            <Text style={styles.photoIcon}>👤</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.adherentInfo}>
-                        <Text style={styles.adherentName}>{adherent.prenom} {adherent.nom}</Text>
-                        <Text style={styles.adherentCode}>{adherent.code}</Text>
-                      </View>
-                      {current.statut === 'retard' && (
-                        <View style={styles.retardBadge}>
-                          <MaterialCommunityIcons name="clock-alert" size={12} color={COLORS.warning} />
-                          <Text style={styles.retardBadgeText}>Retard (&gt;20 min)</Text>
-                        </View>
-                      )}
-                    </View>
-
-                    {/* Status Toggle Buttons - Présent et Absent */}
-                    <View style={styles.statusRow}>
-                      <TouchableOpacity
-                        style={[
-                          styles.statusBtn,
-                          current.statut === 'present' && styles.btnPresent,
-                          current.statut === 'retard' && styles.btnRetard,
-                        ]}
-                        onPress={() => handleStatutChange(adherent.id, 'present')}
-                      >
-                        <MaterialCommunityIcons
-                          name={current.statut === 'retard' ? 'clock-alert' : 'check-circle'}
-                          size={16}
-                          color={['present', 'retard'].includes(current.statut) ? '#FFF' : (current.statut === 'retard' ? COLORS.warning : COLORS.success)}
-                        />
-                        <Text style={[styles.statusBtnText, ['present', 'retard'].includes(current.statut) && styles.textActive]}>
-                          {current.statut === 'retard' ? 'Présent (Retard)' : 'Présent'}
-                        </Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.statusBtn, current.statut === 'absent' && styles.btnAbsent]}
-                        onPress={() => handleStatutChange(adherent.id, 'absent')}
-                      >
-                        <MaterialCommunityIcons name="close-circle" size={16} color={current.statut === 'absent' ? '#FFF' : COLORS.danger} />
-                        <Text style={[styles.statusBtnText, current.statut === 'absent' && styles.textActive]}>Absent</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* Note input */}
-                    <TextInput
-                      style={styles.remarqueInput}
-                      value={current.remarque}
-                      onChangeText={(val) => handleRemarqueChange(adherent.id, val)}
-                      placeholder="Remarque (ex: Arrivé à 18h15, Justificatif médical)"
-                      placeholderTextColor={COLORS.textMuted}
-                    />
-                  </View>
-                );
-              })
-            )}
-          </ScrollView>
-
-          {/* Footer Save Button */}
-          {adherents.length > 0 && (
-            <View style={styles.footer}>
-              <TouchableOpacity
-                style={[styles.saveBtn, (isFuture || isBlocked || noOpenSeason) && { backgroundColor: COLORS.textMuted }]}
-                onPress={handleSave}
-                disabled={saving || isFuture || isBlocked || noOpenSeason}
-              >
-                <MaterialCommunityIcons
-                  name={isFuture || isBlocked ? 'cancel' : 'content-save'}
-                  size={20}
-                  color="#FFF"
+              <View style={styles.dateBox}>
+                <MaterialCommunityIcons name="calendar" size={16} color={COLORS.secondary} />
+                <TextInput
+                  style={styles.dateInput}
+                  value={dateSeance}
+                  onChangeText={setDateSeance}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={COLORS.textMuted}
                 />
-                <Text style={styles.saveBtnText}>
-                  {noOpenSeason
-                    ? 'Saison ouverte requise'
-                    : isFuture
-                    ? 'Date future (Saisie interdite)'
-                    : slotStatus === 'ended'
-                    ? 'Créneau terminé'
-                    : slotStatus === 'not_started'
-                    ? 'Créneau non débuté'
-                    : saving
-                    ? 'Enregistrement...'
-                    : 'Enregistrer la séance'}
-                </Text>
+              </View>
+
+              <TouchableOpacity onPress={handleNextDay} style={styles.dateNavBtn}>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.primary} />
               </TouchableOpacity>
             </View>
+
+            {/* Presets rapides de date */}
+            <View style={styles.dateShortcuts}>
+              <TouchableOpacity onPress={handleYesterday} style={styles.shortcutChip}>
+                <Text style={styles.shortcutText}>Hier</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleToday} style={[styles.shortcutChip, isToday && styles.shortcutChipActive]}>
+                <Text style={[styles.shortcutText, isToday && styles.shortcutTextActive]}>Auj.</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.markAllBtn, (isFuture || isBlocked || noOpenSeason) && { opacity: 0.5 }]}
+              onPress={handleMarkAllPresent}
+              disabled={isFuture || isBlocked || noOpenSeason}
+            >
+              <MaterialCommunityIcons name="check-all" size={16} color={COLORS.success} />
+              <Text style={styles.markAllText}>Tout présent</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Warning Banner if Future Date */}
+          {isFuture && (
+            <View style={styles.futureWarningBox}>
+              <MaterialCommunityIcons name="alert-decagram" size={18} color={COLORS.danger} />
+              <Text style={styles.futureWarningText}>
+                Saisie interdite : La date sélectionnée ({dateSeance}) est dans le futur.
+              </Text>
+            </View>
+          )}
+
+          {/* Affichage du chrono si le créneau n'a pas encore débuté ou est terminé */}
+          {isBlocked && countdownFormatted ? (
+            <View style={styles.countdownContainer}>
+              <View style={styles.countdownCard}>
+                <View style={styles.countdownIconBg}>
+                  <MaterialCommunityIcons
+                    name={slotStatus === 'ended' || slotStatus === 'not_today' ? 'clock-end' : 'clock-start'}
+                    size={40}
+                    color={slotStatus === 'ended' || slotStatus === 'not_today' ? COLORS.danger : COLORS.primary}
+                  />
+                </View>
+                <Text style={[styles.countdownTitle, (slotStatus === 'ended' || slotStatus === 'not_today') && { color: COLORS.danger }]}>
+                  {slotStatus === 'ended' || slotStatus === 'not_today' ? 'Créneau terminé' : 'Créneau non débuté'}
+                </Text>
+                <Text style={styles.countdownSubtitle}>
+                  {slotStatus === 'ended' || slotStatus === 'not_today' ? (
+                    <>Le créneau{' '}
+                      <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>
+                        {selectedCreneau?.discipline} ({selectedCreneau?.categorie})
+                      </Text>{' '}
+                      du <Text style={{ fontWeight: '700', color: COLORS.secondary }}>{selectedCreneau?.jour}</Text>{' '}
+                      est terminé. Prochain créneau dans :
+                    </>
+                  ) : (
+                    <>L’appel pour le créneau{' '}
+                      <Text style={{ fontWeight: '800', color: COLORS.textPrimary }}>
+                        {selectedCreneau?.discipline} ({selectedCreneau?.categorie})
+                      </Text>{' '}
+                      du <Text style={{ fontWeight: '700', color: COLORS.secondary }}>{selectedCreneau?.jour}</Text>{' '}
+                      à{' '}
+                      <Text style={{ fontWeight: '800', color: COLORS.primary }}>
+                        {selectedCreneau?.heureDebut}
+                      </Text>{' '}
+                      commencera dans :
+                    </>
+                  )}
+                </Text>
+
+                <View style={styles.timerRow}>
+                  <View style={styles.timerBlock}>
+                    <Text style={styles.timerNum}>{countdownFormatted.hh}</Text>
+                    <Text style={styles.timerUnit}>HEURES</Text>
+                  </View>
+                  <Text style={styles.timerColon}>:</Text>
+                  <View style={styles.timerBlock}>
+                    <Text style={styles.timerNum}>{countdownFormatted.mm}</Text>
+                    <Text style={styles.timerUnit}>MINUTES</Text>
+                  </View>
+                  <Text style={styles.timerColon}>:</Text>
+                  <View style={styles.timerBlock}>
+                    <Text style={styles.timerNum}>{countdownFormatted.ss}</Text>
+                    <Text style={styles.timerUnit}>SECONDES</Text>
+                  </View>
+                </View>
+
+                <View style={styles.countdownNotice}>
+                  <MaterialCommunityIcons name="lock-clock" size={16} color={COLORS.warning} />
+                  <Text style={styles.countdownNoticeText}>
+                    {slotStatus === 'ended' || slotStatus === 'not_today'
+                      ? `L’appel reprend à ${selectedCreneau?.heureDebut} lors du prochain ${selectedCreneau?.jour}.`
+                      : `La saisie se déverrouille automatiquement dès ${selectedCreneau?.heureDebut}.`}
+                  </Text>
+                </View>
+
+                {/* Bouton d'impression lorsque le créneau est terminé */}
+                <TouchableOpacity
+                  style={styles.countdownPrintBtn}
+                  onPress={handlePrint}
+                  disabled={printing}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="printer" size={18} color="#FFF" />
+                  <Text style={styles.countdownPrintBtnText}>
+                    {printing ? 'Génération du document...' : 'Imprimer la feuille d’appel'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+              {/* Action Toolbar with Scope switch, QR Scanner and Print Button */}
+              <View style={styles.actionToolbar}>
+                <View style={styles.scopeSwitch}>
+                  <TouchableOpacity
+                    style={[styles.scopeBtn, scopeFilter === 'creneau' && styles.scopeBtnActive]}
+                    onPress={() => setScopeFilter('creneau')}
+                  >
+                    <MaterialCommunityIcons name="filter" size={14} color={scopeFilter === 'creneau' ? '#FFF' : COLORS.textMuted} />
+                    <Text style={[styles.scopeText, scopeFilter === 'creneau' && styles.scopeTextActive]}>Ce créneau</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.scopeBtn, scopeFilter === 'tous' && styles.scopeBtnActive]}
+                    onPress={() => setScopeFilter('tous')}
+                  >
+                    <MaterialCommunityIcons name="account-group" size={14} color={scopeFilter === 'tous' ? '#FFF' : COLORS.textMuted} />
+                    <Text style={[styles.scopeText, scopeFilter === 'tous' && styles.scopeTextActive]}>Tous les adhérents</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* QR Scan Action Button */}
+                <TouchableOpacity
+                  style={[styles.qrScanBtn, (isFuture || noOpenSeason) && { opacity: 0.5 }]}
+                  onPress={() => setQrScannerVisible(true)}
+                  disabled={isFuture || noOpenSeason}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="qrcode-scan" size={16} color="#FFF" />
+                  <Text style={styles.qrScanBtnText}>Scanner QR</Text>
+                </TouchableOpacity>
+
+                {/* Print Action Button */}
+                <TouchableOpacity
+                  style={[styles.printBtn, printing && { opacity: 0.6 }]}
+                  onPress={handlePrint}
+                  disabled={printing}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="printer" size={16} color="#FFF" />
+                  <Text style={styles.printBtnText}>{printing ? '...' : 'Imprimer'}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Search Bar */}
+              <View style={styles.searchContainer}>
+                <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textMuted} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Rechercher un adhérent par nom ou code..."
+                  placeholderTextColor={COLORS.textMuted}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                />
+                {searchQuery ? (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
+              {/* Stats Summary & Filter Bar */}
+              <View style={styles.statsBar}>
+                <TouchableOpacity
+                  style={[styles.statPill, statusFilter === 'tous' && styles.statPillActive]}
+                  onPress={() => setStatusFilter('tous')}
+                >
+                  <Text style={[styles.statVal, { color: COLORS.textPrimary }]}>{statsSummary.total}</Text>
+                  <Text style={styles.statLbl}>Tous</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.statPill, { backgroundColor: COLORS.success + '15' }, statusFilter === 'present' && styles.statPillActiveSuccess]}
+                  onPress={() => setStatusFilter('present')}
+                >
+                  <Text style={[styles.statVal, { color: COLORS.success }, statusFilter === 'present' && { color: '#FFF' }]}>{statsSummary.presents}</Text>
+                  <Text style={[styles.statLbl, statusFilter === 'present' && { color: '#FFF' }]}>Présents</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.statPill, { backgroundColor: COLORS.danger + '15' }, statusFilter === 'absent' && styles.statPillActiveDanger]}
+                  onPress={() => setStatusFilter('absent')}
+                >
+                  <Text style={[styles.statVal, { color: COLORS.danger }, statusFilter === 'absent' && { color: '#FFF' }]}>{statsSummary.absents}</Text>
+                  <Text style={[styles.statLbl, statusFilter === 'absent' && { color: '#FFF' }]}>Absents</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.statPill, { backgroundColor: COLORS.warning + '15' }, statusFilter === 'retard' && styles.statPillActiveWarning]}
+                  onPress={() => setStatusFilter('retard')}
+                >
+                  <Text style={[styles.statVal, { color: COLORS.warning }, statusFilter === 'retard' && { color: '#FFF' }]}>{statsSummary.retards}</Text>
+                  <Text style={[styles.statLbl, statusFilter === 'retard' && { color: '#FFF' }]}>Retards</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Main List */}
+              <ScrollView
+                style={styles.scroll}
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+              >
+                {filteredAdherents.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <MaterialCommunityIcons name="account-search" size={48} color={COLORS.textMuted} />
+                    <Text style={styles.emptyTitle}>Aucun adhérent dans cette liste</Text>
+                    <Text style={styles.emptyText}>
+                      {statusFilter === 'tous'
+                        ? `Aucun adhérent inscrit ne correspond à ce créneau.`
+                        : `Aucun adhérent avec le statut "${statusFilter}" pour cette séance.`}
+                    </Text>
+                  </View>
+                ) : (
+                  filteredAdherents.map(adherent => {
+                    const current = presenceMap[adherent.id] || { statut: 'present', remarque: '' };
+                    return (
+                      <View key={adherent.id} style={styles.adherentCard}>
+                        <View style={styles.cardHeader}>
+                          <View style={styles.avatar}>
+                            {adherent.photo ? (
+                              <Image source={{ uri: adherent.photo }} style={styles.photo} />
+                            ) : (
+                              <View style={styles.photoPlaceholder}>
+                                <Text style={styles.photoIcon}>👤</Text>
+                              </View>
+                            )}
+                          </View>
+                          <View style={styles.adherentInfo}>
+                            <Text style={styles.adherentName}>{adherent.prenom} {adherent.nom}</Text>
+                            <Text style={styles.adherentCode}>{adherent.code}</Text>
+                          </View>
+                          {current.statut === 'retard' && (
+                            <View style={styles.retardBadge}>
+                              <MaterialCommunityIcons name="clock-alert" size={12} color={COLORS.warning} />
+                              <Text style={styles.retardBadgeText}>Retard (&gt;20 min)</Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Status Toggle Buttons */}
+                        <View style={styles.statusRow}>
+                          <TouchableOpacity
+                            style={[
+                              styles.statusBtn,
+                              current.statut === 'present' && styles.btnPresent,
+                              current.statut === 'retard' && styles.btnRetard,
+                            ]}
+                            onPress={() => handleStatutChange(adherent.id, 'present')}
+                          >
+                            <MaterialCommunityIcons
+                              name={current.statut === 'retard' ? 'clock-alert' : 'check-circle'}
+                              size={16}
+                              color={['present', 'retard'].includes(current.statut) ? '#FFF' : (current.statut === 'retard' ? COLORS.warning : COLORS.success)}
+                            />
+                            <Text style={[styles.statusBtnText, ['present', 'retard'].includes(current.statut) && styles.textActive]}>
+                              {current.statut === 'retard' ? 'Présent (Retard)' : 'Présent'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.statusBtn, current.statut === 'absent' && styles.btnAbsent]}
+                            onPress={() => handleStatutChange(adherent.id, 'absent')}
+                          >
+                            <MaterialCommunityIcons name="close-circle" size={16} color={current.statut === 'absent' ? '#FFF' : COLORS.danger} />
+                            <Text style={[styles.statusBtnText, current.statut === 'absent' && styles.textActive]}>Absent</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Note input */}
+                        <TextInput
+                          style={styles.remarqueInput}
+                          value={current.remarque}
+                          onChangeText={(val) => handleRemarqueChange(adherent.id, val)}
+                          placeholder="Remarque (ex: Arrivé à 18h15, Justificatif médical)"
+                          placeholderTextColor={COLORS.textMuted}
+                        />
+                      </View>
+                    );
+                  })
+                )}
+              </ScrollView>
+
+              {/* Footer Save Button */}
+              {adherents.length > 0 && (
+                <View style={styles.footer}>
+                  <TouchableOpacity
+                    style={[styles.saveBtn, (isFuture || isBlocked || noOpenSeason) && { backgroundColor: COLORS.textMuted }]}
+                    onPress={handleSave}
+                    disabled={saving || isFuture || isBlocked || noOpenSeason}
+                  >
+                    <MaterialCommunityIcons
+                      name={isFuture || isBlocked ? 'cancel' : 'content-save'}
+                      size={20}
+                      color="#FFF"
+                    />
+                    <Text style={styles.saveBtnText}>
+                      {noOpenSeason
+                        ? 'Saison ouverte requise'
+                        : isFuture
+                        ? 'Date future (Saisie interdite)'
+                        : slotStatus === 'ended' || slotStatus === 'not_today'
+                        ? 'Créneau terminé'
+                        : slotStatus === 'upcoming'
+                        ? 'Créneau non débuté'
+                        : saving
+                        ? 'Enregistrement...'
+                        : 'Enregistrer la séance'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>
           )}
         </>
       )}
@@ -903,8 +988,43 @@ export default function PresencesScreen({ route }) {
 
 const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
+  daySelectorSection: {
+    backgroundColor: COLORS.bgCard,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  jourScroll: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  jourChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.bgInput,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  jourChipActive: {
+    backgroundColor: COLORS.primary + '25',
+    borderColor: COLORS.primary,
+  },
+  jourChipToday: {
+    borderColor: COLORS.primary + '60',
+  },
+  jourChipText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  jourChipTextActive: {
+    color: COLORS.primary,
+    fontWeight: '800',
+  },
+
   selectorSection: {
-    paddingTop: 12,
+    paddingTop: 10,
     paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
@@ -920,24 +1040,6 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 12,
     fontWeight: '600',
-  },
-  noSlotToday: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginHorizontal: 16,
-    marginBottom: 4,
-    backgroundColor: COLORS.bgCard,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  noSlotTodayText: {
-    color: COLORS.textMuted,
-    fontSize: 13,
-    fontStyle: 'italic',
   },
   creneauScroll: {
     paddingHorizontal: 16,
@@ -955,9 +1057,100 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     backgroundColor: COLORS.primary + '20',
     borderColor: COLORS.primary,
   },
+  creneauChipHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   creneauChipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '700' },
   creneauChipTextSelected: { color: COLORS.primary },
   creneauChipCat: { color: COLORS.textMuted, fontSize: 11, fontWeight: '600', marginTop: 2 },
+  slotBadgeOngoing: {
+    backgroundColor: COLORS.success + '25',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  slotBadgeOngoingText: {
+    color: COLORS.success,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  slotBadgeUpcoming: {
+    backgroundColor: COLORS.warning + '25',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  slotBadgeUpcomingText: {
+    color: COLORS.warning,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  slotBadgeEnded: {
+    backgroundColor: COLORS.textMuted + '25',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  slotBadgeEndedText: {
+    color: COLORS.textMuted,
+    fontSize: 9,
+    fontWeight: '700',
+  },
+
+  emptySlotCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 28,
+    backgroundColor: COLORS.bgCard,
+    borderRadius: RADIUS.xl,
+    margin: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    gap: 12,
+    ...SHADOWS.card,
+  },
+  emptySlotIconBg: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: COLORS.bgInput,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  emptySlotTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  emptySlotSubtitle: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 320,
+  },
+  emptySlotPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: RADIUS.md,
+    marginTop: 6,
+    ...SHADOWS.button,
+  },
+  emptySlotPrimaryBtnText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
 
   dateBar: {
     flexDirection: 'row',
@@ -983,19 +1176,6 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
-  },
-  todayBtn: {
-    backgroundColor: COLORS.primary + '15',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: RADIUS.sm,
-    borderWidth: 1,
-    borderColor: COLORS.primary + '30',
-  },
-  todayText: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: '700',
   },
   dateBox: {
     flexDirection: 'row',
@@ -1101,12 +1281,27 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     backgroundColor: COLORS.secondary,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: RADIUS.md,
     ...SHADOWS.button,
   },
   qrScanBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  printBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    ...SHADOWS.button,
+  },
+  printBtnText: {
     color: '#FFF',
     fontSize: 12,
     fontWeight: '800',
@@ -1395,5 +1590,23 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: COLORS.warning,
     fontSize: 12,
     fontWeight: '600',
+  },
+  countdownPrintBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: RADIUS.md,
+    marginTop: 6,
+    width: '100%',
+    ...SHADOWS.button,
+  },
+  countdownPrintBtnText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

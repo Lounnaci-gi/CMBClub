@@ -218,7 +218,9 @@ const useStore = create((set, get) => ({
   getEligibleAdherents: async (creneauId, saisonId) => {
     return await getEligibleAdherentsForCreneau(creneauId, saisonId);
   },
-  savePresencesSeance: async (creneauId, dateSeance, saisonId, presencesList) => {
+  savePresencesSeance: async (creneauId, dateSeance, saisonIdOrPresences, maybePresences) => {
+    let saisonId = typeof saisonIdOrPresences === 'string' ? saisonIdOrPresences : get().saisonActive?.id;
+    let presencesList = Array.isArray(saisonIdOrPresences) ? saisonIdOrPresences : (maybePresences || []);
     await savePresencesSeance(creneauId, dateSeance, saisonId, presencesList);
   },
   getPresencesAdherent: async (adherentId, saisonId) => {

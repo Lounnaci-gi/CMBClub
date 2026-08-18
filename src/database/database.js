@@ -1778,7 +1778,10 @@ export async function getEligibleAdherentsForCreneau(creneauId, saisonId) {
   return scored.map(s => s.adherent);
 }
 
-export async function savePresencesSeance(creneauId, dateSeance, saisonId, presencesList) {
+export async function savePresencesSeance(creneauId, dateSeance, saisonIdOrPresences, maybePresences) {
+  const saisonId = typeof saisonIdOrPresences === 'string' ? saisonIdOrPresences : null;
+  const presencesList = Array.isArray(saisonIdOrPresences) ? saisonIdOrPresences : (maybePresences || []);
+
   if (isCloudflareEnabled()) {
     try {
       await CloudflareAPI.savePresencesSeance(creneauId, dateSeance, saisonId, presencesList);

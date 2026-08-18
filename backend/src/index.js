@@ -1085,8 +1085,9 @@ app.get('/api/presences/seance', async (c) => {
 app.post('/api/presences/seance', async (c) => {
   try {
     const { creneauId, dateSeance, saisonId, presencesList } = await c.req.json();
-    const seasonCheck = await requireOpenActiveSeason(c, saisonId);
+    const seasonCheck = await requireOpenActiveSeason(c, typeof saisonId === 'string' ? saisonId : undefined);
     if (seasonCheck.error) return seasonCheck.error;
+    const effectiveSaisonId = seasonCheck.saison.id;
     const now = new Date().toISOString();
     const statements = [];
 
@@ -1100,7 +1101,7 @@ app.post('/api/presences/seance', async (c) => {
              statut = excluded.statut,
              remarque = excluded.remarque,
              updatedAt = excluded.updatedAt`
-        ).bind(pid, creneauId, item.adherentId, saisonId, dateSeance, item.statut || 'present', item.remarque || '', now, now)
+        ).bind(pid, creneauId, item.adherentId, effectiveSaisonId, dateSeance, item.statut || 'present', item.remarque || '', now, now)
       );
     }
 

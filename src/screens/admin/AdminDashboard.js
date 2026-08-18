@@ -2,7 +2,7 @@
 import React, { useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, StatusBar,
+  RefreshControl, StatusBar, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import StatCard from '../../components/StatCard';
 import useTheme, { useResponsive } from '../../theme/useTheme';
+import { findActiveOrUpcomingSlotToday, getLocalDateString } from '../../utils/creneaux';
 
 export default function AdminDashboard({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -19,14 +20,14 @@ export default function AdminDashboard({ navigation }) {
     () => createStyles(COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding),
     [COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding],
   );
-  const { user, stats, saisons, saisonActive, loadStats, loadSaisons, loadAdherents, loadConfig, logout } = useStore();
+  const { user, stats, saisons, saisonActive, loadStats, loadSaisons, loadAdherents, loadCreneaux, loadConfig, logout } = useStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([loadSaisons(), loadAdherents(), loadConfig()]);
+    await Promise.all([loadSaisons(), loadAdherents(), loadConfig(), loadCreneaux()]);
     const saison = useStore.getState().saisonActive;
     if (saison) await loadStats(saison.id);
-  }, [loadSaisons, loadAdherents, loadConfig, loadStats]);
+  }, [loadSaisons, loadAdherents, loadConfig, loadCreneaux, loadStats]);
 
   useFocusEffect(useCallback(() => { loadAll(); }, [loadAll]));
 
@@ -36,9 +37,37 @@ export default function AdminDashboard({ navigation }) {
     setRefreshing(false);
   };
 
+  const handleFaireAppel = useCallback(() => {
+    const currentCreneaux = useStore.getState().creneaux || [];
+    const result = findActiveOrUpcomingSlotToday(currentCreneaux);
+
+    if (result.slot) {
+      navigation.navigate('Presences', {
+        creneauId: result.slot.id,
+        dateSeance: getLocalDateString(),
+      });
+    } else {
+      const isEnded = result.reason === 'all_slots_ended';
+      const title = isEnded ? "Créneaux du jour terminés" : "Aucun créneau aujourd'hui";
+      const message = isEnded
+        ? `Tous les créneaux prévus pour aujourd'hui (${result.todayJour}) sont déjà terminés.`
+        : `Il n'y a aucun créneau d'entraînement prévu pour aujourd'hui (${result.todayJour}).`;
+
+      Alert.alert(
+        title,
+        message,
+        [
+          { text: 'Voir le planning', onPress: () => navigation.navigate('Creneaux') },
+          { text: 'Consulter l\'appel', onPress: () => navigation.navigate('Presences') },
+          { text: 'Fermer', style: 'cancel' },
+        ]
+      );
+    }
+  }, [navigation]);
+
   const quickActions = [
     { icon: 'account-plus', label: 'Nouvel adhérent', color: COLORS.primary, screen: 'AdherentForm' },
-    { icon: 'clipboard-check-outline', label: 'Faire l\'appel', color: COLORS.success, screen: 'Presences' },
+    { icon: 'clipboard-check-outline', label: 'Faire l\'appel', color: COLORS.success, onPress: handleFaireAppel },
     { icon: 'clock-outline', label: 'Créneaux', color: COLORS.secondary, screen: 'Creneaux' },
     { icon: 'account-group', label: 'Adhérents', color: COLORS.catCadet, screen: 'AdherentList' },
     { icon: 'calendar-star', label: 'Saisons', color: COLORS.catMinime, screen: 'Seasons' },
@@ -116,7 +145,13 @@ export default function AdminDashboard({ navigation }) {
               <TouchableOpacity
                 key={action.label}
                 style={[styles.actionCard, { width: actionCardWidth, borderColor: action.color + '30' }]}
-                onPress={() => navigation.navigate(action.screen)}
+                onPress={() => {
+                  if (action.onPress) {
+                    action.onPress();
+                  } else if (action.screen) {
+                    navigation.navigate(action.screen);
+                  }
+                }}
                 activeOpacity={0.8}
               >
                 <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
