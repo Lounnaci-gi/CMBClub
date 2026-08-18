@@ -287,6 +287,26 @@ async function initDatabase(database) {
     // La colonne existe déjà, on ignore
   }
 
+  // Migration : table des notifications d'absence envoyées par les adhérents
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS notifications_absence (
+      id TEXT PRIMARY KEY,
+      adherentId TEXT NOT NULL,
+      creneauId TEXT NOT NULL,
+      dateSeance TEXT NOT NULL,
+      message TEXT,
+      lu INTEGER DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (adherentId) REFERENCES adherents(id),
+      FOREIGN KEY (creneauId) REFERENCES creneaux(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_notif_absence_creneau_date
+      ON notifications_absence(creneauId, dateSeance);
+    CREATE INDEX IF NOT EXISTS idx_notif_absence_adherent
+      ON notifications_absence(adherentId);
+  `);
+
+
   // Seed config defaults
   await database.runAsync(
     `INSERT OR IGNORE INTO config (key, value) VALUES ('fraisInscription', '2000')`,
@@ -2551,6 +2571,96 @@ export async function estimerPaiementGroupe(adherentId, saisonId, nbMois) {
     reductionAdherent,
   });
 }
+
+
+// ──────────────── NOTIFICATIONS D'ABSENCE ────────────────
+
+/**
+ * L'adhérent envoie une notification d'absence pour un créneau à une date donnée.
+ * Si une notification existe déjà pour ce triplet (adherentId, creneauId, dateSeance),
+ * elle est remplacée (upsert).
+ */
+export async function createNotifAbsence({ adherentId, creneauId, dateSeance, message = '' }) {
+  const database = await getDatabase();
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await database.runAsync(
+    `INSERT OR REPLACE INTO notifications_absence
+       (id, adherentId, creneauId, dateSeance, message, lu, createdAt)
+     VALUES (
+       COALESCE(
+         (SELECT id FROM notifications_absence
+          WHERE adherentId = ? AND creneauId = ? AND dateSeance = ?),
+         ?
+       ),
+       ?, ?, ?, ?, 0, COALESCE(
+         (SELECT createdAt FROM notifications_absence
+          WHERE adherentId = ? AND creneauId = ? AND dateSeance = ?),
+         ?
+       )
+     )`,
+    [adherentId, creneauId, dateSeance,
+     id,
+     adherentId, creneauId, dateSeance, message,
+     adherentId, creneauId, dateSeance,
+     now],
+  );
+}
+
+/**
+ * Récupère toutes les notifications d'absence pour un créneau à une date donnée.
+ * Retourne les infos de l'adhérent en JOIN.
+ */
+export async function getNotifAbsencesForCreneau(creneauId, dateSeance) {
+  const database = await getDatabase();
+  return database.getAllAsync(
+    `SELECT n.*, a.nom, a.prenom, a.code, a.photo
+     FROM notifications_absence n
+     LEFT JOIN adherents a ON a.id = n.adherentId
+     WHERE n.creneauId = ? AND n.dateSeance = ?
+     ORDER BY n.createdAt ASC`,
+    [creneauId, dateSeance],
+  );
+}
+
+/**
+ * Récupère les notifications non lues d'un adhérent.
+ */
+export async function getNotifAbsencesByAdherent(adherentId) {
+  const database = await getDatabase();
+  return database.getAllAsync(
+    `SELECT n.*, c.jour, c.heureDebut, c.heureFin, c.discipline
+     FROM notifications_absence n
+     LEFT JOIN creneaux c ON c.id = n.creneauId
+     WHERE n.adherentId = ?
+     ORDER BY n.dateSeance DESC, n.createdAt DESC`,
+    [adherentId],
+  );
+}
+
+/**
+ * Marque une notification comme lue.
+ */
+export async function markNotifAbsenceLue(notifId) {
+  const database = await getDatabase();
+  await database.runAsync(
+    `UPDATE notifications_absence SET lu = 1 WHERE id = ?`,
+    [notifId],
+  );
+}
+
+/**
+ * Supprime une notification d'absence (l'adhérent annule son signalement).
+ */
+export async function deleteNotifAbsence(adherentId, creneauId, dateSeance) {
+  const database = await getDatabase();
+  await database.runAsync(
+    `DELETE FROM notifications_absence
+     WHERE adherentId = ? AND creneauId = ? AND dateSeance = ?`,
+    [adherentId, creneauId, dateSeance],
+  );
+}
+
 
 
 

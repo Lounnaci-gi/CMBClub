@@ -23,6 +23,7 @@ import {
   findActiveOrUpcomingSlotToday,
 } from '../../utils/creneaux';
 import { printPresencesSeance } from '../../utils/printPresencesSeance';
+import { getNotifAbsencesForCreneau, markNotifAbsenceLue } from '../../database/database';
 
 export default function PresencesScreen({ route, navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -56,6 +57,8 @@ export default function PresencesScreen({ route, navigation }) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [qrScannerVisible, setQrScannerVisible] = useState(false);
+  const [notifAbsences, setNotifAbsences]       = useState([]); // notifications d'absence adhérents
+  const [showNotifs, setShowNotifs]             = useState(false);
 
   // Synchronise selectedJour si un initialCreneauId est reçu
   useEffect(() => {
@@ -183,6 +186,14 @@ export default function PresencesScreen({ route, navigation }) {
       setPresenceMap(map);
       setIsSaved(hasSavedRecords);
       setHasUnsavedChanges(false);
+
+      // Charger les notifications d'absence des adhérents pour ce créneau/date
+      try {
+        const notifs = await getNotifAbsencesForCreneau(targetCreneau.id, dateSeance);
+        setNotifAbsences(notifs || []);
+      } catch (_e) {
+        setNotifAbsences([]);
+      }
     } catch (e) {
       Alert.alert('Erreur', e.message || 'Impossible de charger les présences.');
     } finally {
@@ -888,6 +899,73 @@ export default function PresencesScreen({ route, navigation }) {
                 ) : null}
               </View>
 
+              {/* ── Panneau notifications d'absence adhérents ── */}
+              {notifAbsences.length > 0 && (
+                <View style={styles.notifAbsencePanel}>
+                  <TouchableOpacity
+                    style={styles.notifAbsenceHeader}
+                    onPress={() => setShowNotifs(!showNotifs)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.notifAbsenceLeft}>
+                      <View style={styles.notifAbsenceBadge}>
+                        <Text style={styles.notifAbsenceBadgeText}>{notifAbsences.length}</Text>
+                      </View>
+                      <MaterialCommunityIcons name="bell-alert-outline" size={16} color={COLORS.warning} />
+                      <Text style={styles.notifAbsenceTitle}>
+                        {notifAbsences.length} signalement{notifAbsences.length > 1 ? 's' : ''} d'absence
+                      </Text>
+                    </View>
+                    <MaterialCommunityIcons
+                      name={showNotifs ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={COLORS.textMuted}
+                    />
+                  </TouchableOpacity>
+
+                  {showNotifs && (
+                    <View style={styles.notifAbsenceList}>
+                      {notifAbsences.map(n => (
+                        <View key={n.id} style={[styles.notifAbsenceItem, n.lu === 1 && styles.notifAbsenceItemLu]}>
+                          <View style={styles.notifAbsenceItemLeft}>
+                            <View style={styles.notifAbsenceAvatar}>
+                              <Text style={{ fontSize: 16 }}>🔔</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.notifAbsenceName}>
+                                {n.prenom} {n.nom}
+                                <Text style={styles.notifAbsenceCode}> · {n.code}</Text>
+                              </Text>
+                              {n.message ? (
+                                <Text style={styles.notifAbsenceMessage}>"{n.message}"</Text>
+                              ) : (
+                                <Text style={styles.notifAbsenceNoMsg}>Absence signalée sans motif</Text>
+                              )}
+                            </View>
+                          </View>
+                          {n.lu === 0 && (
+                            <TouchableOpacity
+                              style={styles.notifAbsenceLuBtn}
+                              onPress={async () => {
+                                await markNotifAbsenceLue(n.id);
+                                setNotifAbsences(prev =>
+                                  prev.map(x => x.id === n.id ? { ...x, lu: 1 } : x)
+                                );
+                              }}
+                            >
+                              <MaterialCommunityIcons name="check" size={14} color={COLORS.success} />
+                            </TouchableOpacity>
+                          )}
+                          {n.lu === 1 && (
+                            <MaterialCommunityIcons name="check-circle" size={16} color={COLORS.success} />
+                          )}
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+
               {/* Stats Summary & Filter Bar */}
               <View style={styles.statsBar}>
                 <TouchableOpacity
@@ -954,6 +1032,7 @@ export default function PresencesScreen({ route, navigation }) {
                 ) : (
                   filteredAdherents.map(adherent => {
                     const current = presenceMap[adherent.id] || { statut: null, remarque: '' };
+                    const notif = notifAbsences.find(n => n.adherentId === adherent.id);
                     return (
                       <View key={adherent.id} style={styles.adherentCard}>
                         <View style={styles.cardHeader}>
@@ -982,6 +1061,16 @@ export default function PresencesScreen({ route, navigation }) {
                             </View>
                           )}
                         </View>
+
+                        {/* Badge de signalement d'absence si présent */}
+                        {notif && (
+                          <View style={styles.adherentNotifBadge}>
+                            <MaterialCommunityIcons name="bell-alert" size={13} color={COLORS.warning} />
+                            <Text style={styles.adherentNotifText}>
+                              Absence signalée {notif.message ? `: "${notif.message}"` : ''}
+                            </Text>
+                          </View>
+                        )}
 
                         {/* Status Toggle Buttons */}
                         <View style={styles.statusRow}>
@@ -1723,5 +1812,115 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     color: '#FFF',
     fontSize: 13,
     fontWeight: '800',
+  },
+
+  /* Panneau notifications d'absence */
+  notifAbsencePanel: {
+    backgroundColor: COLORS.warning + '12',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.warning + '40',
+    overflow: 'hidden',
+  },
+  notifAbsenceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  notifAbsenceLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  notifAbsenceBadge: {
+    backgroundColor: COLORS.warning,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: RADIUS.full,
+  },
+  notifAbsenceBadgeText: {
+    color: '#000',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  notifAbsenceTitle: {
+    color: COLORS.warning,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  notifAbsenceList: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.warning + '30',
+    padding: 10,
+    gap: 8,
+  },
+  notifAbsenceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.sm,
+    padding: 10,
+    gap: 8,
+  },
+  notifAbsenceItemLu: {
+    opacity: 0.7,
+  },
+  notifAbsenceItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    flex: 1,
+  },
+  notifAbsenceAvatar: {
+    marginTop: 2,
+  },
+  notifAbsenceName: {
+    color: COLORS.textPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  notifAbsenceCode: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  notifAbsenceMessage: {
+    color: COLORS.warning,
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  notifAbsenceNoMsg: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  notifAbsenceLuBtn: {
+    backgroundColor: COLORS.success + '20',
+    padding: 6,
+    borderRadius: RADIUS.full,
+  },
+
+  /* Badge dans la carte de l'adhérent */
+  adherentNotifBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.warning + '18',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.warning + '35',
+    marginVertical: 4,
+  },
+  adherentNotifText: {
+    color: COLORS.warning,
+    fontSize: 11.5,
+    fontWeight: '600',
+    flex: 1,
   },
 });
