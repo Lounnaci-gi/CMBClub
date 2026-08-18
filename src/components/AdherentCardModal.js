@@ -58,8 +58,8 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
               gap: 20px;
             }
             .card {
-              width: 85.6mm;
-              min-height: 58mm;
+              width: 85mm;
+              min-height: 54mm;
               background: linear-gradient(135deg, #0A1520 0%, #162A3B 100%);
               border-radius: 12px;
               box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
@@ -234,7 +234,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
                     <div class="subtitle">Carte Officielle d'Adhérent</div>
                   </div>
                 </div>
-                <div class="season-badge">2025-2026</div>
+                <div class="season-badge">${saisonActive?.label || '2025-2026'}</div>
               </div>
 
               <div class="card-body">

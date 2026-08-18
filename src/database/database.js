@@ -553,7 +553,19 @@ export async function setConfig(key, value) {
 export async function getSaisons() {
   if (isCloudflareEnabled()) {
     try {
-      return await CloudflareAPI.getSaisons();
+      const remoteSaisons = await CloudflareAPI.getSaisons();
+      if (Array.isArray(remoteSaisons) && remoteSaisons.length > 0) {
+        const db = await getDatabase();
+        for (const s of remoteSaisons) {
+          const dateFin = s.dateFin || `${s.annee}-12-31`;
+          await db.runAsync(
+            `INSERT OR REPLACE INTO saisons (id, label, annee, dateDebut, dateFin, actif, statut, createdAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
+            [s.id, s.label, s.annee, s.dateDebut, dateFin, s.actif ? 1 : 0, s.statut || 'ouvert', s.createdAt || null]
+          );
+        }
+      }
+      return remoteSaisons;
     } catch (e) {
       logCloudflareFallback('getSaisons', e);
     }
@@ -566,7 +578,19 @@ export async function getSaisonActive() {
   if (isCloudflareEnabled()) {
     try {
       const saison = await CloudflareAPI.getSaisonActive();
-      return saison?.statut === 'ouvert' ? saison : null;
+      if (saison && (!saison.statut || saison.statut === 'ouvert')) {
+        const db = await getDatabase();
+        const dateFin = saison.dateFin || `${saison.annee}-12-31`;
+        await db.withTransactionAsync(async () => {
+          await db.runAsync('UPDATE saisons SET actif = 0');
+          await db.runAsync(
+            `INSERT OR REPLACE INTO saisons (id, label, annee, dateDebut, dateFin, actif, statut, createdAt)
+             VALUES (?, ?, ?, ?, ?, 1, ?, COALESCE(?, datetime('now')))`,
+            [saison.id, saison.label, saison.annee, saison.dateDebut, dateFin, saison.statut || 'ouvert', saison.createdAt || null]
+          );
+        });
+        return saison;
+      }
     } catch (e) {
       logCloudflareFallback('getSaisonActive', e);
     }
@@ -602,6 +626,19 @@ export async function requireOpenActiveSeason(database, saisonId) {
 
   if (!saison) throw new Error(OPEN_SEASON_REQUIRED_MESSAGE);
   if (saisonId && saison.id !== saisonId) {
+    const targetSaison = await database.getFirstAsync(
+      "SELECT id FROM saisons WHERE id = ? AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1",
+      [saisonId]
+    );
+
+    if (targetSaison) {
+      await database.withTransactionAsync(async () => {
+        await database.runAsync('UPDATE saisons SET actif = 0');
+        await database.runAsync('UPDATE saisons SET actif = 1 WHERE id = ?', [saisonId]);
+      });
+      return targetSaison;
+    }
+
     throw new Error('La saison concernée n’est pas la saison ouverte active.');
   }
   return saison;

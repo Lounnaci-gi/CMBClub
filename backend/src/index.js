@@ -178,6 +178,18 @@ async function requireOpenActiveSeason(c, saisonId) {
   }
 
   if (saisonId && saisonId !== activeSaison.id) {
+    const targetSaison = await c.env.DB.prepare(
+      "SELECT id FROM saisons WHERE id = ? AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
+    ).bind(saisonId).first();
+
+    if (targetSaison) {
+      await c.env.DB.batch([
+        c.env.DB.prepare('UPDATE saisons SET actif = 0'),
+        c.env.DB.prepare('UPDATE saisons SET actif = 1 WHERE id = ?').bind(targetSaison.id),
+      ]);
+      return { saison: targetSaison };
+    }
+
     return { error: err(c, 'La saison concernée n’est pas la saison ouverte active.', 409) };
   }
 
@@ -562,9 +574,25 @@ app.get('/api/saisons', async (c) => {
 
 app.get('/api/saisons/active', async (c) => {
   try {
-    const active = await c.env.DB.prepare(
+    let active = await c.env.DB.prepare(
       "SELECT * FROM saisons WHERE actif = 1 AND COALESCE(statut, 'ouvert') = 'ouvert' LIMIT 1"
     ).first();
+
+    if (!active) {
+      const { results: openSaisons } = await c.env.DB.prepare(
+        "SELECT id FROM saisons WHERE COALESCE(statut, 'ouvert') = 'ouvert' ORDER BY annee DESC, createdAt DESC LIMIT 2"
+      ).all();
+
+      if (openSaisons?.length === 1) {
+        const fallback = openSaisons[0];
+        await c.env.DB.batch([
+          c.env.DB.prepare('UPDATE saisons SET actif = 0'),
+          c.env.DB.prepare('UPDATE saisons SET actif = 1 WHERE id = ?').bind(fallback.id),
+        ]);
+        active = await c.env.DB.prepare('SELECT * FROM saisons WHERE id = ?').bind(fallback.id).first();
+      }
+    }
+
     return ok(c, active || null);
   } catch (e) {
     return err(c, e.message, 500);

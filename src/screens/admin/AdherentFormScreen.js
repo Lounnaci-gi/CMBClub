@@ -58,13 +58,14 @@ export default function AdherentFormScreen({ navigation, route }) {
   const { adherentId } = route.params || {};
   const isEdit = !!adherentId;
   const {
-    adherents, createAdherent, updateAdherent, saisonActive, config,
+    adherents, createAdherent, updateAdherent, deleteAdherent, saisonActive, loadSaisons, config,
     createPaiement, enrollAdherent, disciplines, loadDisciplines,
   } = useStore();
 
   useEffect(() => {
     loadDisciplines();
-  }, [loadDisciplines]);
+    loadSaisons();
+  }, [loadDisciplines, loadSaisons]);
 
   const activeDisciplines = useMemo(() => {
     if (disciplines && disciplines.length > 0) {
@@ -205,7 +206,8 @@ export default function AdherentFormScreen({ navigation, route }) {
   };
 
   const handleSave = async () => {
-    if (!isEdit && !saisonActive) {
+    const currentActiveSeason = saisonActive || useStore.getState().saisonActive;
+    if (!isEdit && !currentActiveSeason) {
       Alert.alert('Saison requise', 'Créez ou rouvrez une saison avant d’ajouter un adhérent.');
       return;
     }
@@ -218,6 +220,7 @@ export default function AdherentFormScreen({ navigation, route }) {
     }
     if (!validate()) return;
     setLoading(true);
+    let createdAdherentId = null;
     try {
       if (isEdit) {
         await updateAdherent({ ...form, code: existingCode });
@@ -229,15 +232,16 @@ export default function AdherentFormScreen({ navigation, route }) {
         const dateInscription = today.toISOString().slice(0, 10);
         const adherent = { ...form, id: uuidv4(), code, dateInscription };
         await createAdherent(adherent);
+        createdAdherentId = adherent.id;
         setCreatedAdherent(adherent);
         const password = (form.dateNaissance || '').replace(/-/g, '').slice(2);
 
-        if (saisonActive) {
+        if (currentActiveSeason) {
           const todayIso = today.toISOString();
-          await enrollAdherent(adherent.id, saisonActive.id, todayIso, form.assure ? 1 : 0);
+          await enrollAdherent(adherent.id, currentActiveSeason.id, todayIso, form.assure ? 1 : 0);
 
           let initialPaymentRemaining = getInitialPaymentAmount();
-          const schedule = generatePaymentSchedule(saisonActive.annee, config, todayIso);
+          const schedule = generatePaymentSchedule(currentActiveSeason.annee, config, todayIso);
 
           for (const s of schedule) {
             let montantPaye = 0;
@@ -264,7 +268,7 @@ export default function AdherentFormScreen({ navigation, route }) {
             await createPaiement({
               id: uuidv4(),
               adherentId: adherent.id,
-              saisonId: saisonActive.id,
+              saisonId: currentActiveSeason.id,
               type: s.type,
               label: s.label,
               mois: s.month,
@@ -313,6 +317,14 @@ export default function AdherentFormScreen({ navigation, route }) {
         );
       }
     } catch (e) {
+      if (createdAdherentId) {
+        try {
+          await deleteAdherent(createdAdherentId);
+        } catch (cleanupErr) {
+          console.error('Erreur lors du nettoyage de l’adhérent créé partiellement :', cleanupErr);
+        }
+        setCreatedAdherent(null);
+      }
       Alert.alert('Erreur', e.message);
     } finally {
       setLoading(false);

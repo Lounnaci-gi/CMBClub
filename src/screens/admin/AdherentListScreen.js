@@ -15,6 +15,7 @@ import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/paym
 import { formatDate } from '../../utils/seasons';
 import { getPaymentStatusByAdherent } from '../../database/database';
 import ValidationAssuranceModal from '../../components/ValidationAssuranceModal';
+import { printAllAdherentCards } from '../../utils/printAdherentCards';
 
 export default function AdherentListScreen({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -45,6 +46,7 @@ export default function AdherentListScreen({ navigation }) {
   const [payStatusMap,  setPayStatusMap]  = useState({});
   const [refreshing,    setRefreshing]    = useState(false);
   const [printing,      setPrinting]      = useState(false);
+  const [printingCards, setPrintingCards] = useState(false);
   const [filtersOpen,   setFiltersOpen]   = useState(false);
   const [showAssuranceModal, setShowAssuranceModal] = useState(false);
 
@@ -215,6 +217,24 @@ export default function AdherentListScreen({ navigation }) {
     }
   };
 
+  const handlePrintCards = async () => {
+    if (filtered.length === 0) {
+      Alert.alert('Information', 'Aucun adhérent à imprimer avec les filtres actuels.');
+      return;
+    }
+    setPrintingCards(true);
+    try {
+      await printAllAdherentCards({
+        adherents: filtered,
+        saison: saisonActive,
+      });
+    } catch (e) {
+      Alert.alert("Erreur d'impression des cartes", e.message);
+    } finally {
+      setPrintingCards(false);
+    }
+  };
+
   // ── Chip helpers ──────────────────────────────────────────────────────────
   const renderChip = ({ value, label, icon, color }, active, onPress) => (
     <TouchableOpacity
@@ -360,18 +380,35 @@ export default function AdherentListScreen({ navigation }) {
           {activeFiltersCount > 0 ? ' (filtrés)' : ''}
         </Text>
 
-        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Bouton validation assurances */}
           <TouchableOpacity
             style={styles.assurancesBtn}
             onPress={() => setShowAssuranceModal(true)}
             activeOpacity={0.8}
           >
-            <MaterialCommunityIcons name="shield-check" size={16} color="#10B981" />
+            <MaterialCommunityIcons name="shield-check" size={15} color="#10B981" />
             <Text style={styles.assurancesBtnText}>Assurances</Text>
           </TouchableOpacity>
 
-          {/* Bouton impression */}
+          {/* Bouton impression Cartes */}
+          <TouchableOpacity
+            style={styles.cardsBtn}
+            onPress={handlePrintCards}
+            disabled={printingCards}
+            activeOpacity={0.8}
+          >
+            {printingCards ? (
+              <ActivityIndicator size="small" color="#C084FC" />
+            ) : (
+              <>
+                <MaterialCommunityIcons name="badge-account-horizontal-outline" size={15} color="#C084FC" />
+                <Text style={styles.cardsBtnText}>Cartes ({filtered.length})</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Bouton impression liste */}
           <TouchableOpacity
             style={styles.printBtn}
             onPress={handlePrintList}
@@ -382,8 +419,8 @@ export default function AdherentListScreen({ navigation }) {
               <ActivityIndicator size="small" color="#38BDF8" />
             ) : (
               <>
-                <MaterialCommunityIcons name="printer" size={16} color="#38BDF8" />
-                <Text style={styles.printBtnText}>Imprimer</Text>
+                <MaterialCommunityIcons name="printer" size={15} color="#38BDF8" />
+                <Text style={styles.printBtnText}>Liste</Text>
               </>
             )}
           </TouchableOpacity>
@@ -668,25 +705,37 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     alignItems: 'center',
     gap: 6,
     backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1.5,
     borderColor: '#10B981',
   },
-  assurancesBtnText: { color: '#10B981', fontWeight: '700', fontSize: 13 },
+  assurancesBtnText: { color: '#10B981', fontWeight: '700', fontSize: 12.5 },
+  cardsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(168, 85, 247, 0.12)',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#A855F7',
+  },
+  cardsBtnText: { color: '#C084FC', fontWeight: '700', fontSize: 12.5 },
   printBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     backgroundColor: 'rgba(2, 132, 199, 0.12)',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1.5,
     borderColor: '#0284C7',
   },
-  printBtnText: { color: '#38BDF8', fontWeight: '700', fontSize: 13 },
+  printBtnText: { color: '#38BDF8', fontWeight: '700', fontSize: 12.5 },
 
   // List
   list: { paddingBottom: 100, paddingTop: 4 },
