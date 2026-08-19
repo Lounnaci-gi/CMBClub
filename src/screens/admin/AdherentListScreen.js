@@ -10,7 +10,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import CategoryBadge from '../../components/CategoryBadge';
 import useTheme, { useResponsive } from '../../theme/useTheme';
-import { CATEGORIES, DISCIPLINES, getCategoryByAge, getEffectiveCategory } from '../../utils/categories';
+import { CATEGORIES, DISCIPLINES, getCategoryByAge, getEffectiveCategory, calculateAge } from '../../utils/categories';
 import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
 import { getPaymentStatusByAdherent } from '../../database/database';
@@ -478,11 +478,29 @@ export default function AdherentListScreen({ navigation }) {
   );
 }
 
+// ── Helper icône discipline ──────────────────────────────────────────────────
+const getDisciplineIcon = (discipline) => {
+  if (!discipline) return '🏅';
+  const lower = discipline.toLowerCase();
+  if (lower.includes('kick') || lower.includes('box')) return '🥊';
+  if (lower.includes('nat') || lower.includes('swim')) return '🏊';
+  if (lower.includes('judo') || lower.includes('karat') || lower.includes('art') || lower.includes('lutte')) return '🥋';
+  if (lower.includes('foot') || lower.includes('ball')) return '⚽';
+  if (lower.includes('gym') || lower.includes('fit') || lower.includes('muscu')) return '🏋️';
+  if (lower.includes('run') || lower.includes('athle')) return '🏃';
+  return '🏅';
+};
+
 // ── Composant Carte Adhérent mémoïsé ─────────────────────────────────────────
 const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus, COLORS, styles, onPress }) {
   const cat = getEffectiveCategory(item);
   const isFemme = item.genre === 'F';
   const catColor = cat?.color || '#38BDF8';
+  const payColor = payStatus ? getStatusColor(payStatus) : null;
+  const payLabel = payStatus ? getStatusLabel(payStatus) : null;
+  const dateInsc = item.dateInscriptionSaison || item.dateInscription || item.createdAt?.slice(0, 10);
+  const age = item.dateNaissance ? calculateAge(item.dateNaissance) : null;
+  const discIcon = getDisciplineIcon(item.discipline);
 
   return (
     <TouchableOpacity
@@ -503,10 +521,10 @@ const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus,
 
       {/* Content */}
       <View style={styles.info}>
-        {/* Ligne 1 : Nom complet + Code */}
+        {/* Ligne 1 : Nom complet (NOM Prénom) + Code */}
         <View style={styles.nameRow}>
           <Text style={styles.name} numberOfLines={1}>
-            {item.prenom} {item.nom ? item.nom.toUpperCase() : ''}
+            {item.nom ? item.nom.toUpperCase() : ''} {item.prenom || ''}
           </Text>
           {item.code ? (
             <View style={styles.codeBadge}>
@@ -517,7 +535,7 @@ const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus,
           ) : null}
         </View>
 
-        {/* Ligne 2 : Badges (Catégorie, Genre, Assurance) */}
+        {/* Ligne 2 : Badges uniformisés (Catégorie, Genre, Assurance, Paiement) */}
         <View style={styles.badgesRow}>
           {/* Catégorie */}
           {cat && (
@@ -545,15 +563,36 @@ const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus,
             </View>
           ) : (
             <View style={styles.nonAssureBadge}>
-              <Text style={styles.nonAssureText}>Non assuré</Text>
+              <Text style={styles.nonAssureText}>❌ Non assuré</Text>
+            </View>
+          )}
+
+          {/* Paiement */}
+          {payLabel && payColor && (
+            <View style={[styles.payBadge, { backgroundColor: payColor + '18', borderColor: payColor + '50' }]}>
+              <Text style={[styles.payText, { color: payColor }]}>{payLabel}</Text>
             </View>
           )}
         </View>
 
-        {/* Ligne 3 : Discipline */}
-        <View style={styles.disciplineRow}>
-          <Text style={styles.disciplineIcon}>🥊</Text>
-          <Text style={styles.disciplineText}>{item.discipline || 'Natation'}</Text>
+        {/* Ligne 3 : Discipline & Métadonnées (Âge/naissance, inscription) */}
+        <View style={styles.metaRow}>
+          <View style={styles.disciplineTag}>
+            <Text style={styles.disciplineIcon}>{discIcon}</Text>
+            <Text style={styles.disciplineText}>{item.discipline || 'Non assignée'}</Text>
+          </View>
+
+          {age !== null && (
+            <Text style={styles.metaItem}>
+              🎂 {age} ans
+            </Text>
+          )}
+
+          {dateInsc ? (
+            <Text style={styles.metaItem}>
+              📅 Inscrit: {formatDate(dateInsc)}
+            </Text>
+          ) : null}
         </View>
       </View>
 
@@ -862,19 +901,46 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     fontSize: 11,
     fontWeight: '700',
   },
-  disciplineRow: {
+  payBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  payText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  metaRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     marginTop: 6,
   },
+  disciplineTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(2, 132, 199, 0.1)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(2, 132, 199, 0.25)',
+  },
   disciplineIcon: {
-    fontSize: 12,
+    fontSize: 11,
   },
   disciplineText: {
+    color: '#38BDF8',
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  metaItem: {
     color: '#94A3B8',
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 11.5,
+    fontWeight: '600',
   },
   chevron: {
     marginLeft: 6,

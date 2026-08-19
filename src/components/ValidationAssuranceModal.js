@@ -303,7 +303,7 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
                       </View>
 
                       <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={styles.name}>{item.prenom} {item.nom}</Text>
+                        <Text style={styles.name}>{item.nom ? item.nom.toUpperCase() : ''} {item.prenom || ''}</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <Text style={styles.code}>{item.code}</Text>
                           <Text style={styles.discText}>· {item.discipline || 'Sans disc.'}</Text>
