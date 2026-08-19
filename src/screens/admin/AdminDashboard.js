@@ -68,10 +68,10 @@ export default function AdminDashboard({ navigation }) {
   const quickActions = [
     { icon: 'account-plus', label: 'Nouvel adhérent', color: COLORS.primary, screen: 'AdherentForm' },
     { icon: 'clipboard-check-outline', label: 'Faire l\'appel', color: COLORS.success, onPress: handleFaireAppel },
+    { icon: 'cash-multiple', label: 'Paiements & Bilans', color: '#10B981', screen: 'PaymentList' },
     { icon: 'clock-outline', label: 'Créneaux', color: COLORS.secondary, screen: 'Creneaux' },
     { icon: 'account-group', label: 'Adhérents', color: COLORS.catCadet, screen: 'AdherentList' },
     { icon: 'calendar-star', label: 'Saisons', color: COLORS.catMinime, screen: 'Seasons' },
-    { icon: 'cog', label: 'Paramètres', color: COLORS.textSecondary, screen: 'Config' },
   ];
 
   const saisonOuverte = saisons.find((saison) => saison.statut !== 'fermé');
@@ -133,9 +133,15 @@ export default function AdminDashboard({ navigation }) {
           {/* Stats */}
           <Text style={styles.sectionTitle}>Statistiques de la saison</Text>
           <View style={[styles.statsRow, statCols === 1 && styles.statsRowVertical]}>
-            <StatCard icon="account-group" label="Adhérents" value={stats.nbAdherents} color={COLORS.primary} />
-            <StatCard icon="cash-check" label="Encaissé" value={(stats.collected / 1000).toFixed(1)} suffix="k DA" color={COLORS.success} />
-            <StatCard icon="alert-circle" label="Retards" value={stats.retards} color={COLORS.danger} />
+            <TouchableOpacity style={{ flex: 1 }} onPress={() => navigation.navigate('AdherentList')} activeOpacity={0.8}>
+              <StatCard icon="account-group" label="Adhérents" value={stats.nbAdherents} color={COLORS.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity style={{ flex: 1 }} onPress={() => navigation.navigate('PaymentList')} activeOpacity={0.8}>
+              <StatCard icon="cash-check" label="Encaissé" value={(stats.collected / 1000).toFixed(1)} suffix="k DA" color={COLORS.success} />
+            </TouchableOpacity>
+            <TouchableOpacity style={{ flex: 1 }} onPress={() => navigation.navigate('PaymentList')} activeOpacity={0.8}>
+              <StatCard icon="alert-circle" label="Retards" value={stats.retards} color={COLORS.danger} />
+            </TouchableOpacity>
           </View>
 
           {/* Quick Actions */}
@@ -166,6 +172,7 @@ export default function AdminDashboard({ navigation }) {
           <Text style={styles.sectionTitle}>Module de gestion</Text>
           <View style={[styles.menuList, isLarge && styles.menuGrid]}>
             {[
+              { icon: 'cash-register', label: 'Suivi des paiements & Bilans', sub: 'Frais, mensualités, avances, dettes & bilans', screen: 'PaymentList', color: '#10B981' },
               { icon: 'account-multiple', label: 'Liste des adhérents', sub: 'Filtrer, rechercher, voir fiches', screen: 'AdherentList', color: COLORS.primary },
               { icon: 'clipboard-check', label: 'Gestion des présences', sub: 'Appel par créneau & suivi d\'assiduité', screen: 'Presences', color: COLORS.success },
               { icon: 'calendar-clock', label: 'Planning & Créneaux', sub: 'Horaires par discipline et catégorie', screen: 'Creneaux', color: COLORS.secondary },

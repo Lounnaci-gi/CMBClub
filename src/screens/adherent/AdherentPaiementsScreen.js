@@ -117,6 +117,27 @@ export default function AdherentPaiementsScreen() {
               </Text>
             </View>
           )}
+
+          {/* Alerte renouvellement 7 jours */}
+          {(() => {
+            const now = new Date();
+            const currentDay = now.getDate();
+            const currentMonth = now.getMonth() + 1;
+            const currentYear = now.getFullYear();
+            const lastDayOfMonth = new Date(currentYear, currentMonth, 0).getDate();
+            const daysLeft = lastDayOfMonth - currentDay;
+            if (daysLeft >= 0 && daysLeft <= 7) {
+              return (
+                <View style={[styles.alertBox, { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: 'rgba(245, 158, 11, 0.35)' }]}>
+                  <MaterialCommunityIcons name="calendar-clock" size={16} color="#F59E0B" />
+                  <Text style={[styles.alertText, { color: '#F59E0B' }]}>
+                    Votre mensualité expire dans {daysLeft} jour(s). Pensez à renouveler votre abonnement.
+                  </Text>
+                </View>
+              );
+            }
+            return null;
+          })()}
         </View>
 
         {/* Liste des paiements */}

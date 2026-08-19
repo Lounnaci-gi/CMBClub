@@ -935,19 +935,22 @@ app.get('/api/paiements', async (c) => {
     const adherentId = c.req.query('adherentId');
     const saisonId = c.req.query('saisonId');
 
-    let query = 'SELECT * FROM paiements WHERE 1=1';
+    let query = `SELECT p.*, a.nom, a.prenom, a.code, a.discipline, a.dateNaissance
+      FROM paiements p
+      JOIN adherents a ON a.id = p.adherentId
+      WHERE 1=1`;
     let binds = [];
 
     if (adherentId) {
-      query += ' AND adherentId = ?';
+      query += ' AND p.adherentId = ?';
       binds.push(adherentId);
     }
     if (saisonId) {
-      query += ' AND saisonId = ?';
+      query += ' AND p.saisonId = ?';
       binds.push(saisonId);
     }
 
-    query += ' ORDER BY annee ASC, mois ASC, type ASC';
+    query += ' ORDER BY p.annee ASC, p.mois ASC, p.type ASC';
     const stmt = c.env.DB.prepare(query);
     const { results } = binds.length > 0 ? await stmt.bind(...binds).all() : await stmt.all();
     return ok(c, results || []);

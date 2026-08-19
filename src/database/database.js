@@ -304,6 +304,24 @@ async function initDatabase(database) {
       ON notifications_absence(creneauId, dateSeance);
     CREATE INDEX IF NOT EXISTS idx_notif_absence_adherent
       ON notifications_absence(adherentId);
+
+    -- Notifications adressées aux adhérents (alertes retards, renouvellement 7j, etc.)
+    CREATE TABLE IF NOT EXISTS notifications_adherent (
+      id TEXT PRIMARY KEY,
+      adherentId TEXT NOT NULL,
+      saisonId TEXT,
+      type TEXT NOT NULL, -- 'retard', 'non_paye', 'echeance_7j', 'info'
+      titre TEXT NOT NULL,
+      message TEXT NOT NULL,
+      lu INTEGER DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (adherentId) REFERENCES adherents(id),
+      FOREIGN KEY (saisonId) REFERENCES saisons(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_notif_adh_adherent
+      ON notifications_adherent(adherentId);
+    CREATE INDEX IF NOT EXISTS idx_notif_adh_type_date
+      ON notifications_adherent(adherentId, type, createdAt);
   `);
 
 
@@ -2659,6 +2677,205 @@ export async function deleteNotifAbsence(adherentId, creneauId, dateSeance) {
      WHERE adherentId = ? AND creneauId = ? AND dateSeance = ?`,
     [adherentId, creneauId, dateSeance],
   );
+}
+
+// ──────────────── NOTIFICATIONS ADHÉRENT (PAIEMENTS & ALERTES) ────────────────
+
+/**
+ * Crée une notification pour un adhérent.
+ */
+export async function createNotificationAdherent({ adherentId, saisonId = null, type, titre, message }) {
+  if (!adherentId || !titre || !message) return null;
+  const db = await getDatabase();
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO notifications_adherent (id, adherentId, saisonId, type, titre, message, lu, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+    [id, adherentId, saisonId, type || 'info', titre, message, now],
+  );
+  return { id, adherentId, saisonId, type, titre, message, lu: 0, createdAt: now };
+}
+
+/**
+ * Récupère toutes les notifications d'un adhérent.
+ */
+export async function getNotificationsByAdherent(adherentId) {
+  if (!adherentId) return [];
+  const db = await getDatabase();
+  return await db.getAllAsync(
+    `SELECT * FROM notifications_adherent
+     WHERE adherentId = ?
+     ORDER BY lu ASC, createdAt DESC`,
+    [adherentId],
+  );
+}
+
+/**
+ * Marque une notification adhérent comme lue.
+ */
+export async function markNotificationAdherentLue(notifId) {
+  if (!notifId) return;
+  const db = await getDatabase();
+  await db.runAsync(`UPDATE notifications_adherent SET lu = 1 WHERE id = ?`, [notifId]);
+}
+
+/**
+ * Marque toutes les notifications d'un adhérent comme lues.
+ */
+export async function markAllNotificationsAdherentLues(adherentId) {
+  if (!adherentId) return;
+  const db = await getDatabase();
+  await db.runAsync(`UPDATE notifications_adherent SET lu = 1 WHERE adherentId = ?`, [adherentId]);
+}
+
+/**
+ * Supprime une notification adhérent.
+ */
+export async function deleteNotificationAdherent(notifId) {
+  if (!notifId) return;
+  const db = await getDatabase();
+  await db.runAsync(`DELETE FROM notifications_adherent WHERE id = ?`, [notifId]);
+}
+
+/**
+ * Analyse et génère automatiquement les alertes de paiement pour une saison donnée :
+ * 1. Alertes de retards & impayés (mensualités échues non payées, frais d'inscription non réglés).
+ * 2. Alertes préventives 7 jours avant expiration de la mensualité pour inciter au renouvellement.
+ */
+export async function generatePaymentAlertsForSaison(saisonId) {
+  if (!saisonId) return { retardsCreated: 0, echeancesCreated: 0 };
+  const db = await getDatabase();
+  await refreshPaymentStatuses(saisonId);
+
+  const adherents = await db.getAllAsync(`
+    SELECT a.id, a.nom, a.prenom, a.code
+    FROM adherents a
+    JOIN adherent_saisons s ON s.adherentId = a.id AND s.saisonId = ? AND s.actif = 1
+  `, [saisonId]);
+
+  const allPaiements = await db.getAllAsync(
+    `SELECT * FROM paiements WHERE saisonId = ?`,
+    [saisonId]
+  );
+
+  const now = new Date();
+  const currentDay = now.getDate();
+  const currentMonth = now.getMonth() + 1; // 1-12
+  const currentYear = now.getFullYear();
+  const sevenDaysAgoIso = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  let retardsCreated = 0;
+  let echeancesCreated = 0;
+
+  for (const adh of adherents) {
+    const adhPaiements = allPaiements.filter(p => p.adherentId === adh.id);
+
+    // 1. Détection des retards
+    const retards = adhPaiements.filter(p => p.statut === 'en_retard');
+    if (retards.length > 0) {
+      const totalRetard = retards.reduce((s, p) => s + Math.max(0, (p.montantDu || 0) - (p.montantPaye || 0)), 0);
+
+      // Vérifier s'il existe déjà une alerte de retard non lue ou créée il y a moins de 5 jours
+      const recentNotif = await db.getFirstAsync(`
+        SELECT id FROM notifications_adherent
+        WHERE adherentId = ? AND type = 'retard' AND (lu = 0 OR createdAt >= ?)
+        LIMIT 1
+      `, [adh.id, sevenDaysAgoIso]);
+
+      if (!recentNotif && totalRetard > 0) {
+        const labels = retards.map(r => r.label).join(', ');
+        await createNotificationAdherent({
+          adherentId: adh.id,
+          saisonId,
+          type: 'retard',
+          titre: '⚠️ Retard de cotisation',
+          message: `Bonjour ${adh.prenom}, vous avez ${retards.length} paiement(s) en retard (${labels}) pour un total de ${totalRetard.toLocaleString()} DA. Merci de régulariser votre cotisation au club.`,
+        });
+        retardsCreated++;
+      }
+    }
+
+    // 2. Détection de mensualité expirant dans les 7 prochains jours
+    // Exemple : la mensualité du mois en cours se termine sous 7 jours (à partir du 24 du mois),
+    // ou le mois prochain commence dans <= 7 jours et n'a pas encore été payé.
+    const lastDayOfMonth = new Date(currentYear, currentMonth, 0).getDate();
+    const daysUntilEndOfMonth = lastDayOfMonth - currentDay;
+
+    if (daysUntilEndOfMonth <= 7) {
+      // Prochain mois cible
+      const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+      const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+
+      const nextPaiement = adhPaiements.find(p => p.type === 'mensualite' && Number(p.mois) === nextMonth && Number(p.annee) === nextYear);
+      const isNextPaid = nextPaiement && (nextPaiement.statut === 'paye');
+
+      if (!isNextPaid) {
+        // Vérifier s'il n'y a pas déjà eu une alerte d'échéance 7j récente
+        const recent7j = await db.getFirstAsync(`
+          SELECT id FROM notifications_adherent
+          WHERE adherentId = ? AND type = 'echeance_7j' AND createdAt >= ?
+          LIMIT 1
+        `, [adh.id, sevenDaysAgoIso]);
+
+        if (!recent7j) {
+          await createNotificationAdherent({
+            adherentId: adh.id,
+            saisonId,
+            type: 'echeance_7j',
+            titre: '⏳ Renouvellement de votre cotisation',
+            message: `Bonjour ${adh.prenom}, votre abonnement mensuel arrive à échéance dans ${daysUntilEndOfMonth} jour(s). Pensez à verser votre prochaine mensualité pour continuer vos entraînements en toute tranquillité.`,
+          });
+          echeancesCreated++;
+        }
+      }
+    }
+  }
+
+  return { retardsCreated, echeancesCreated };
+}
+
+/**
+ * Envoie un rappel individuel de paiement avec message personnalisé
+ */
+export async function sendPaymentReminderToAdherent(adherentId, saisonId, type = 'retard', customMessage = null) {
+  const db = await getDatabase();
+  const adherent = await db.getFirstAsync(`SELECT * FROM adherents WHERE id = ?`, [adherentId]);
+  if (!adherent) return false;
+
+  const paiements = await db.getAllAsync(`SELECT * FROM paiements WHERE adherentId = ? AND saisonId = ?`, [adherentId, saisonId]);
+  const retards = paiements.filter(p => p.statut === 'en_retard');
+  const totalDue = paiements.reduce((s, p) => s + Math.max(0, (p.montantDu || 0) - (p.montantPaye || 0)), 0);
+
+  let titre = '⚠️ Rappel de paiement';
+  let message = customMessage;
+
+  if (!message) {
+    if (type === 'echeance_7j') {
+      titre = '⏳ Renouvellement de cotisation';
+      message = `Bonjour ${adherent.prenom}, votre mensualité expire bientôt. Merci de bien vouloir procéder à son renouvellement pour maintenir votre accès aux entraînements.`;
+    } else {
+      titre = '⚠️ Rappel de cotisation impayée';
+      message = `Bonjour ${adherent.prenom}, un montant de ${totalDue.toLocaleString()} DA (${retards.length} créance(s)) est actuellement en attente de règlement. Merci de vous rapprocher de l'administration du club.`;
+    }
+  }
+
+  await createNotificationAdherent({
+    adherentId,
+    saisonId,
+    type,
+    titre,
+    message,
+  });
+
+  return true;
+}
+
+/**
+ * Envoie un rappel groupé à tous les adhérents ayant des retards
+ */
+export async function sendBulkPaymentReminders(saisonId) {
+  return await generatePaymentAlertsForSaison(saisonId);
 }
 
 

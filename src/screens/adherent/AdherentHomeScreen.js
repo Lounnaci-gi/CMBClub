@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, StatusBar, Image,
+  RefreshControl, StatusBar, Image, Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,8 +10,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import useTheme, { useResponsive } from '../../theme/useTheme';
 import { getEffectiveCategory, calculateAge } from '../../utils/categories';
-import { calculateBalance } from '../../utils/payments';
-import { getAdherentById, getPaiementsByAdherent, getPresencesByAdherent } from '../../database/database';
+import { calculateBalance, PAYMENT_STATUS } from '../../utils/payments';
+import {
+  getAdherentById,
+  getPaiementsByAdherent,
+  getPresencesByAdherent,
+  getNotificationsByAdherent,
+  markNotificationAdherentLue,
+  markAllNotificationsAdherentLues,
+} from '../../database/database';
 import CategoryBadge from '../../components/CategoryBadge';
 import AdherentCardModal from '../../components/AdherentCardModal';
 
@@ -26,11 +33,13 @@ export default function AdherentHomeScreen({ navigation }) {
 
   const { user, saisonActive, creneaux, loadSaisons, loadCreneaux, logout } = useStore();
 
-  const [adherent, setAdherent]         = useState(null);
-  const [paiements, setPaiements]       = useState([]);
+  const [adherent, setAdherent]           = useState(null);
+  const [paiements, setPaiements]         = useState([]);
   const [presencesData, setPresencesData] = useState(null);
-  const [refreshing, setRefreshing]     = useState(false);
-  const [showCard, setShowCard]         = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifModal, setShowNotifModal] = useState(false);
+  const [refreshing, setRefreshing]       = useState(false);
+  const [showCard, setShowCard]           = useState(false);
 
   const load = useCallback(async () => {
     await Promise.all([loadSaisons(), loadCreneaux()]);
@@ -39,12 +48,14 @@ export default function AdherentHomeScreen({ navigation }) {
     const a = await getAdherentById(user.adherentId);
     setAdherent(a);
     if (a) {
-      const [p, pres] = await Promise.all([
+      const [p, pres, notifs] = await Promise.all([
         saison ? getPaiementsByAdherent(a.id, saison.id) : Promise.resolve([]),
         getPresencesByAdherent(a.id, saison?.id),
+        getNotificationsByAdherent(a.id),
       ]);
       setPaiements(p);
       setPresencesData(pres);
+      setNotifications(notifs);
     }
   }, [user?.adherentId, loadSaisons, loadCreneaux]);
 
@@ -56,8 +67,33 @@ export default function AdherentHomeScreen({ navigation }) {
     setRefreshing(false);
   };
 
-  const cat     = adherent ? getEffectiveCategory(adherent) : null;
+  const handleMarkAllRead = async () => {
+    if (!adherent) return;
+    await markAllNotificationsAdherentLues(adherent.id);
+    const updated = await getNotificationsByAdherent(adherent.id);
+    setNotifications(updated);
+  };
+
+  const handleMarkOneRead = async (id) => {
+    await markNotificationAdherentLue(id);
+    if (adherent) {
+      const updated = await getNotificationsByAdherent(adherent.id);
+      setNotifications(updated);
+    }
+  };
+
+  const cat = adherent ? getEffectiveCategory(adherent) : null;
   const balance = calculateBalance(paiements);
+  const unreadNotifs = useMemo(() => notifications.filter(n => !n.lu), [notifications]);
+  const retards = useMemo(() => paiements.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD), [paiements]);
+
+  // Alerte prioritaire (retard ou renouvellement 7j)
+  const topAlertNotif = useMemo(() => {
+    return unreadNotifs.find(n => n.type === 'retard') ||
+           unreadNotifs.find(n => n.type === 'echeance_7j') ||
+           unreadNotifs[0] || null;
+  }, [unreadNotifs]);
+
   const tauxColor = presencesData
     ? (presencesData.tauxPresence >= 80 ? COLORS.success
         : presencesData.tauxPresence >= 50 ? COLORS.warning
@@ -86,9 +122,30 @@ export default function AdherentHomeScreen({ navigation }) {
                 {adherent ? `${adherent.prenom} ${adherent.nom}` : user?.username || 'Adhérent'}
               </Text>
             </View>
-            <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
-              <MaterialCommunityIcons name="logout" size={22} color={COLORS.textSecondary} />
-            </TouchableOpacity>
+
+            <View style={styles.headerIcons}>
+              {/* Cloche de notifications */}
+              <TouchableOpacity
+                style={styles.notifBtn}
+                onPress={() => setShowNotifModal(true)}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons
+                  name={unreadNotifs.length > 0 ? 'bell-badge' : 'bell-outline'}
+                  size={22}
+                  color={unreadNotifs.length > 0 ? '#F59E0B' : COLORS.textSecondary}
+                />
+                {unreadNotifs.length > 0 && (
+                  <View style={styles.notifBadge}>
+                    <Text style={styles.notifBadgeTxt}>{unreadNotifs.length}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+                <MaterialCommunityIcons name="logout" size={22} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {saisonActive && (
@@ -117,6 +174,44 @@ export default function AdherentHomeScreen({ navigation }) {
             </View>
           ) : (
             <>
+              {/* ── Bannière d'alerte paiement / renouvellement 7j ── */}
+              {topAlertNotif ? (
+                <TouchableOpacity
+                  style={[
+                    styles.alertBanner,
+                    topAlertNotif.type === 'retard' ? styles.alertBannerRetard : styles.alertBanner7j
+                  ]}
+                  onPress={() => setShowNotifModal(true)}
+                  activeOpacity={0.85}
+                >
+                  <MaterialCommunityIcons
+                    name={topAlertNotif.type === 'retard' ? 'alert-circle' : 'calendar-alert'}
+                    size={24}
+                    color={topAlertNotif.type === 'retard' ? '#EF4444' : '#F59E0B'}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.alertBannerTitle}>{topAlertNotif.titre}</Text>
+                    <Text style={styles.alertBannerMsg} numberOfLines={2}>{topAlertNotif.message}</Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color="#94A3B8" />
+                </TouchableOpacity>
+              ) : (retards.length > 0 || balance.resteAVerser > 0) ? (
+                <TouchableOpacity
+                  style={[styles.alertBanner, styles.alertBannerRetard]}
+                  onPress={() => navigation.navigate('MesPaiements')}
+                  activeOpacity={0.85}
+                >
+                  <MaterialCommunityIcons name="alert-circle" size={22} color="#EF4444" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.alertBannerTitle}>Cotisation en attente</Text>
+                    <Text style={styles.alertBannerMsg}>
+                      {balance.resteAVerser.toLocaleString()} DA restant à régler pour cette saison.
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color="#94A3B8" />
+                </TouchableOpacity>
+              ) : null}
+
               {/* ── Carte profil ── */}
               {adherent && (
                 <View style={styles.profileCard}>
@@ -134,7 +229,9 @@ export default function AdherentHomeScreen({ navigation }) {
                   </TouchableOpacity>
 
                   <View style={styles.profileInfo}>
-                    <Text style={styles.profileName}>{adherent.prenom} {adherent.nom}</Text>
+                    <Text style={styles.profileName}>
+                      {adherent.nom ? adherent.nom.toUpperCase() : ''} {adherent.prenom || ''}
+                    </Text>
                     <Text style={styles.profileCode}>{adherent.code}</Text>
                     {cat && <CategoryBadge category={cat.label} />}
                     <Text style={styles.profileMeta}>
@@ -249,6 +346,7 @@ export default function AdherentHomeScreen({ navigation }) {
         </View>
       </ScrollView>
 
+      {/* ── Modal Carte Adhérent ── */}
       {adherent && (
         <AdherentCardModal
           visible={showCard}
@@ -256,6 +354,67 @@ export default function AdherentHomeScreen({ navigation }) {
           onClose={() => setShowCard(false)}
         />
       )}
+
+      {/* ── Modal Centre de Notifications ── */}
+      <Modal visible={showNotifModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MaterialCommunityIcons name="bell-ring" size={20} color={COLORS.primary} />
+                <Text style={styles.modalTitle}>Mes Notifications</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowNotifModal(false)}>
+                <MaterialCommunityIcons name="close" size={22} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {unreadNotifs.length > 0 && (
+              <TouchableOpacity style={styles.markAllBtn} onPress={handleMarkAllRead}>
+                <Text style={styles.markAllTxt}>Tout marquer comme lu</Text>
+              </TouchableOpacity>
+            )}
+
+            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+              {notifications.length === 0 ? (
+                <View style={styles.emptyNotifs}>
+                  <MaterialCommunityIcons name="bell-sleep-outline" size={40} color={COLORS.textMuted} />
+                  <Text style={styles.emptyNotifsTxt}>Aucune notification reçue.</Text>
+                </View>
+              ) : (
+                notifications.map(n => (
+                  <TouchableOpacity
+                    key={n.id}
+                    style={[styles.notifCard, !n.lu && styles.notifCardUnread]}
+                    onPress={() => handleMarkOneRead(n.id)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.notifIconCol}>
+                      <MaterialCommunityIcons
+                        name={n.type === 'retard' ? 'alert-circle' : n.type === 'echeance_7j' ? 'calendar-clock' : 'information'}
+                        size={20}
+                        color={n.type === 'retard' ? '#EF4444' : n.type === 'echeance_7j' ? '#F59E0B' : COLORS.primary}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.notifTitle}>{n.titre}</Text>
+                      <Text style={styles.notifMsg}>{n.message}</Text>
+                      <Text style={styles.notifDate}>
+                        {new Date(n.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                    </View>
+                    {!n.lu && <View style={styles.unreadDot} />}
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+
+            <TouchableOpacity style={styles.closeModalBtn} onPress={() => setShowNotifModal(false)}>
+              <Text style={styles.closeModalTxt}>Fermer</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -265,8 +424,31 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
   header: { paddingTop: 56, paddingHorizontal: horizontalPadding, paddingBottom: 20 },
   headerInner: { width: '100%', maxWidth: 840, alignSelf: 'center', gap: 10 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  headerIcons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   greeting: { color: COLORS.textSecondary, fontSize: 14 },
   userName: { color: COLORS.textPrimary, fontSize: isSmall ? 20 : isLarge ? 26 : 24, fontWeight: '800' },
+
+  notifBtn: {
+    backgroundColor: COLORS.bgInput,
+    borderRadius: RADIUS.full,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    backgroundColor: '#EF4444',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  notifBadgeTxt: { color: '#FFF', fontSize: 9, fontWeight: '900' },
+
   logoutBtn: {
     backgroundColor: COLORS.bgInput,
     borderRadius: RADIUS.full,
@@ -286,6 +468,26 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
   scroll: { flex: 1 },
   scrollContent: { alignItems: 'center' },
   bodyWrapper: { width: '100%', maxWidth: 840, padding: 16, gap: 14 },
+
+  /* Alert Banner */
+  alertBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+  },
+  alertBannerRetard: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+  },
+  alertBanner7j: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+  },
+  alertBannerTitle: { color: '#FFF', fontSize: 13.5, fontWeight: '800', marginBottom: 2 },
+  alertBannerMsg: { color: '#CBD5E1', fontSize: 12, lineHeight: 17 },
 
   /* Profil */
   profileCard: {
@@ -348,4 +550,36 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
   empty: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 32, gap: 12 },
   emptyTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '700' },
   emptyText: { color: COLORS.textMuted, fontSize: 14, textAlign: 'center' },
+
+  /* Modal Notifications */
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  modalBox: { width: '100%', maxWidth: 500, backgroundColor: '#132032', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  modalTitle: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+  markAllBtn: { alignSelf: 'flex-end', marginBottom: 10 },
+  markAllTxt: { color: '#38BDF8', fontSize: 12, fontWeight: '700' },
+  notifCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  notifCardUnread: {
+    borderColor: 'rgba(56, 189, 248, 0.35)',
+    backgroundColor: 'rgba(2, 132, 199, 0.1)',
+  },
+  notifIconCol: { marginTop: 2 },
+  notifTitle: { color: '#FFF', fontSize: 13.5, fontWeight: '700', marginBottom: 2 },
+  notifMsg: { color: '#94A3B8', fontSize: 12, lineHeight: 17, marginBottom: 4 },
+  notifDate: { color: '#64748B', fontSize: 10.5 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#38BDF8', marginTop: 4 },
+  emptyNotifs: { alignItems: 'center', paddingVertical: 40, gap: 10 },
+  emptyNotifsTxt: { color: '#64748B', fontSize: 13 },
+  closeModalBtn: { marginTop: 12, paddingVertical: 10, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 10 },
+  closeModalTxt: { color: '#FFF', fontWeight: '700', fontSize: 13 },
 });
