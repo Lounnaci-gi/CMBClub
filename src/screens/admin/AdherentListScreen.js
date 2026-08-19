@@ -152,10 +152,11 @@ export default function AdherentListScreen({ navigation }) {
       const payText    = payFilter  === 'all' ? 'Tous'   : getStatusLabel(payFilter);
 
       const rowsHtml = filtered.map((item, index) => {
-        const cat     = getEffectiveCategory(item);
-        const st      = payStatusMap[item.id];
-        const stLabel = st ? getStatusLabel(st) : '—';
-        const stColor = st ? getStatusColor(st) : '#888';
+        const cat      = getEffectiveCategory(item);
+        const st       = payStatusMap[item.id];
+        const stLabel  = st ? getStatusLabel(st) : '—';
+        const stColor  = st ? getStatusColor(st) : '#888';
+        const dateInsc = item.dateInscriptionSaison || item.dateInscription || item.createdAt?.slice(0, 10);
         return `
           <tr style="border-bottom:1px solid #E2E8F0">
             <td style="padding:8px 10px;text-align:center;color:#64748B;font-weight:600">${index + 1}</td>
@@ -164,6 +165,7 @@ export default function AdherentListScreen({ navigation }) {
             <td style="padding:8px 10px">${cat.label}</td>
             <td style="padding:8px 10px;color:#0284C7;font-weight:600">${item.discipline || '—'}</td>
             <td style="padding:8px 10px">${formatDate(item.dateNaissance)}</td>
+            <td style="padding:8px 10px">${dateInsc ? formatDate(dateInsc) : '—'}</td>
             <td style="padding:8px 10px">${item.telephone || '—'}</td>
             <td style="padding:8px 10px">
               <span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;color:${stColor};background:${stColor}18;border:1px solid ${stColor}40">${stLabel}</span>
@@ -202,7 +204,7 @@ export default function AdherentListScreen({ navigation }) {
             <th style="width:30px;text-align:center">#</th>
             <th style="width:90px">Code</th>
             <th>Nom & Prénom</th><th>Catégorie</th><th>Discipline</th>
-            <th>Date Naiss.</th><th>Téléphone</th><th>Statut</th>
+            <th>Date Naiss.</th><th>Date Inscription</th><th>Téléphone</th><th>Statut</th>
           </tr></thead>
           <tbody>${rowsHtml}</tbody>
         </table>
