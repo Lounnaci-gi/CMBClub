@@ -30,7 +30,7 @@ export default function CreneauxScreen({ navigation }) {
   // Form State
   const [discipline, setDiscipline] = useState('');
   const [selectedCategories, setSelectedCategories] = useState([]);
-  const [jour, setJour] = useState('Lundi');
+  const [selectedJours, setSelectedJours] = useState(['Lundi']);
   const [heureDebut, setHeureDebut] = useState('17:00');
   const [heureFin, setHeureFin] = useState('18:30');
   const [lieu, setLieu] = useState('');
@@ -68,7 +68,7 @@ export default function CreneauxScreen({ navigation }) {
         .map(s => s.trim())
         .filter(Boolean);
       setSelectedCategories(parsedCats.length > 0 ? parsedCats : [CATEGORIES[0]?.label || 'Poussin']);
-      setJour(item.jour);
+      setSelectedJours([item.jour || 'Lundi']);
       setHeureDebut(item.heureDebut);
       setHeureFin(item.heureFin);
       setLieu(item.lieu || '');
@@ -77,7 +77,7 @@ export default function CreneauxScreen({ navigation }) {
       setEditingCreneau(null);
       setDiscipline(disciplineList[0] || 'KickBoxing');
       setSelectedCategories([CATEGORIES[0]?.label || 'Poussin']);
-      setJour('Lundi');
+      setSelectedJours(['Lundi']);
       setHeureDebut('17:00');
       setHeureFin('18:30');
       setLieu('');
@@ -108,6 +108,34 @@ export default function CreneauxScreen({ navigation }) {
     setSelectedCategories([CATEGORIES[0]?.label || 'Poussin']);
   };
 
+  const toggleJour = (jourLabel) => {
+    // En édition : un seul jour (le créneau existant)
+    if (editingCreneau) {
+      setSelectedJours([jourLabel]);
+      return;
+    }
+    setSelectedJours(prev => {
+      if (prev.includes(jourLabel)) {
+        if (prev.length === 1) {
+          Alert.alert('Information', 'Sélectionnez au moins un jour.');
+          return prev;
+        }
+        return prev.filter(j => j !== jourLabel);
+      }
+      return [...prev, jourLabel];
+    });
+  };
+
+  const selectAllJours = () => {
+    if (editingCreneau) return;
+    setSelectedJours([...JOURS]);
+  };
+
+  const clearAllJours = () => {
+    if (editingCreneau) return;
+    setSelectedJours(['Lundi']);
+  };
+
   const parseTimeToMinutes = (timeStr) => {
     if (!timeStr || typeof timeStr !== 'string') return NaN;
     const parts = timeStr.trim().split(':');
@@ -121,8 +149,8 @@ export default function CreneauxScreen({ navigation }) {
   };
 
   const handleSave = async () => {
-    if (!discipline || selectedCategories.length === 0 || !jour || !heureDebut || !heureFin) {
-      Alert.alert('Champs requis', 'Veuillez sélectionner au moins une catégorie et remplir tous les champs obligatoires.');
+    if (!discipline || selectedCategories.length === 0 || selectedJours.length === 0 || !heureDebut || !heureFin) {
+      Alert.alert('Champs requis', 'Veuillez sélectionner au moins une catégorie, un jour, et remplir tous les champs obligatoires.');
       return;
     }
 
@@ -142,31 +170,32 @@ export default function CreneauxScreen({ navigation }) {
     }
 
     const categoriesString = selectedCategories.join(', ');
+    const basePayload = {
+      discipline,
+      categorie: categoriesString,
+      heureDebut: cleanStart,
+      heureFin: cleanEnd,
+      lieu: lieu.trim() || null,
+      remarque: remarque.trim() || null,
+    };
 
     setSubmitting(true);
     try {
       if (editingCreneau) {
         await updateCreneau({
           id: editingCreneau.id,
-          discipline,
-          categorie: categoriesString,
-          jour,
-          heureDebut: cleanStart,
-          heureFin: cleanEnd,
-          lieu: lieu.trim() || null,
-          remarque: remarque.trim() || null,
+          ...basePayload,
+          jour: selectedJours[0],
         });
       } else {
-        await createCreneau({
-          id: `creneau-${Date.now()}`,
-          discipline,
-          categorie: categoriesString,
-          jour,
-          heureDebut: cleanStart,
-          heureFin: cleanEnd,
-          lieu: lieu.trim() || null,
-          remarque: remarque.trim() || null,
-        });
+        const timestamp = Date.now();
+        for (let i = 0; i < selectedJours.length; i++) {
+          await createCreneau({
+            id: `creneau-${timestamp}-${i}`,
+            ...basePayload,
+            jour: selectedJours[i],
+          });
+        }
       }
       setModalVisible(false);
     } catch (e) {
@@ -484,19 +513,50 @@ export default function CreneauxScreen({ navigation }) {
                 })}
               </View>
 
-              {/* Jour Selection */}
-              <Text style={styles.fieldLabel}>Jour de la semaine *</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
-                {JOURS.map(j => (
-                  <TouchableOpacity
-                    key={j}
-                    style={[styles.optionChip, jour === j && styles.optionChipSelected]}
-                    onPress={() => setJour(j)}
-                  >
-                    <Text style={[styles.optionText, jour === j && styles.optionTextSelected]}>{j}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              {/* Jour Multi-Selection (création) / mono (édition) */}
+              <View style={styles.catHeaderRow}>
+                <View>
+                  <Text style={styles.fieldLabel}>
+                    {editingCreneau ? 'Jour de la semaine *' : `Jours de la semaine * (${selectedJours.length})`}
+                  </Text>
+                  {!editingCreneau ? (
+                    <Text style={styles.fieldHint}>Sélectionnez un ou plusieurs jours — un créneau sera créé par jour</Text>
+                  ) : null}
+                </View>
+                {!editingCreneau ? (
+                  <View style={styles.catQuickActions}>
+                    <TouchableOpacity onPress={selectAllJours} style={styles.quickActionBtn}>
+                      <Text style={styles.quickActionText}>Tous</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={clearAllJours} style={styles.quickActionBtn}>
+                      <Text style={styles.quickActionText}>Reset</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={styles.optionsWrap}>
+                {JOURS.map(j => {
+                  const isChecked = selectedJours.includes(j);
+                  return (
+                    <TouchableOpacity
+                      key={j}
+                      style={[styles.catOptionChip, isChecked && styles.optionChipSelected]}
+                      onPress={() => toggleJour(j)}
+                      activeOpacity={0.7}
+                    >
+                      {!editingCreneau ? (
+                        <MaterialCommunityIcons
+                          name={isChecked ? 'checkbox-marked-circle' : 'checkbox-blank-circle-outline'}
+                          size={16}
+                          color={isChecked ? COLORS.primary : COLORS.textMuted}
+                        />
+                      ) : null}
+                      <Text style={[styles.optionText, isChecked && styles.optionTextSelected]}>{j}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
               {/* Heures */}
               <View style={styles.rowTwo}>
@@ -549,7 +609,15 @@ export default function CreneauxScreen({ navigation }) {
                 <Text style={styles.cancelBtnText}>Annuler</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={submitting}>
-                <Text style={styles.saveBtnText}>{submitting ? 'Enregistrement...' : 'Enregistrer'}</Text>
+                <Text style={styles.saveBtnText}>
+                  {submitting
+                    ? 'Enregistrement...'
+                    : editingCreneau
+                      ? 'Enregistrer'
+                      : selectedJours.length > 1
+                        ? `Créer ${selectedJours.length} créneaux`
+                        : 'Enregistrer'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
