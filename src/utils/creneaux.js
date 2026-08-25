@@ -44,6 +44,65 @@ export function parseTimeToMinutes(timeStr) {
 }
 
 /**
+ * Parse une chaîne de catégories ("Cadet, Minime") en labels normalisés.
+ */
+export function parseCategories(categorie) {
+  if (!categorie) return [];
+  if (Array.isArray(categorie)) {
+    return categorie.map(c => String(c).trim().toLowerCase()).filter(Boolean);
+  }
+  return String(categorie)
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * True si au moins une catégorie est commune.
+ */
+export function categoriesOverlap(catsA, catsB) {
+  const setB = new Set(parseCategories(catsB));
+  return parseCategories(catsA).some(c => setB.has(c));
+}
+
+/**
+ * True si les plages [start, end) se chevauchent (contact exact autorisé).
+ */
+export function timesOverlap(startA, endA, startB, endB) {
+  const aStart = typeof startA === 'number' ? startA : parseTimeToMinutes(startA);
+  const aEnd = typeof endA === 'number' ? endA : parseTimeToMinutes(endA);
+  const bStart = typeof startB === 'number' ? startB : parseTimeToMinutes(startB);
+  const bEnd = typeof endB === 'number' ? endB : parseTimeToMinutes(endB);
+  if (aStart === null || aEnd === null || bStart === null || bEnd === null) return false;
+  return aStart < bEnd && bStart < aEnd;
+}
+
+/**
+ * Trouve les créneaux existants en conflit avec un candidat :
+ * même discipline + même jour + catégorie commune + horaires qui se chevauchent.
+ * @param {object} candidate - { discipline, categorie, jour, heureDebut, heureFin, id? }
+ * @param {array} existing - liste des créneaux
+ * @param {{ excludeId?: string }} options
+ */
+export function findOverlappingCreneaux(candidate, existing = [], options = {}) {
+  if (!candidate) return [];
+  const { excludeId } = options;
+  const disc = String(candidate.discipline || '').trim().toLowerCase();
+  const jour = String(candidate.jour || '').trim().toLowerCase();
+  if (!disc || !jour) return [];
+
+  return (existing || []).filter(c => {
+    if (!c) return false;
+    if (excludeId && c.id === excludeId) return false;
+    if (candidate.id && c.id === candidate.id) return false;
+    if (String(c.discipline || '').trim().toLowerCase() !== disc) return false;
+    if (String(c.jour || '').trim().toLowerCase() !== jour) return false;
+    if (!categoriesOverlap(candidate.categorie, c.categorie)) return false;
+    return timesOverlap(candidate.heureDebut, candidate.heureFin, c.heureDebut, c.heureFin);
+  });
+}
+
+/**
  * Vérifie si l'heure actuelle dépasse de plus de 20 minutes le début d'un créneau
  */
 export function isLateBy20Min(heureDebutStr, now = new Date()) {

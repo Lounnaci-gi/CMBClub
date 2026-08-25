@@ -8,6 +8,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
 import { CATEGORIES } from '../../utils/categories';
+import { findOverlappingCreneaux } from '../../utils/creneaux';
 
 const JOURS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
@@ -178,6 +179,31 @@ export default function CreneauxScreen({ navigation }) {
       lieu: lieu.trim() || null,
       remarque: remarque.trim() || null,
     };
+
+    // Bloquer les chevauchements : même discipline + catégorie commune + même jour + horaires qui se croisent
+    const joursToCheck = editingCreneau ? [selectedJours[0]] : selectedJours;
+    const conflicts = [];
+    for (const j of joursToCheck) {
+      const overlaps = findOverlappingCreneaux(
+        { ...basePayload, jour: j },
+        creneaux,
+        { excludeId: editingCreneau?.id }
+      );
+      for (const o of overlaps) {
+        conflicts.push(o);
+      }
+    }
+
+    if (conflicts.length > 0) {
+      const details = conflicts
+        .map(c => `• ${c.jour} ${c.heureDebut}–${c.heureFin} (${c.categorie})`)
+        .join('\n');
+      Alert.alert(
+        'Chevauchement détecté',
+        `Impossible de créer/modifier ce créneau : une catégorie de « ${discipline} » a déjà un créneau sur le même jour avec des horaires qui se chevauchent.\n\n${details}`
+      );
+      return;
+    }
 
     setSubmitting(true);
     try {

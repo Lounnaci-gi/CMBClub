@@ -7,6 +7,10 @@ import {
   isLateBy20Min,
   getSlotStartDateTime,
   getDateForJour,
+  parseCategories,
+  categoriesOverlap,
+  timesOverlap,
+  findOverlappingCreneaux,
 } from './creneaux';
 
 describe('creneaux utils', () => {
@@ -114,6 +118,88 @@ describe('creneaux utils', () => {
       const late = new Date(2026, 7, 18, 17, 25);   // +25 min
       expect(isLateBy20Min('17:00', onTime)).toBe(false);
       expect(isLateBy20Min('17:00', late)).toBe(true);
+    });
+  });
+
+  describe('overlap detection', () => {
+    it('parses categories and detects shared ones', () => {
+      expect(parseCategories('Cadet, Minime')).toEqual(['cadet', 'minime']);
+      expect(categoriesOverlap('Cadet, Minime', 'Minime')).toBe(true);
+      expect(categoriesOverlap('Cadet', 'Minime')).toBe(false);
+    });
+
+    it('detects overlapping times but allows adjacent slots', () => {
+      expect(timesOverlap('17:30', '19:00', '18:00', '19:45')).toBe(true);
+      expect(timesOverlap('17:00', '18:00', '18:00', '19:00')).toBe(false);
+      expect(timesOverlap('09:00', '10:00', '10:30', '11:30')).toBe(false);
+    });
+
+    it('finds conflict when same discipline, shared category, same day and overlapping times', () => {
+      const existing = [
+        {
+          id: 'a',
+          discipline: 'KickBoxing',
+          categorie: 'Cadet, Minime',
+          jour: 'Lundi',
+          heureDebut: '17:30',
+          heureFin: '19:00',
+        },
+      ];
+      const conflicts = findOverlappingCreneaux(
+        {
+          discipline: 'KickBoxing',
+          categorie: 'Minime',
+          jour: 'Lundi',
+          heureDebut: '18:00',
+          heureFin: '19:45',
+        },
+        existing
+      );
+      expect(conflicts).toHaveLength(1);
+      expect(conflicts[0].id).toBe('a');
+    });
+
+    it('allows different discipline, different day, or no shared category', () => {
+      const existing = [
+        {
+          id: 'a',
+          discipline: 'KickBoxing',
+          categorie: 'Cadet, Minime',
+          jour: 'Lundi',
+          heureDebut: '17:30',
+          heureFin: '19:00',
+        },
+      ];
+      expect(findOverlappingCreneaux(
+        { discipline: 'Natation', categorie: 'Minime', jour: 'Lundi', heureDebut: '18:00', heureFin: '19:45' },
+        existing
+      )).toHaveLength(0);
+      expect(findOverlappingCreneaux(
+        { discipline: 'KickBoxing', categorie: 'Minime', jour: 'Mardi', heureDebut: '18:00', heureFin: '19:45' },
+        existing
+      )).toHaveLength(0);
+      expect(findOverlappingCreneaux(
+        { discipline: 'KickBoxing', categorie: 'Sénior', jour: 'Lundi', heureDebut: '18:00', heureFin: '19:45' },
+        existing
+      )).toHaveLength(0);
+    });
+
+    it('excludes the créneau being edited', () => {
+      const existing = [
+        {
+          id: 'a',
+          discipline: 'KickBoxing',
+          categorie: 'Minime',
+          jour: 'Lundi',
+          heureDebut: '17:30',
+          heureFin: '19:00',
+        },
+      ];
+      expect(findOverlappingCreneaux(
+        { id: 'a', discipline: 'KickBoxing', categorie: 'Minime', jour: 'Lundi', heureDebut: '17:30', heureFin: '19:00' },
+        existing,
+        { excludeId: 'a' }
+      )).toHaveLength(0);
     });
   });
 });
