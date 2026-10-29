@@ -49,6 +49,35 @@ export function computePaymentStatus(paiement) {
   return PAYMENT_STATUS.A_PAYER;
 }
 
+export function isPaymentOverdue(paiement, asOfDate = new Date()) {
+  const montantDu = Number(paiement.montantDu) || 0;
+  const montantPaye = Number(paiement.montantPaye) || 0;
+  if (montantDu <= 0 || montantPaye >= montantDu) return false;
+
+  const mois = Number(paiement.mois ?? paiement.month);
+  const annee = Number(paiement.annee ?? paiement.year);
+  if (Number.isInteger(mois) && mois >= 1 && mois <= 12 && Number.isInteger(annee) && annee > 0) {
+    return asOfDate > new Date(annee, mois - 1, 10);
+  }
+
+  if (paiement.type === PAYMENT_TYPES.INSCRIPTION && paiement.createdAt) {
+    const created = new Date(paiement.createdAt);
+    if (Number.isNaN(created.getTime())) return false;
+    created.setDate(created.getDate() + 30);
+    return asOfDate > created;
+  }
+
+  return false;
+}
+
+export function countOverdueAdherents(paiements, asOfDate = new Date()) {
+  return new Set(
+    (paiements || [])
+      .filter((paiement) => paiement.adherentId && isPaymentOverdue(paiement, asOfDate))
+      .map((paiement) => paiement.adherentId),
+  ).size;
+}
+
 /**
  * Calcule le solde restant d'un adhérent pour une saison
  */

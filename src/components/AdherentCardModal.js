@@ -4,14 +4,13 @@ import {
   View, Text, StyleSheet, Modal, TouchableOpacity, Image,
   ActivityIndicator, ScrollView, Alert, Platform,
 } from 'react-native';
-import * as Print from 'expo-print';
-import { File } from 'expo-file-system';
-import * as FileSystem from 'expo-file-system/legacy';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useTheme from '../theme/useTheme';
 import { getCategoryByAge, getEffectiveCategory } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 import { getQrCodeImageUrl, buildAdherentQrData } from '../utils/qrGenerator';
+import { readLocalFileBase64 } from '../utils/readLocalFileBase64';
+import { printHtml } from '../services/printing';
 import useStore from '../store/useStore';
 
 export default function AdherentCardModal({ visible, adherent, onClose }) {
@@ -290,23 +289,15 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
           photoSrc = adherent.photo;
         } else {
           try {
-            const file = new File(adherent.photo);
-            const base64 = await file.base64();
+            const base64 = await readLocalFileBase64(adherent.photo);
             photoSrc = `data:image/jpeg;base64,${base64}`;
-          } catch (e) {
-            try {
-              const base64 = await FileSystem.readAsStringAsync(adherent.photo, {
-                encoding: FileSystem.EncodingType.Base64,
-              });
-              photoSrc = `data:image/jpeg;base64,${base64}`;
-            } catch (_err) {
-              photoSrc = adherent.photo;
-            }
+          } catch (_error) {
+            photoSrc = adherent.photo;
           }
         }
       }
       const html = generatePrintableHtml(photoSrc);
-      await Print.printAsync({ html });
+      await printHtml(html);
     } catch (e) {
       Alert.alert('Erreur d\'impression', e.message);
     } finally {

@@ -1,6 +1,6 @@
 // src/services/api.js
 // Client API HTTP pour le backend Cloudflare Worker / Cloudflare D1
-import * as SecureStore from 'expo-secure-store';
+import * as Keychain from 'react-native-keychain';
 
 let currentApiUrl = '';
 let refreshPromise = null;
@@ -8,18 +8,31 @@ let refreshPromise = null;
 const ACCESS_TOKEN_KEY = 'cmbclub.access-token';
 const REFRESH_TOKEN_KEY = 'cmbclub.refresh-token';
 
+async function setSecureValue(service, value) {
+  await Keychain.setGenericPassword(service, value, { service });
+}
+
+async function getSecureValue(service) {
+  const credentials = await Keychain.getGenericPassword({ service });
+  return credentials ? credentials.password : null;
+}
+
+async function deleteSecureValue(service) {
+  await Keychain.resetGenericPassword({ service });
+}
+
 async function saveSession(session) {
   if (!session?.accessToken || !session?.refreshToken) throw new Error('Session invalide.');
   await Promise.all([
-    SecureStore.setItemAsync(ACCESS_TOKEN_KEY, session.accessToken),
-    SecureStore.setItemAsync(REFRESH_TOKEN_KEY, session.refreshToken),
+    setSecureValue(ACCESS_TOKEN_KEY, session.accessToken),
+    setSecureValue(REFRESH_TOKEN_KEY, session.refreshToken),
   ]);
 }
 
 async function clearSession() {
   await Promise.all([
-    SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
-    SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+    deleteSecureValue(ACCESS_TOKEN_KEY),
+    deleteSecureValue(REFRESH_TOKEN_KEY),
   ]);
 }
 
@@ -47,7 +60,7 @@ async function parseResponse(response) {
 async function fetchApi(endpoint, options = {}, includeAccessToken = true) {
   if (!currentApiUrl) throw new Error('URL Cloudflare non configurée');
   const url = `${currentApiUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-  const accessToken = includeAccessToken ? await SecureStore.getItemAsync(ACCESS_TOKEN_KEY) : null;
+  const accessToken = includeAccessToken ? await getSecureValue(ACCESS_TOKEN_KEY) : null;
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   return fetch(url, { ...options, headers });
@@ -56,7 +69,7 @@ async function fetchApi(endpoint, options = {}, includeAccessToken = true) {
 async function refreshAccessToken() {
   if (!refreshPromise) {
     refreshPromise = (async () => {
-      const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      const refreshToken = await getSecureValue(REFRESH_TOKEN_KEY);
       if (!refreshToken) throw new Error('Session expirée.');
       const response = await fetchApi('/api/auth/refresh', {
         method: 'POST',
@@ -138,7 +151,7 @@ export const CloudflareAPI = {
   },
 
   logout: async () => {
-    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    const refreshToken = await getSecureValue(REFRESH_TOKEN_KEY);
     try {
       if (currentApiUrl && refreshToken) {
         const response = await fetchApi('/api/auth/logout', {
@@ -223,6 +236,8 @@ export const CloudflareAPI = {
       method: 'POST',
       body: JSON.stringify({ saisonId, dateInscription, assure }),
     }),
+  isAdherentEnrolled: (adherentId, saisonId) =>
+    request(`/api/adherents/${encodeURIComponent(adherentId)}/enrolled?saisonId=${encodeURIComponent(saisonId)}`),
 
   // ── Paiements ──
   getPaiements: (adherentId, saisonId) => {

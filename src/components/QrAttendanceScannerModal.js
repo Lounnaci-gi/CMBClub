@@ -2,11 +2,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, Modal, TouchableOpacity,
-  Image, ActivityIndicator, Animated, Platform, StatusBar,
+  Image, ActivityIndicator, Animated, Platform, StatusBar, PermissionsAndroid,
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Camera, CameraType } from 'react-native-camera-kit';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useTheme from '../theme/useTheme';
 import { getEffectiveCategory } from '../utils/categories';
 
@@ -55,7 +55,7 @@ export default function QrAttendanceScannerModal({
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = createStyles(COLORS, RADIUS, SHADOWS);
 
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, setPermission] = useState(null);
   const [torch, setTorch] = useState(false);
   const [facing, setFacing] = useState('back');
   const [scanPaused, setScanPaused] = useState(false);
@@ -64,6 +64,40 @@ export default function QrAttendanceScannerModal({
 
   // Animation pour le laser de scan
   const scanLineAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return undefined;
+    let active = true;
+    PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA)
+      .then(granted => {
+        if (active) setPermission(granted);
+      })
+      .catch(error => {
+        console.error('Impossible de vérifier l’autorisation caméra:', error);
+        if (active) setPermission(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [visible]);
+
+  const requestPermission = async () => {
+    try {
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.CAMERA,
+        {
+          title: 'Autorisation caméra',
+          message: 'CMBClub a besoin de la caméra pour scanner les QR codes.',
+          buttonPositive: 'Autoriser',
+          buttonNegative: 'Annuler',
+        },
+      );
+      setPermission(result === PermissionsAndroid.RESULTS.GRANTED);
+    } catch (error) {
+      console.error('Impossible de demander l’autorisation caméra:', error);
+      setPermission(false);
+    }
+  };
 
   useEffect(() => {
     if (visible) {
@@ -118,7 +152,7 @@ export default function QrAttendanceScannerModal({
 
     if (foundAdherent) {
       // Vibration haptique succès
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      ReactNativeHapticFeedback.trigger('notificationSuccess');
 
       const effectiveCat = getEffectiveCategory(foundAdherent);
       const res = onAdherentScanned ? onAdherentScanned(foundAdherent) : null;
@@ -139,7 +173,7 @@ export default function QrAttendanceScannerModal({
       }, 2200);
     } else {
       // Vibration haptique erreur
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      ReactNativeHapticFeedback.trigger('notificationError');
 
       setLastScannedResult({
         success: false,
@@ -187,12 +221,12 @@ export default function QrAttendanceScannerModal({
         </View>
 
         {/* Camera or Permission View */}
-        {!permission ? (
+        {permission === null ? (
           <View style={styles.centerContainer}>
             <ActivityIndicator size="large" color={COLORS.primary} />
             <Text style={styles.permissionText}>Chargement de la caméra...</Text>
           </View>
-        ) : !permission.granted ? (
+        ) : permission === false ? (
           <View style={styles.centerContainer}>
             <MaterialCommunityIcons name="camera-off" size={56} color={COLORS.warning} />
             <Text style={styles.permissionTitle}>Autorisation requise</Text>
@@ -206,14 +240,15 @@ export default function QrAttendanceScannerModal({
           </View>
         ) : (
           <View style={styles.cameraContainer}>
-            <CameraView
+            <Camera
               style={StyleSheet.absoluteFillObject}
-              facing={facing}
-              enableTorch={torch}
-              barcodeScannerSettings={{
-                barcodeTypes: ['qr'],
-              }}
-              onBarcodeScanned={scanPaused ? undefined : handleBarCodeScanned}
+              cameraType={facing === 'back' ? CameraType.Back : CameraType.Front}
+              torchMode={torch ? 'on' : 'off'}
+              scanBarcode
+              allowedBarcodeTypes={['qr']}
+              onReadCode={scanPaused ? undefined : event => handleBarCodeScanned({
+                data: event.nativeEvent.codeStringValue,
+              })}
             />
 
             {/* Viewfinder Target Mask */}

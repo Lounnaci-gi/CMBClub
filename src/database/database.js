@@ -1,10 +1,10 @@
 // src/database/database.js
 // Couche SQLite – Init, migrations, CRUD complet
 
-import * as SQLite from 'expo-sqlite';
+import { open } from '@op-engineering/op-sqlite';
 import { v4 as uuidv4 } from 'uuid';
 import { buildAdherentCodeBase, findAdherentDuplicate } from '../utils/adherentCode';
-import { computePaymentStatus, generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../utils/payments';
+import { computePaymentStatus, countOverdueAdherents, generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../utils/payments';
 import { isCloudflareEnabled, CloudflareAPI } from '../services/api';
 import { hashPassword, verifyPassword, encryptUsername, decryptUsername, matchesUsername } from '../utils/security';
 import {
@@ -26,11 +26,51 @@ function logCloudflareFallback(action, err) {
 let db = null;
 let dbInitPromise = null;
 
+function createDatabaseAdapter(nativeDatabase) {
+  let activeTransaction = null;
+
+  const getExecutor = () => activeTransaction || nativeDatabase;
+  const normalizeParams = (params) => {
+    const values = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
+    return values.map(value => value === undefined ? null : value);
+  };
+
+  return {
+    async execAsync(sql) {
+      const statements = sql.split(';').map(statement => statement.trim()).filter(Boolean);
+      for (const statement of statements) {
+        await getExecutor().execute(statement);
+      }
+    },
+    runAsync(sql, ...params) {
+      return getExecutor().execute(sql, normalizeParams(params));
+    },
+    async getAllAsync(sql, ...params) {
+      const result = await getExecutor().execute(sql, normalizeParams(params));
+      return result.rows;
+    },
+    async getFirstAsync(sql, ...params) {
+      const result = await getExecutor().execute(sql, normalizeParams(params));
+      return result.rows[0] || null;
+    },
+    withTransactionAsync(callback) {
+      return nativeDatabase.transaction(async transaction => {
+        activeTransaction = transaction;
+        try {
+          await callback();
+        } finally {
+          activeTransaction = null;
+        }
+      });
+    },
+  };
+}
+
 export async function getDatabase() {
   if (db) return db;
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
-      const database = await SQLite.openDatabaseAsync('cmbclub.db');
+      const database = createDatabaseAdapter(open({ name: 'cmbclub.db', location: 'SQLite' }));
       await initDatabase(database);
       db = database;
     })();
@@ -337,7 +377,7 @@ async function initDatabase(database) {
   );
   await database.runAsync(
     `INSERT OR IGNORE INTO config (key, value) VALUES ('cloudflareApiUrl', ?)`,
-    [process.env.EXPO_PUBLIC_CLOUDFLARE_API_URL || ''],
+    [process.env.CLOUDFLARE_API_URL || ''],
   );
 
   // Seed single admin user (identifiant chiffré & mot de passe haché)
@@ -827,7 +867,30 @@ export async function closeSaison(saisonId, credentials = {}) {
 export async function getAdherents(saisonId) {
   if (isCloudflareEnabled()) {
     try {
-      return await CloudflareAPI.getAdherents(saisonId);
+      const remoteAdherents = await CloudflareAPI.getAdherents(saisonId);
+      if (Array.isArray(remoteAdherents)) {
+        try {
+          const db = await getDatabase();
+          for (const a of remoteAdherents) {
+            await db.runAsync(
+              `INSERT OR REPLACE INTO adherents (id, code, nom, prenom, dateNaissance, lieuNaissance, telephone, taille, groupeSanguin, observationsMedicales, photo, discipline, genre, dateInscription, assure, categorieOverride, createdAt, updatedAt)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), datetime('now'))`,
+              [a.id, a.code, a.nom, a.prenom, a.dateNaissance, a.lieuNaissance, a.telephone || null, a.taille || null, a.groupeSanguin || null, a.observationsMedicales || null, a.photo || null, a.discipline || null, a.genre || 'M', a.dateInscription || null, a.assure ? 1 : 0, a.categorieOverride || null, a.createdAt || null]
+            );
+            if (saisonId && a.isEnrolled) {
+              const linkId = `as-${a.id}-${saisonId}`;
+              await db.runAsync(
+                `INSERT OR REPLACE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif)
+                 VALUES (?, ?, ?, ?, ?, 1)`,
+                [linkId, a.id, saisonId, a.dateInscriptionSaison || a.dateInscription || new Date().toISOString(), a.assure ? 1 : 0]
+              );
+            }
+          }
+        } catch (_syncErr) {
+          // cache sync fallback
+        }
+        return remoteAdherents;
+      }
     } catch (e) {
       logCloudflareFallback('getAdherents', e);
     }
@@ -910,7 +973,7 @@ export async function createAdherent(adherent) {
     }
   }
   const db = await getDatabase();
-  await requireOpenActiveSeason(db);
+  const activeSaison = await requireOpenActiveSeason(db);
 
   // Vérification stricte anti-doublon (nom, prénom, dateNaissance)
   const existingDup = await checkAdherentDuplicate({
@@ -939,6 +1002,14 @@ export async function createAdherent(adherent) {
       adherent.categorieOverride || null, now, now,
     ],
   );
+  if (activeSaison?.id) {
+    const linkId = `as-${adherent.id}-${activeSaison.id}`;
+    await db.runAsync(
+      `INSERT OR REPLACE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif)
+       VALUES (?, ?, ?, ?, ?, 1)`,
+      [linkId, adherent.id, activeSaison.id, dateInscription, assureVal],
+    );
+  }
 }
 
 export async function updateAdherent(adherent) {
@@ -1277,7 +1348,11 @@ export async function updatePaiement(paiement) {
 export async function getStatsBySaison(saisonId) {
   if (isCloudflareEnabled()) {
     try {
-      return await CloudflareAPI.getStats(saisonId);
+      const [stats, paiements] = await Promise.all([
+        CloudflareAPI.getStats(saisonId),
+        CloudflareAPI.getPaiements(null, saisonId),
+      ]);
+      return { ...stats, retards: countOverdueAdherents(paiements) };
     } catch (e) {
       logCloudflareFallback('getStats', e);
     }
@@ -1291,15 +1366,15 @@ export async function getStatsBySaison(saisonId) {
     'SELECT statut, SUM(montantPaye) as total FROM paiements WHERE saisonId = ? GROUP BY statut',
     [saisonId],
   );
-  const retards = await db.getFirstAsync(
-    "SELECT COUNT(DISTINCT adherentId) as count FROM paiements WHERE saisonId = ? AND statut = 'en_retard'",
+  const paiementsPourRetards = await db.getAllAsync(
+    'SELECT adherentId, type, mois, annee, montantDu, montantPaye, createdAt FROM paiements WHERE saisonId = ?',
     [saisonId],
   );
   const collected = paiements.reduce((sum, p) => sum + (p.total || 0), 0);
   return {
     nbAdherents: nbAdherents?.count || 0,
     collected,
-    retards: retards?.count || 0,
+    retards: countOverdueAdherents(paiementsPourRetards),
   };
 }
 
@@ -1583,12 +1658,44 @@ export async function getPaymentStatusByAdherent(saisonId) {
  * Vérifie si un adhérent est inscrit à une saison
  */
 export async function isAdherentEnrolled(adherentId, saisonId) {
+  if (isCloudflareEnabled()) {
+    try {
+      const res = await CloudflareAPI.isAdherentEnrolled(adherentId, saisonId);
+      if (typeof res === 'boolean') return res;
+      if (res && typeof res.isEnrolled === 'boolean') return res.isEnrolled;
+    } catch (e) {
+      logCloudflareFallback('isAdherentEnrolled', e);
+    }
+  }
   const db = await getDatabase();
   const row = await db.getFirstAsync(
     'SELECT id FROM adherent_saisons WHERE adherentId = ? AND saisonId = ? AND actif = 1',
     [adherentId, saisonId],
   );
-  return !!row;
+  if (row) return true;
+
+  // Auto-réparation si l'adhérent a sa date d'inscription dans l'année de la saison
+  if (saisonId) {
+    try {
+      const saison = await db.getFirstAsync('SELECT annee FROM saisons WHERE id = ?', [saisonId]);
+      if (saison?.annee) {
+        const adh = await db.getFirstAsync('SELECT dateInscription, assure FROM adherents WHERE id = ?', [adherentId]);
+        if (adh?.dateInscription && adh.dateInscription.startsWith(String(saison.annee))) {
+          const linkId = `as-${adherentId}-${saisonId}`;
+          await db.runAsync(
+            `INSERT OR REPLACE INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif)
+             VALUES (?, ?, ?, ?, ?, 1)`,
+            [linkId, adherentId, saisonId, adh.dateInscription, adh.assure || 0],
+          );
+          return true;
+        }
+      }
+    } catch (_repairErr) {
+      // Ignorer erreur de tentative de réparation
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -2877,7 +2984,4 @@ export async function sendPaymentReminderToAdherent(adherentId, saisonId, type =
 export async function sendBulkPaymentReminders(saisonId) {
   return await generatePaymentAlertsForSaison(saisonId);
 }
-
-
-
 

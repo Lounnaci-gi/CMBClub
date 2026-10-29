@@ -56,7 +56,7 @@ const useStore = create((set, get) => ({
   },
 
   // ── Config ──
-  config: { fraisInscription: 2000, fraisMensuel: 1500, fraisAssurance: 500, cloudflareApiUrl: process.env.EXPO_PUBLIC_CLOUDFLARE_API_URL || '' },
+  config: { fraisInscription: 2000, fraisMensuel: 1500, fraisAssurance: 500, cloudflareApiUrl: process.env.CLOUDFLARE_API_URL || '' },
   themeId: THEME_IDS.DARK,
   loadConfig: async () => {
     const config = await getConfig();

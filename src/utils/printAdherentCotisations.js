@@ -1,6 +1,6 @@
 // src/utils/printAdherentCotisations.js
 import { Image, Alert } from 'react-native';
-import * as Print from 'expo-print';
+import { printHtml } from '../services/printing';
 import { getEffectiveCategory } from './categories';
 import { calculateAge } from './categories';
 import { formatDate } from './seasons';
@@ -441,7 +441,7 @@ export async function printAdherentCotisations({ adherent, saison, paiements = [
       </html>
     `;
 
-    await Print.printAsync({ html });
+    await printHtml(html);
   } catch (error) {
     console.error('Erreur lors de l’impression:', error);
     Alert.alert('Erreur', 'Impossible de lancer l’impression : ' + (error.message || 'Erreur inconnue'));

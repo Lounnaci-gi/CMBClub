@@ -5,8 +5,8 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator, Image,
   StatusBar,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import LinearGradient from 'react-native-linear-gradient';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { getUserByCredentials } from '../../database/database';
 import useStore from '../../store/useStore';
 import useTheme, { useResponsive } from '../../theme/useTheme';

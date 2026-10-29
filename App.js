@@ -18,12 +18,20 @@ LogBox.ignoreLogs([
 
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [logoLoaded, setLogoLoaded] = useState(false);
+  const [introElapsed, setIntroElapsed] = useState(false);
   const [error, setError] = useState(null);
   const loadConfig = useStore(s => s.loadConfig);
   const restoreSession = useStore(s => s.restoreSession);
   const { colors: COLORS, RADIUS, shadows: SHADOWS, themeId } = useTheme();
   const statusBarStyle = themeId === THEME_IDS.LIGHT ? 'dark-content' : 'light-content';
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
+
+  useEffect(() => {
+    if (!logoLoaded) return undefined;
+    const timer = setTimeout(() => setIntroElapsed(true), 3000);
+    return () => clearTimeout(timer);
+  }, [logoLoaded]);
 
   useEffect(() => {
     (async () => {
@@ -48,7 +56,7 @@ export default function App() {
     );
   }
 
-  if (!ready) {
+  if (!ready || !logoLoaded || !introElapsed) {
     return (
       <View style={styles.center}>
         <StatusBar barStyle={statusBarStyle} />
@@ -56,9 +64,11 @@ export default function App() {
           source={require('./assets/cmbclub.png')}
           style={styles.logo}
           resizeMode="contain"
+          onLoad={() => {
+            setLogoLoaded(true);
+          }}
         />
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Initialisation CMBClub…</Text>
       </View>
     );
   }
@@ -83,14 +93,9 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     gap: 16,
   },
   logo: {
-    width: 96,
-    height: 96,
+    width: 160,
+    height: 160,
     marginBottom: 8,
-  },
-  loadingText: {
-    color: COLORS.textMuted,
-    fontSize: 14,
-    fontWeight: '500',
   },
   errorTitle: {
     color: COLORS.danger,

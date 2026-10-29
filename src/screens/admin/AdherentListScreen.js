@@ -4,8 +4,8 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Image, RefreshControl, Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
-import * as Print from 'expo-print';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import { printHtml } from '../../services/printing';
 import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import CategoryBadge from '../../components/CategoryBadge';
@@ -211,7 +211,7 @@ export default function AdherentListScreen({ navigation }) {
         <div class="footer"><div>CMBClub App v1.0</div><div>Page 1 / 1</div></div>
       </body></html>`;
 
-      await Print.printAsync({ html });
+      await printHtml(html);
     } catch (e) {
       Alert.alert("Erreur d'impression", e.message);
     } finally {
@@ -491,6 +491,35 @@ const getDisciplineIcon = (discipline) => {
   return '🏅';
 };
 
+// ── Composant Avatar Adhérent mémoïsé ────────────────────────────────────────
+const AdherentAvatar = React.memo(function AdherentAvatar({ photo, catIcon, styles }) {
+  const [imgError, setImgError] = useState(false);
+
+  React.useEffect(() => {
+    setImgError(false);
+  }, [photo]);
+
+  if (photo && !imgError) {
+    return (
+      <View style={styles.avatar}>
+        <Image
+          source={{ uri: photo }}
+          style={styles.photo}
+          onError={() => setImgError(true)}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.avatar}>
+      <View style={styles.photoPlaceholder}>
+        <Text style={styles.photoEmoji}>{catIcon || '👤'}</Text>
+      </View>
+    </View>
+  );
+});
+
 // ── Composant Carte Adhérent mémoïsé ─────────────────────────────────────────
 const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus, COLORS, styles, onPress }) {
   const cat = getEffectiveCategory(item);
@@ -509,15 +538,7 @@ const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus,
       activeOpacity={0.75}
     >
       {/* Avatar / Photo / Emoji */}
-      <View style={styles.avatar}>
-        {item.photo ? (
-          <Image source={{ uri: item.photo }} style={styles.photo} />
-        ) : (
-          <View style={styles.photoPlaceholder}>
-            <Text style={styles.photoEmoji}>{cat?.icon || '👤'}</Text>
-          </View>
-        )}
-      </View>
+      <AdherentAvatar photo={item.photo} catIcon={cat?.icon} styles={styles} />
 
       {/* Content */}
       <View style={styles.info}>
@@ -792,11 +813,11 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.05)',
   },
-  avatar: { width: 54, height: 54, marginRight: 12 },
-  photo: { width: 54, height: 54, borderRadius: 27, resizeMode: 'cover' },
+  avatar: { width: 54, height: 54, marginRight: 12, borderRadius: 27, overflow: 'hidden', backgroundColor: '#1A2A3E' },
+  photo: { width: '100%', height: '100%', borderRadius: 27, resizeMode: 'cover' },
   photoPlaceholder: {
-    width: 54,
-    height: 54,
+    width: '100%',
+    height: '100%',
     borderRadius: 27,
     backgroundColor: '#1A2A3E',
     borderWidth: 1,
@@ -972,4 +993,3 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     opacity: 0.5,
   },
 });
-

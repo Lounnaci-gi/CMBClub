@@ -1,7 +1,7 @@
 // src/components/StatCard.js
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useTheme, { useResponsive } from '../theme/useTheme';
 
 export default function StatCard({ icon, label, value, color, suffix = '', style }) {

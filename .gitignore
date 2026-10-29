@@ -3,11 +3,17 @@
 # dependencies
 node_modules/
 
-# Expo
-.expo/
+# Native React Native
 dist/
 web-build/
-expo-env.d.ts
+.expo/
+/app/.expo/
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/.cxx/
+/android/local.properties
+/android/app/debug.keystore
 
 # Native
 .kotlin/
@@ -39,9 +45,8 @@ backend/.dev.vars
 # typescript
 *.tsbuildinfo
 
-# generated native folders
+# generated iOS folder
 /ios
-/android
 
 # IDE & build tools
 .gradle/
@@ -49,4 +54,3 @@ backend/.dev.vars
 .claude/
 
 dist-check/
-

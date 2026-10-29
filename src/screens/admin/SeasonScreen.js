@@ -5,7 +5,7 @@ import {
   Modal, TextInput, Alert, RefreshControl, ScrollView, KeyboardAvoidingView,
   Platform, ActivityIndicator,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from '@react-navigation/native';
 import { v4 as uuidv4 } from 'uuid';
 import useStore from '../../store/useStore';

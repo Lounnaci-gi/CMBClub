@@ -1,10 +1,9 @@
-// src/components/PhotoPicker.js
 import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Alert, Modal, Pressable,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import ImagePicker from 'react-native-image-crop-picker';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useTheme from '../theme/useTheme';
 
 export default function PhotoPicker({ value, onChange }) {
@@ -17,33 +16,40 @@ export default function PhotoPicker({ value, onChange }) {
     setTimeout(async () => {
       try {
         const result = await launcher();
-        if (!result.canceled && result.assets?.length > 0) {
-          onChange(result.assets[0].uri);
+        if (result?.data) {
+          onChange(`data:${result.mime || 'image/jpeg'};base64,${result.data}`);
+        } else if (result?.path) {
+          onChange(result.path);
         }
       } catch (e) {
-        Alert.alert('Erreur', e.message);
+        if (e.code !== 'E_PICKER_CANCELLED') {
+          Alert.alert('Erreur', e.message);
+        }
       }
     }, 300);
   };
 
   const takePhoto = () =>
     requestAndLaunch(async () => {
-      await ImagePicker.requestCameraPermissionsAsync();
-      return ImagePicker.launchCameraAsync({
-        allowsEditing: true,
-        aspect: [3, 4],
-        quality: 0.6,
+      return ImagePicker.openCamera({
+        mediaType: 'photo',
+        cropping: true,
+        width: 600,
+        height: 800,
+        compressImageQuality: 0.5,
+        includeBase64: true,
       });
     });
 
   const pickFromGallery = () =>
     requestAndLaunch(async () => {
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
-      return ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType?.images || ['images'],
-        allowsEditing: true,
-        aspect: [3, 4],
-        quality: 0.6,
+      return ImagePicker.openPicker({
+        mediaType: 'photo',
+        cropping: true,
+        width: 600,
+        height: 800,
+        compressImageQuality: 0.5,
+        includeBase64: true,
       });
     });
 

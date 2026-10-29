@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, RefreshControl, Image, StatusBar,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
 import { CATEGORIES, getEffectiveCategory } from '../../utils/categories';

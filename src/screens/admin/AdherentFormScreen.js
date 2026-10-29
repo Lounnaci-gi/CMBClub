@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   KeyboardAvoidingView, Platform, Alert, ActivityIndicator,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { v4 as uuidv4 } from 'uuid';
 import useStore from '../../store/useStore';
 import PhotoPicker from '../../components/PhotoPicker';
@@ -1359,4 +1359,3 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     fontStyle: 'italic',
   },
 });
-

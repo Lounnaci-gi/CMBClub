@@ -5,21 +5,17 @@ jest.mock('react-native', () => ({
   Image: { resolveAssetSource: jest.fn(() => ({ uri: 'mock-logo-uri' })) },
 }));
 
-jest.mock('expo-print', () => ({
-  printAsync: jest.fn().mockResolvedValue(true),
+jest.mock('../services/printing', () => ({
+  printHtml: jest.fn().mockResolvedValue(true),
 }));
 
-jest.mock('expo-file-system', () => ({
-  File: jest.fn(),
+jest.mock('react-native-fs', () => ({
+  __esModule: true,
+  default: { readFile: jest.fn() },
 }));
 
-jest.mock('expo-file-system/legacy', () => ({
-  readAsStringAsync: jest.fn(),
-  EncodingType: { Base64: 'base64' },
-}));
-
-import * as Print from 'expo-print';
 import { Alert } from 'react-native';
+import { printHtml } from '../services/printing';
 import { printAllAdherentCards } from './printAdherentCards';
 
 describe('printAdherentCards', () => {
@@ -30,10 +26,10 @@ describe('printAdherentCards', () => {
   it('alerts if adherents list is empty', async () => {
     await printAllAdherentCards({ adherents: [] });
     expect(Alert.alert).toHaveBeenCalledWith('Information', 'Aucun adhérent à imprimer.');
-    expect(Print.printAsync).not.toHaveBeenCalled();
+    expect(printHtml).not.toHaveBeenCalled();
   });
 
-  it('generates HTML cards and calls Print.printAsync for given adherents', async () => {
+  it('generates HTML cards and calls the native print API for given adherents', async () => {
     const adherents = [
       {
         id: '1',
@@ -64,15 +60,15 @@ describe('printAdherentCards', () => {
 
     await printAllAdherentCards({ adherents, saison });
 
-    expect(Print.printAsync).toHaveBeenCalledTimes(1);
-    const callArgs = Print.printAsync.mock.calls[0][0];
-    expect(callArgs.html).toContain('BKAR100101');
-    expect(callArgs.html).toContain('Karim Benali');
-    expect(callArgs.html).toContain('SAMI120503');
-    expect(callArgs.html).toContain('Amina Saidi');
-    expect(callArgs.html).toContain('2025-2026');
-    expect(callArgs.html).toContain('KickBoxing');
-    expect(callArgs.html).toContain('Natation');
-    expect(callArgs.html).toContain('O+');
+    expect(printHtml).toHaveBeenCalledTimes(1);
+    const html = printHtml.mock.calls[0][0];
+    expect(html).toContain('BKAR100101');
+    expect(html).toContain('Karim Benali');
+    expect(html).toContain('SAMI120503');
+    expect(html).toContain('Amina Saidi');
+    expect(html).toContain('2025-2026');
+    expect(html).toContain('KickBoxing');
+    expect(html).toContain('Natation');
+    expect(html).toContain('O+');
   });
 });

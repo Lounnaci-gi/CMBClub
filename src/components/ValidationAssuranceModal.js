@@ -4,10 +4,10 @@ import {
   View, Text, StyleSheet, Modal, TouchableOpacity, Image,
   TextInput, ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as Print from 'expo-print';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useStore from '../store/useStore';
 import useTheme from '../theme/useTheme';
+import { printHtml } from '../services/printing';
 import { getCategoryByAge, getEffectiveCategory } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 
@@ -182,7 +182,7 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
         <div class="footer"><div>CMBClub — Gestion des Assurances</div><div>Page 1 / 1</div></div>
       </body></html>`;
 
-      await Print.printAsync({ html });
+      await printHtml(html);
     } catch (e) {
       Alert.alert("Erreur d'impression", e.message || 'Impossible d\'imprimer la liste.');
     } finally {

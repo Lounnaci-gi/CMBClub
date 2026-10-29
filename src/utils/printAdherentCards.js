@@ -1,11 +1,10 @@
 // src/utils/printAdherentCards.js
 import { Image, Alert } from 'react-native';
-import * as Print from 'expo-print';
-import { File } from 'expo-file-system';
-import * as FileSystem from 'expo-file-system/legacy';
 import { getEffectiveCategory } from './categories';
 import { formatDate } from './seasons';
 import { getQrCodeImageUrl, buildAdherentQrData } from './qrGenerator';
+import { readLocalFileBase64 } from './readLocalFileBase64';
+import { printHtml } from '../services/printing';
 
 /**
  * Convertit l'URI d'une photo en base64 pour garantir son rendu à l'impression.
@@ -15,18 +14,10 @@ async function resolvePhotoBase64(photo) {
   if (photo.startsWith('data:image')) return photo;
 
   try {
-    const file = new File(photo);
-    const base64 = await file.base64();
+    const base64 = await readLocalFileBase64(photo);
     return `data:image/jpeg;base64,${base64}`;
-  } catch (_e1) {
-    try {
-      const base64 = await FileSystem.readAsStringAsync(photo, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      return `data:image/jpeg;base64,${base64}`;
-    } catch (_e2) {
-      return photo;
-    }
+  } catch (_error) {
+    return photo;
   }
 }
 
@@ -328,5 +319,5 @@ export async function printAllAdherentCards({ adherents = [], saison = null }) {
     </html>
   `;
 
-  await Print.printAsync({ html });
+  await printHtml(html);
 }

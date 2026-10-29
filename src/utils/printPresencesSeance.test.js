@@ -5,8 +5,8 @@ jest.mock('react-native', () => ({
   Image: { resolveAssetSource: jest.fn(() => ({ uri: '' })) },
 }));
 
-jest.mock('expo-print', () => ({
-  printAsync: jest.fn(),
+jest.mock('../services/printing', () => ({
+  printHtml: jest.fn(),
 }));
 
 import { parsePresenceDetails } from './printPresencesSeance';

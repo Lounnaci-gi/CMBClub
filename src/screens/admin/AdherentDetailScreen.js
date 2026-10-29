@@ -4,8 +4,8 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Image, Alert, RefreshControl,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import LinearGradient from 'react-native-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { v4 as uuidv4 } from 'uuid';
 import useStore from '../../store/useStore';
@@ -34,15 +34,21 @@ export default function AdherentDetailScreen({ navigation, route }) {
     adherents, saisonActive, deleteAdherent, enrollAdherent, toggleAdherentAssure,
     createPaiement, config, loadConfig, getPresencesAdherent,
   } = useStore();
+  const adherent = adherents.find(a => a.id === adherentId);
+  const isInitiallyEnrolled = Boolean(
+    adherent?.isEnrolled ||
+    (adherent?.saisonId && saisonActive?.id && adherent.saisonId === saisonActive.id) ||
+    (adherent?.dateInscriptionSaison && saisonActive)
+  );
+
   const [paiements, setPaiements] = useState([]);
   const [presencesData, setPresencesData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [account, setAccount] = useState(null);
-  const [enrolled, setEnrolled] = useState(false);
+  const [enrolled, setEnrolled] = useState(isInitiallyEnrolled);
+  const [photoError, setPhotoError] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
-
-  const adherent = adherents.find(a => a.id === adherentId);
 
   const handlePrintCotisations = async () => {
     if (!adherent || !saisonActive) return;
@@ -67,14 +73,15 @@ export default function AdherentDetailScreen({ navigation, route }) {
     const user = await getUserByAdherentId(adherent.id);
     setAccount(user);
     if (saisonActive) {
-      setEnrolled(await isAdherentEnrolled(adherent.id, saisonActive.id));
+      const isEnrolledDb = await isAdherentEnrolled(adherent.id, saisonActive.id);
+      setEnrolled(Boolean(isEnrolledDb || isInitiallyEnrolled || adherent?.isEnrolled));
       await refreshPaymentStatuses(saisonActive.id);
       const p = await getPaiementsByAdherent(adherent.id, saisonActive.id);
       setPaiements(p);
     }
     const pres = await getPresencesAdherent(adherent.id, saisonActive?.id);
     setPresencesData(pres);
-  }, [adherent, saisonActive, loadConfig, getPresencesAdherent]);
+  }, [adherent, saisonActive, isInitiallyEnrolled, loadConfig, getPresencesAdherent]);
 
   useFocusEffect(useCallback(() => { loadPaiements(); }, [loadPaiements]));
 
@@ -168,6 +175,7 @@ export default function AdherentDetailScreen({ navigation, route }) {
           text: 'Inscrire',
           onPress: async () => {
             const today = new Date().toISOString();
+            setEnrolled(true);
             await enrollAdherent(adherent.id, saisonActive.id, today, adherent.assure ? 1 : 0);
             await loadPaiements();
             Alert.alert('Inscription effectuée', `Adhérent réinscrit avec succès pour la saison ${saisonActive.label}`);
@@ -193,8 +201,12 @@ export default function AdherentDetailScreen({ navigation, route }) {
       >
         <LinearGradient colors={[cat.color + '30', COLORS.bg]} style={styles.hero}>
           <View style={styles.photoContainer}>
-            {adherent.photo ? (
-              <Image source={{ uri: adherent.photo }} style={styles.photo} />
+            {adherent.photo && !photoError ? (
+              <Image
+                source={{ uri: adherent.photo }}
+                style={styles.photo}
+                onError={() => setPhotoError(true)}
+              />
             ) : (
               <View style={[styles.photoPlaceholder, { backgroundColor: cat.color + '20' }]}>
                 <Text style={{ fontSize: 40 }}>{cat.icon}</Text>

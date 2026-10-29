@@ -1,7 +1,7 @@
 // src/utils/financialReports.test.js
 
-jest.mock('expo-print', () => ({
-  printAsync: jest.fn().mockResolvedValue(true),
+jest.mock('../services/printing', () => ({
+  printHtml: jest.fn().mockResolvedValue(true),
 }));
 
 import {

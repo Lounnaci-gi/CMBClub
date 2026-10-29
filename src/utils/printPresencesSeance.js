@@ -1,6 +1,6 @@
 // src/utils/printPresencesSeance.js
 import { Image, Alert } from 'react-native';
-import * as Print from 'expo-print';
+import { printHtml } from '../services/printing';
 import { getEffectiveCategory } from './categories';
 
 /**
@@ -467,7 +467,7 @@ export async function printPresencesSeance({
 </html>
     `;
 
-    await Print.printAsync({ html });
+    await printHtml(html);
   } catch (error) {
     Alert.alert("Erreur d'impression", error.message || "Impossible d'imprimer la feuille d'appel.");
   }

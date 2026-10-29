@@ -748,6 +748,7 @@ app.get('/api/adherents', async (c) => {
     let query = `
       SELECT a.*,
              COALESCE(s.assure, a.assure) AS assure,
+             CASE WHEN s.id IS NOT NULL THEN 1 ELSE 0 END AS isEnrolled,
              s.saisonId,
              s.dateInscription AS dateInscriptionSaison
       FROM adherents a
@@ -755,10 +756,10 @@ app.get('/api/adherents', async (c) => {
     let bindings = [];
 
     if (saisonId) {
-      query += ` INNER JOIN adherent_saisons s ON a.id = s.adherentId WHERE s.saisonId = ? AND s.actif = 1 `;
+      query += ` LEFT JOIN adherent_saisons s ON a.id = s.adherentId AND s.saisonId = ? AND s.actif = 1 `;
       bindings.push(saisonId);
     } else {
-      query += ` LEFT JOIN adherent_saisons s ON a.id = s.adherentId `;
+      query += ` LEFT JOIN adherent_saisons s ON a.id = s.adherentId AND s.actif = 1 `;
     }
 
     query += ` ORDER BY a.nom ASC, a.prenom ASC `;
@@ -785,6 +786,7 @@ app.post('/api/adherents', async (c) => {
   try {
     const seasonCheck = await requireOpenActiveSeason(c);
     if (seasonCheck.error) return seasonCheck.error;
+    const activeSaison = seasonCheck.saison;
 
     const raw = await c.req.json();
     const now = new Date().toISOString();
@@ -807,21 +809,32 @@ app.post('/api/adherents', async (c) => {
       return err(c, `Un adhérent avec le même nom, prénom et date de naissance existe déjà (${duplicatePost.nom} ${duplicatePost.prenom} - Code : ${duplicatePost.code || 'N/A'}).`, 409);
     }
 
-    await c.env.DB.prepare(
-      `INSERT INTO adherents (
-        id, code, nom, prenom, dateNaissance, lieuNaissance,
-        telephone, taille, groupeSanguin, observationsMedicales,
-        photo, discipline, genre, dateInscription, assure, categorieOverride,
-        createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      a.id, a.code, a.nom, a.prenom, a.dateNaissance, a.lieuNaissance,
-      a.telephone || '', a.taille || '', a.groupeSanguin || '', a.observationsMedicales || '',
-      a.photo || null, a.discipline || '', a.genre || 'M', a.dateInscription || now,
-      a.assure ? 1 : 0, a.categorieOverride || null,
-      a.createdAt || now, a.updatedAt || now
-    ).run();
-    return ok(c, a);
+    const linkId = `${a.id}-${activeSaison.id}`;
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO adherents (
+          id, code, nom, prenom, dateNaissance, lieuNaissance,
+          telephone, taille, groupeSanguin, observationsMedicales,
+          photo, discipline, genre, dateInscription, assure, categorieOverride,
+          createdAt, updatedAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        a.id, a.code, a.nom, a.prenom, a.dateNaissance, a.lieuNaissance,
+        a.telephone || '', a.taille || '', a.groupeSanguin || '', a.observationsMedicales || '',
+        a.photo || null, a.discipline || '', a.genre || 'M', a.dateInscription || now,
+        a.assure ? 1 : 0, a.categorieOverride || null,
+        a.createdAt || now, a.updatedAt || now
+      ),
+      c.env.DB.prepare(
+        `INSERT INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif)
+         VALUES (?, ?, ?, ?, ?, 1)
+         ON CONFLICT(id) DO UPDATE SET
+           dateInscription = excluded.dateInscription,
+           assure = excluded.assure,
+           actif = 1`
+      ).bind(linkId, a.id, activeSaison.id, a.dateInscription || now, a.assure ? 1 : 0),
+    ]);
+    return ok(c, { ...a, isEnrolled: 1, saisonId: activeSaison.id });
   } catch (e) {
     return err(c, e.message, 500);
   }
@@ -924,6 +937,38 @@ app.post('/api/adherents/:id/enroll', async (c) => {
     ).bind(linkId, id, saisonId, dateInscription || new Date().toISOString(), assure ? 1 : 0).run();
 
     return ok(c, { linkId, adherentId: id, saisonId });
+  } catch (e) {
+    return err(c, e.message, 500);
+  }
+});
+
+app.get('/api/adherents/:id/enrolled', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const saisonId = c.req.query('saisonId');
+    if (!saisonId) return ok(c, { isEnrolled: false });
+
+    const row = await c.env.DB.prepare(
+      'SELECT id FROM adherent_saisons WHERE adherentId = ? AND saisonId = ? AND actif = 1 LIMIT 1'
+    ).bind(id, saisonId).first();
+    if (row) return ok(c, { isEnrolled: true });
+
+    // Auto-réparation si l'adhérent a été inscrit durant l'année de la saison
+    const saison = await c.env.DB.prepare('SELECT annee FROM saisons WHERE id = ?').bind(saisonId).first();
+    if (saison?.annee) {
+      const adh = await c.env.DB.prepare('SELECT dateInscription, assure FROM adherents WHERE id = ?').bind(id).first();
+      if (adh?.dateInscription && adh.dateInscription.startsWith(String(saison.annee))) {
+        const linkId = `${id}-${saisonId}`;
+        await c.env.DB.prepare(
+          `INSERT INTO adherent_saisons (id, adherentId, saisonId, dateInscription, assure, actif)
+           VALUES (?, ?, ?, ?, ?, 1)
+           ON CONFLICT(id) DO UPDATE SET actif = 1`
+        ).bind(linkId, id, saisonId, adh.dateInscription, adh.assure || 0).run();
+        return ok(c, { isEnrolled: true });
+      }
+    }
+
+    return ok(c, { isEnrolled: false });
   } catch (e) {
     return err(c, e.message, 500);
   }
@@ -1187,7 +1232,16 @@ app.get('/api/stats', async (c) => {
     ).bind(saisonId).first();
 
     const retardsCount = await c.env.DB.prepare(
-      "SELECT COUNT(*) as total FROM paiements WHERE saisonId = ? AND statut = 'retard'"
+      `SELECT COUNT(DISTINCT adherentId) as total
+       FROM paiements
+       WHERE saisonId = ?
+         AND montantPaye < montantDu
+         AND (
+           (mois IS NOT NULL AND annee IS NOT NULL
+             AND date('now') >= date(annee || '-' || printf('%02d', mois) || '-10'))
+           OR (type = 'inscription' AND createdAt IS NOT NULL
+             AND datetime('now') > datetime(createdAt, '+30 days'))
+         )`
     ).bind(saisonId).first();
 
     return ok(c, {

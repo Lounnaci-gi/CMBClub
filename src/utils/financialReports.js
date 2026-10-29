@@ -1,6 +1,6 @@
 // src/utils/financialReports.js
 // Module de calcul et d'impression des bilans financiers (Hebdomadaire, Mensuel, Saison Complète)
-import * as Print from 'expo-print';
+import { printHtml } from '../services/printing';
 import { formatDate } from './seasons';
 import { PAYMENT_STATUS } from './payments';
 
@@ -359,5 +359,5 @@ export async function printFinancialReport({ report, saison = null, clubName = '
     </div>
   </body></html>`;
 
-  await Print.printAsync({ html });
+  await printHtml(html);
 }
