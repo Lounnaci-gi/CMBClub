@@ -10,6 +10,7 @@ import useTheme from '../theme/useTheme';
 import { printHtml } from '../services/printing';
 import { getCategoryByAge, getEffectiveCategory } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
+import { getAdherentPhotoUri } from '../utils/adherentPhotos';
 
 export default function ValidationAssuranceModal({ visible, onClose }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -294,7 +295,7 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
                     <View style={styles.cardInfoRow}>
                       <View style={styles.avatar}>
                         {item.photo ? (
-                          <Image source={{ uri: item.photo }} style={styles.photo} />
+                          <Image source={{ uri: getAdherentPhotoUri(item.photo) }} style={styles.photo} />
                         ) : (
                           <View style={[styles.photoPlaceholder, { backgroundColor: cat.color + '20' }]}>
                             <Text style={{ fontSize: 20 }}>{cat.icon}</Text>

@@ -108,5 +108,5 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderRadius: RADIUS.md,
     marginTop: 4,
   },
-  doneText: { color: '#fff', fontWeight: '700' },
+  doneText: { color: COLORS.textInverse, fontWeight: '700' },
 });

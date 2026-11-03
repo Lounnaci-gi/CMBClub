@@ -71,4 +71,21 @@ describe('printAdherentCards', () => {
     expect(html).toContain('Natation');
     expect(html).toContain('O+');
   });
+
+  it('embeds the member photo in the printed card HTML', async () => {
+    const photo = 'data:image/png;base64,cG5n';
+
+    await printAllAdherentCards({
+      adherents: [{
+        id: '1',
+        nom: 'Benali',
+        prenom: 'Karim',
+        dateNaissance: '2010-01-01',
+        photo,
+      }],
+    });
+
+    const html = printHtml.mock.calls[0][0];
+    expect(html).toContain(`<img src="${photo}" class="photo-img" />`);
+  });
 });

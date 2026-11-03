@@ -9,7 +9,7 @@ import useTheme from '../theme/useTheme';
 import { getCategoryByAge, getEffectiveCategory } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 import { getQrCodeImageUrl, buildAdherentQrData } from '../utils/qrGenerator';
-import { readLocalFileBase64 } from '../utils/readLocalFileBase64';
+import { getAdherentPhotoUri, resolveAdherentPhotoDataUri } from '../utils/adherentPhotos';
 import { printHtml } from '../services/printing';
 import useStore from '../store/useStore';
 
@@ -283,19 +283,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
   const handlePrint = async () => {
     setPrinting(true);
     try {
-      let photoSrc = null;
-      if (adherent.photo) {
-        if (adherent.photo.startsWith('data:image')) {
-          photoSrc = adherent.photo;
-        } else {
-          try {
-            const base64 = await readLocalFileBase64(adherent.photo);
-            photoSrc = `data:image/jpeg;base64,${base64}`;
-          } catch (_error) {
-            photoSrc = adherent.photo;
-          }
-        }
-      }
+      const photoSrc = await resolveAdherentPhotoDataUri(adherent.photo);
       const html = generatePrintableHtml(photoSrc);
       await printHtml(html);
     } catch (e) {
@@ -348,7 +336,7 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
                 {/* Photo & Category */}
                 <View style={styles.photoContainer}>
                   {adherent.photo ? (
-                    <Image source={{ uri: adherent.photo }} style={styles.photoImg} />
+                    <Image source={{ uri: getAdherentPhotoUri(adherent.photo) }} style={styles.photoImg} />
                   ) : (
                     <View style={styles.photoPlaceholder}>
                       <Text style={{ fontSize: 32 }}>{category.icon}</Text>

@@ -13,9 +13,11 @@ import useTheme, { useResponsive } from '../../theme/useTheme';
 import { CATEGORIES, DISCIPLINES, getCategoryByAge, getEffectiveCategory, calculateAge } from '../../utils/categories';
 import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
+import { getAdherentPhotoUri } from '../../utils/adherentPhotos';
 import { getPaymentStatusByAdherent } from '../../database/database';
 import ValidationAssuranceModal from '../../components/ValidationAssuranceModal';
 import { printAllAdherentCards } from '../../utils/printAdherentCards';
+import { paginateItems } from '../../utils/printAdherentList';
 
 export default function AdherentListScreen({ navigation }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -151,64 +153,77 @@ export default function AdherentListScreen({ navigation }) {
       const discText   = discFilter === 'all' ? 'Toutes' : discFilter;
       const payText    = payFilter  === 'all' ? 'Tous'   : getStatusLabel(payFilter);
 
-      const rowsHtml = filtered.map((item, index) => {
-        const cat      = getEffectiveCategory(item);
-        const st       = payStatusMap[item.id];
-        const stLabel  = st ? getStatusLabel(st) : '—';
-        const stColor  = st ? getStatusColor(st) : '#888';
-        const dateInsc = item.dateInscriptionSaison || item.dateInscription || item.createdAt?.slice(0, 10);
+      const pages = paginateItems(filtered);
+      const pagesHtml = pages.map((page, pageIndex) => {
+        const rowsHtml = page.map((item, index) => {
+          const cat      = getEffectiveCategory(item);
+          const st       = payStatusMap[item.id];
+          const stLabel  = st ? getStatusLabel(st) : '—';
+          const stColor  = st ? getStatusColor(st) : '#888';
+          const dateInsc = item.dateInscriptionSaison || item.dateInscription || item.createdAt?.slice(0, 10);
+          const rowNumber = pageIndex * 20 + index + 1;
+          return `
+            <tr>
+              <td style="text-align:center;color:#64748B;font-weight:600">${rowNumber}</td>
+              <td style="font-family:monospace;font-weight:700">${item.code}</td>
+              <td style="font-weight:700">${item.nom.toUpperCase()} ${item.prenom}</td>
+              <td>${cat.label}</td>
+              <td style="color:#0284C7;font-weight:600">${item.discipline || '—'}</td>
+              <td>${formatDate(item.dateNaissance)}</td>
+              <td>${dateInsc ? formatDate(dateInsc) : '—'}</td>
+              <td>${item.telephone || '—'}</td>
+              <td>
+                <span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;color:${stColor};background:${stColor}18;border:1px solid ${stColor}40">${stLabel}</span>
+              </td>
+            </tr>`;
+        }).join('');
+
         return `
-          <tr style="border-bottom:1px solid #E2E8F0">
-            <td style="padding:8px 10px;text-align:center;color:#64748B;font-weight:600">${index + 1}</td>
-            <td style="padding:8px 10px;font-family:monospace;font-weight:700">${item.code}</td>
-            <td style="padding:8px 10px;font-weight:700">${item.nom.toUpperCase()} ${item.prenom}</td>
-            <td style="padding:8px 10px">${cat.label}</td>
-            <td style="padding:8px 10px;color:#0284C7;font-weight:600">${item.discipline || '—'}</td>
-            <td style="padding:8px 10px">${formatDate(item.dateNaissance)}</td>
-            <td style="padding:8px 10px">${dateInsc ? formatDate(dateInsc) : '—'}</td>
-            <td style="padding:8px 10px">${item.telephone || '—'}</td>
-            <td style="padding:8px 10px">
-              <span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;color:${stColor};background:${stColor}18;border:1px solid ${stColor}40">${stLabel}</span>
-            </td>
-          </tr>`;
+          <section class="page">
+            <div class="header">
+              <div><h1>🏆 CMB CLUB — LISTE DES ADHÉRENTS</h1><p>Club Omnisports CMB</p></div>
+              <div style="text-align:right">
+                <div class="badge">Saison ${saisonText}</div>
+                <div>Imprimé le : ${now}</div>
+                <div>Total : <strong>${filtered.length}</strong></div>
+              </div>
+            </div>
+            <div class="filters">
+              <span><b>Catégorie :</b> ${catText}</span>
+              <span><b>Discipline :</b> ${discText}</span>
+              <span><b>Paiement :</b> ${payText}</span>
+              ${search ? `<span><b>Recherche :</b> "${search}"</span>` : ''}
+            </div>
+            <table>
+              <thead><tr>
+                <th style="width:30px;text-align:center">#</th>
+                <th style="width:90px">Code</th>
+                <th>Nom & Prénom</th><th>Catégorie</th><th>Discipline</th>
+                <th>Date Naiss.</th><th>Date Inscription</th><th>Téléphone</th><th>Statut</th>
+              </tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+            <div class="footer"><div>CMBClub App v1.0</div><div>Page ${pageIndex + 1} / ${pages.length}</div></div>
+          </section>`;
       }).join('');
 
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
         <style>
           @page{size:A4 landscape;margin:12mm}
           body{font-family:Arial,sans-serif;font-size:11.5px;margin:0;padding:10px}
-          .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1DD1A1;padding-bottom:12px;margin-bottom:15px}
+          .page{break-after:page;page-break-after:always}
+          .page:last-child{break-after:auto;page-break-after:auto}
+          .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1DD1A1;padding-bottom:8px;margin-bottom:10px}
           h1{margin:0;font-size:22px;font-weight:900}
           .badge{display:inline-block;background:#0A1520;color:#1DD1A1;font-weight:700;padding:3px 10px;border-radius:12px}
-          .filters{display:flex;gap:15px;background:#F8FAFC;border:1px solid #E2E8F0;padding:8px 14px;border-radius:8px;margin-bottom:15px}
+          .filters{display:flex;gap:15px;background:#F8FAFC;border:1px solid #E2E8F0;padding:6px 12px;border-radius:8px;margin-bottom:10px}
           table{width:100%;border-collapse:collapse}
           th{background:#0A1520;color:#fff;text-align:left;padding:10px;text-transform:uppercase;letter-spacing:.5px}
-          .footer{margin-top:20px;display:flex;justify-content:space-between;font-size:10px;color:#94A3B8;border-top:1px solid #E2E8F0;padding-top:8px}
+          td{padding:5px 8px;border-bottom:1px solid #E2E8F0}
+          tr{break-inside:avoid;page-break-inside:avoid}
+          .footer{margin-top:10px;display:flex;justify-content:space-between;font-size:10px;color:#94A3B8;border-top:1px solid #E2E8F0;padding-top:6px}
         </style></head><body>
-        <div class="header">
-          <div><h1>🏆 CMB CLUB — LISTE DES ADHÉRENTS</h1><p>Club Omnisports CMB</p></div>
-          <div style="text-align:right">
-            <div class="badge">Saison ${saisonText}</div>
-            <div>Imprimé le : ${now}</div>
-            <div>Total : <strong>${filtered.length}</strong></div>
-          </div>
-        </div>
-        <div class="filters">
-          <span><b>Catégorie :</b> ${catText}</span>
-          <span><b>Discipline :</b> ${discText}</span>
-          <span><b>Paiement :</b> ${payText}</span>
-          ${search ? `<span><b>Recherche :</b> "${search}"</span>` : ''}
-        </div>
-        <table>
-          <thead><tr>
-            <th style="width:30px;text-align:center">#</th>
-            <th style="width:90px">Code</th>
-            <th>Nom & Prénom</th><th>Catégorie</th><th>Discipline</th>
-            <th>Date Naiss.</th><th>Date Inscription</th><th>Téléphone</th><th>Statut</th>
-          </tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-        <div class="footer"><div>CMBClub App v1.0</div><div>Page 1 / 1</div></div>
+        ${pagesHtml}
       </body></html>`;
 
       await printHtml(html);
@@ -503,7 +518,7 @@ const AdherentAvatar = React.memo(function AdherentAvatar({ photo, catIcon, styl
     return (
       <View style={styles.avatar}>
         <Image
-          source={{ uri: photo }}
+          source={{ uri: getAdherentPhotoUri(photo) }}
           style={styles.photo}
           onError={() => setImgError(true)}
         />

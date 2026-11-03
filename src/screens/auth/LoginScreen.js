@@ -10,6 +10,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { getUserByCredentials } from '../../database/database';
 import useStore from '../../store/useStore';
 import useTheme, { useResponsive } from '../../theme/useTheme';
+import { THEME_IDS } from '../../theme/themes';
 import {
   validateLoginInput,
   isLoginLocked,
@@ -20,8 +21,9 @@ import {
 } from '../../utils/validation';
 
 export default function LoginScreen() {
-  const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
+  const { colors: COLORS, RADIUS, shadows: SHADOWS, themeId } = useTheme();
   const { isSmall, isTablet, isDesktop, isLandscape, height } = useResponsive();
+  const statusBarStyle = themeId === THEME_IDS.LIGHT ? 'dark-content' : 'light-content';
   const isShortScreen = height < 640;
   const styles = useMemo(
     () => createStyles(COLORS, RADIUS, SHADOWS, isSmall, isTablet || isDesktop, isShortScreen),
@@ -100,8 +102,8 @@ export default function LoginScreen() {
   const isLocked = lockoutSeconds > 0;
 
   return (
-    <LinearGradient colors={[COLORS.bg, '#0A1520', '#071018']} style={styles.gradient}>
-      <StatusBar barStyle="light-content" />
+    <LinearGradient colors={[COLORS.gradStart, COLORS.gradMid, COLORS.gradEnd]} style={styles.gradient}>
+      <StatusBar barStyle={statusBarStyle} />
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -165,9 +167,9 @@ export default function LoginScreen() {
                 <MaterialCommunityIcons
                   name={isLocked ? 'lock-clock' : 'alert-circle'}
                   size={15}
-                  color={isLocked ? COLORS.warning || '#f59e0b' : COLORS.danger}
+                  color={isLocked ? COLORS.warning : COLORS.danger}
                 />
-                <Text style={[styles.errorText, isLocked && { color: COLORS.warning || '#f59e0b' }]}>{error}</Text>
+                <Text style={[styles.errorText, isLocked && { color: COLORS.warning }]}>{error}</Text>
               </View>
             ) : null}
 
@@ -187,10 +189,10 @@ export default function LoginScreen() {
               disabled={loading || isLocked}
             >
               {loading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={COLORS.textInverse} />
               ) : (
                 <>
-                  <MaterialCommunityIcons name={isLocked ? 'lock' : 'login'} size={20} color="#fff" />
+                  <MaterialCommunityIcons name={isLocked ? 'lock' : 'login'} size={20} color={COLORS.textInverse} />
                   <Text style={styles.loginText}>{isLocked ? 'Accès verrouillé' : 'Se connecter'}</Text>
                 </>
               )}
@@ -295,8 +297,8 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, isShort) => Sty
     borderColor: COLORS.danger + '30',
   },
   errorBoxLocked: {
-    backgroundColor: '#f59e0b15',
-    borderColor: '#f59e0b30',
+    backgroundColor: COLORS.warning + '15',
+    borderColor: COLORS.warning + '30',
   },
   errorText: {
     color: COLORS.danger,
@@ -332,7 +334,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, isShort) => Sty
     opacity: 0.5,
   },
   loginText: {
-    color: '#fff',
+    color: COLORS.textInverse,
     fontWeight: '700',
     fontSize: 15,
   },

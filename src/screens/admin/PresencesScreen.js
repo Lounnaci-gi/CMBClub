@@ -8,6 +8,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
 import { CATEGORIES, getEffectiveCategory } from '../../utils/categories';
+import { getAdherentPhotoUri } from '../../utils/adherentPhotos';
 import QrAttendanceScannerModal from '../../components/QrAttendanceScannerModal';
 import {
   JOURS_FR,
@@ -1038,7 +1039,7 @@ export default function PresencesScreen({ route, navigation }) {
                         <View style={styles.cardHeader}>
                           <View style={styles.avatar}>
                             {adherent.photo ? (
-                              <Image source={{ uri: adherent.photo }} style={styles.photo} />
+                              <Image source={{ uri: getAdherentPhotoUri(adherent.photo) }} style={styles.photo} />
                             ) : (
                               <View style={styles.photoPlaceholder}>
                                 <Text style={styles.photoIcon}>👤</Text>

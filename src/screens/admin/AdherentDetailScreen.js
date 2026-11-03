@@ -16,6 +16,7 @@ import useTheme from '../../theme/useTheme';
 import { getCategoryByAge, getEffectiveCategory, calculateAge } from '../../utils/categories';
 import { calculateBalance, generatePaymentSchedule, PAYMENT_STATUS } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
+import { getAdherentPhotoUri } from '../../utils/adherentPhotos';
 import {
   getPaiementsByAdherent,
   getUserByAdherentId,
@@ -203,7 +204,7 @@ export default function AdherentDetailScreen({ navigation, route }) {
           <View style={styles.photoContainer}>
             {adherent.photo && !photoError ? (
               <Image
-                source={{ uri: adherent.photo }}
+                source={{ uri: getAdherentPhotoUri(adherent.photo) }}
                 style={styles.photo}
                 onError={() => setPhotoError(true)}
               />
@@ -289,8 +290,8 @@ export default function AdherentDetailScreen({ navigation, route }) {
               }}
               onPress={handleEnrollSeason}
             >
-              <MaterialCommunityIcons name="account-plus-outline" size={18} color="#FFF" />
-              <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>
+              <MaterialCommunityIcons name="account-plus-outline" size={18} color={COLORS.textInverse} />
+              <Text style={{ color: COLORS.textInverse, fontWeight: '700', fontSize: 14 }}>
                 Réinscrire pour la saison {saisonActive.label}
               </Text>
             </TouchableOpacity>
@@ -405,8 +406,8 @@ export default function AdherentDetailScreen({ navigation, route }) {
                 onPress={() => navigation.navigate('PaymentDetail', { adherentId: adherent.id })}
                 activeOpacity={0.8}
               >
-                <MaterialCommunityIcons name="cash-plus" size={18} color="#FFF" />
-                <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 13 }}>
+                <MaterialCommunityIcons name="cash-plus" size={18} color={COLORS.textInverse} />
+                <Text style={{ color: COLORS.textInverse, fontWeight: '700', fontSize: 13 }}>
                   Ajouter un versement / Avancer des cotisations
                 </Text>
               </TouchableOpacity>
@@ -554,7 +555,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     paddingVertical: 3,
     maxWidth: 160,
   },
-  codeText: { color: '#fff', fontWeight: '700', fontSize: 10 },
+  codeText: { color: COLORS.textInverse, fontWeight: '700', fontSize: 10 },
   fullName: { color: COLORS.textPrimary, fontSize: 22, fontWeight: '800', marginTop: 8 },
   ageText: { color: COLORS.textSecondary, fontSize: 14 },
   disciplineBadge: {

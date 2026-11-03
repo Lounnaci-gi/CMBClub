@@ -72,7 +72,7 @@ const createStyles = (COLORS, RADIUS) => StyleSheet.create({
     paddingHorizontal: 4,
   },
   countText: {
-    color: '#fff',
+    color: COLORS.textInverse,
     fontSize: 10,
     fontWeight: '700',
   },

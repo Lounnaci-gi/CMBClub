@@ -9,6 +9,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import useTheme from '../theme/useTheme';
 import { getEffectiveCategory } from '../utils/categories';
+import { getAdherentPhotoUri } from '../utils/adherentPhotos';
 
 /**
  * Extrait le code adhérent ou l'identifiant depuis le texte d'un QR code scanné
@@ -286,7 +287,7 @@ export default function QrAttendanceScannerModal({
                         <View style={styles.resultPhotoWrap}>
                           {lastScannedResult.adherent.photo ? (
                             <Image
-                              source={{ uri: lastScannedResult.adherent.photo }}
+                              source={{ uri: getAdherentPhotoUri(lastScannedResult.adherent.photo) }}
                               style={styles.resultPhoto}
                             />
                           ) : (

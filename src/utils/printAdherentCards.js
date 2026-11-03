@@ -3,23 +3,8 @@ import { Image, Alert } from 'react-native';
 import { getEffectiveCategory } from './categories';
 import { formatDate } from './seasons';
 import { getQrCodeImageUrl, buildAdherentQrData } from './qrGenerator';
-import { readLocalFileBase64 } from './readLocalFileBase64';
+import { resolveAdherentPhotoDataUri } from './adherentPhotos';
 import { printHtml } from '../services/printing';
-
-/**
- * Convertit l'URI d'une photo en base64 pour garantir son rendu à l'impression.
- */
-async function resolvePhotoBase64(photo) {
-  if (!photo) return null;
-  if (photo.startsWith('data:image')) return photo;
-
-  try {
-    const base64 = await readLocalFileBase64(photo);
-    return `data:image/jpeg;base64,${base64}`;
-  } catch (_error) {
-    return photo;
-  }
-}
 
 /**
  * Génère le HTML d'une seule carte — copie exacte du modèle AdherentCardModal.
@@ -116,7 +101,7 @@ export async function printAllAdherentCards({ adherents = [], saison = null }) {
       const category = getEffectiveCategory(adherent);
       const qrText = buildAdherentQrData(adherent, category.label, saison);
       const qrImageUrl = getQrCodeImageUrl(qrText);
-      const photoSrc = await resolvePhotoBase64(adherent.photo);
+      const photoSrc = await resolveAdherentPhotoDataUri(adherent.photo);
 
       return renderSingleCardHtml(adherent, {
         photoSrc,

@@ -11,6 +11,7 @@ import useStore from '../../store/useStore';
 import useTheme, { useResponsive } from '../../theme/useTheme';
 import { getEffectiveCategory, calculateAge } from '../../utils/categories';
 import { calculateBalance, PAYMENT_STATUS } from '../../utils/payments';
+import { getAdherentPhotoUri } from '../../utils/adherentPhotos';
 import {
   getAdherentById,
   getPaiementsByAdherent,
@@ -217,7 +218,7 @@ export default function AdherentHomeScreen({ navigation }) {
                 <View style={styles.profileCard}>
                   <TouchableOpacity onPress={() => setShowCard(true)} activeOpacity={0.85}>
                     {adherent.photo ? (
-                      <Image source={{ uri: adherent.photo }} style={styles.photo} />
+                      <Image source={{ uri: getAdherentPhotoUri(adherent.photo) }} style={styles.photo} />
                     ) : (
                       <View style={[styles.photoPlaceholder, { backgroundColor: (cat?.color || COLORS.primary) + '25' }]}>
                         <Text style={{ fontSize: 32 }}>{cat?.icon || '👤'}</Text>

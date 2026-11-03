@@ -5,6 +5,7 @@ import {
 import ImagePicker from 'react-native-image-crop-picker';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useTheme from '../theme/useTheme';
+import { getAdherentPhotoUri, resolveAdherentPhotoDataUri } from '../utils/adherentPhotos';
 
 export default function PhotoPicker({ value, onChange }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
@@ -16,11 +17,11 @@ export default function PhotoPicker({ value, onChange }) {
     setTimeout(async () => {
       try {
         const result = await launcher();
-        if (result?.data) {
-          onChange(`data:${result.mime || 'image/jpeg'};base64,${result.data}`);
-        } else if (result?.path) {
-          onChange(result.path);
-        }
+        if (!result?.data && !result?.path) return;
+        const photo = result.data
+          ? `data:${result.mime || 'image/jpeg'};base64,${result.data}`
+          : result.path;
+        onChange(await resolveAdherentPhotoDataUri(photo));
       } catch (e) {
         if (e.code !== 'E_PICKER_CANCELLED') {
           Alert.alert('Erreur', e.message);
@@ -61,7 +62,7 @@ export default function PhotoPicker({ value, onChange }) {
         activeOpacity={0.85}
       >
         {value ? (
-          <Image source={{ uri: value }} style={styles.image} />
+          <Image source={{ uri: getAdherentPhotoUri(value) }} style={styles.image} />
         ) : (
           <View style={styles.placeholder}>
             <View style={styles.iconCircle}>
