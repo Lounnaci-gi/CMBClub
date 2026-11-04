@@ -24,6 +24,13 @@ describe('adherentPhotos', () => {
     expect(getAdherentPhotoUri(base64)).toBe(`data:image/jpeg;base64,${base64}`);
   });
 
+  it('normalizes legacy absolute file paths for native image sources', () => {
+    expect(getAdherentPhotoUri('/storage/emulated/0/Club photos/member.jpg'))
+      .toBe('file:///storage/emulated/0/Club%20photos/member.jpg');
+    expect(getAdherentPhotoUri('file:///storage/emulated/0/member.jpg'))
+      .toBe('file:///storage/emulated/0/member.jpg');
+  });
+
   it('converts local image files to data URIs with their MIME type', async () => {
     RNFS.readFile.mockResolvedValue('cG5n');
 

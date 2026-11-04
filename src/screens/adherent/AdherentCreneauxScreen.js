@@ -14,7 +14,7 @@ import {
   deleteNotifAbsence,
   getNotifAbsencesByAdherent,
 } from '../../database/database';
-import { getEffectiveCategory } from '../../utils/categories';
+import { getEffectiveCategory, getThemedCategory } from '../../utils/categories';
 import { getLocalDateString, getDateForJour } from '../../utils/creneaux';
 
 const JOURS_ORDER = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
@@ -59,7 +59,7 @@ export default function AdherentCreneauxScreen() {
     setRefreshing(false);
   };
 
-  const cat = adherent ? getEffectiveCategory(adherent) : null;
+  const cat = adherent ? getThemedCategory(getEffectiveCategory(adherent), COLORS) : null;
 
   const myCreneaux = useMemo(() => {
     if (!adherent) return creneaux;
@@ -151,7 +151,7 @@ export default function AdherentCreneauxScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={COLORS.statusBarStyle} />
 
       {/* Header */}
       <View style={styles.header}>

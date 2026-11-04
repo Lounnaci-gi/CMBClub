@@ -7,7 +7,7 @@ import {
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useStore from '../../store/useStore';
 import useTheme from '../../theme/useTheme';
-import { CATEGORIES } from '../../utils/categories';
+import { CATEGORIES, getThemedCategory } from '../../utils/categories';
 import { findOverlappingCreneaux } from '../../utils/creneaux';
 
 const JOURS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
@@ -409,7 +409,10 @@ export default function CreneauxScreen({ navigation }) {
                     </View>
                     <View style={styles.catsBadgeWrap}>
                       {itemCats.map(catName => {
-                        const catObj = CATEGORIES.find(c => c.label.toLowerCase() === catName.toLowerCase());
+                        const catObj = getThemedCategory(
+                          CATEGORIES.find(c => c.label.toLowerCase() === catName.toLowerCase()),
+                          COLORS,
+                        );
                         const catColor = catObj?.color || COLORS.secondary;
                         return (
                           <View key={catName} style={[styles.catBadge, { backgroundColor: catColor + '20', borderColor: catColor + '40', borderWidth: 1 }]}>
@@ -508,31 +511,32 @@ export default function CreneauxScreen({ navigation }) {
               </View>
 
               <View style={styles.optionsWrap}>
-                {CATEGORIES.map(c => {
-                  const isChecked = selectedCategories.includes(c.label);
+                {CATEGORIES.map(category => {
+                  const themedCategory = getThemedCategory(category, COLORS);
+                  const isChecked = selectedCategories.includes(themedCategory.label);
                   return (
                     <TouchableOpacity
-                      key={c.label}
+                      key={themedCategory.label}
                       style={[
                         styles.catOptionChip,
-                        isChecked && { backgroundColor: c.color + '22', borderColor: c.color },
+                        isChecked && { backgroundColor: themedCategory.color + '22', borderColor: themedCategory.color },
                       ]}
-                      onPress={() => toggleCategory(c.label)}
+                      onPress={() => toggleCategory(themedCategory.label)}
                       activeOpacity={0.7}
                     >
                       <MaterialCommunityIcons
                         name={isChecked ? "checkbox-marked-circle" : "checkbox-blank-circle-outline"}
                         size={16}
-                        color={isChecked ? c.color : COLORS.textMuted}
+                        color={isChecked ? themedCategory.color : COLORS.textMuted}
                       />
-                      <Text style={{ fontSize: 13 }}>{c.icon}</Text>
+                      <Text style={{ fontSize: 13 }}>{themedCategory.icon}</Text>
                       <Text
                         style={[
                           styles.optionText,
-                          isChecked && { color: c.color, fontWeight: '700' },
+                          isChecked && { color: themedCategory.color, fontWeight: '700' },
                         ]}
                       >
-                        {c.label}
+                        {themedCategory.label}
                       </Text>
                     </TouchableOpacity>
                   );

@@ -1,12 +1,12 @@
 // src/components/AdherentCardModal.js
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Modal, TouchableOpacity, Image,
   ActivityIndicator, ScrollView, Alert, Platform,
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import useTheme from '../theme/useTheme';
-import { getCategoryByAge, getEffectiveCategory } from '../utils/categories';
+import { getCategoryByAge, getEffectiveCategory, getThemedCategory } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 import { getQrCodeImageUrl, buildAdherentQrData } from '../utils/qrGenerator';
 import { getAdherentPhotoUri, resolveAdherentPhotoDataUri } from '../utils/adherentPhotos';
@@ -17,11 +17,16 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
   const { colors: COLORS, RADIUS, shadows: SHADOWS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
   const [printing, setPrinting] = useState(false);
+  const [photoError, setPhotoError] = useState(false);
   const { saisonActive } = useStore();
+
+  useEffect(() => {
+    setPhotoError(false);
+  }, [adherent?.photo]);
 
   if (!adherent) return null;
 
-  const category = getEffectiveCategory(adherent);
+  const category = getThemedCategory(getEffectiveCategory(adherent), COLORS);
   const qrText = buildAdherentQrData(adherent, category.label, saisonActive);
   const qrImageUrl = getQrCodeImageUrl(qrText);
   const logoUri = Image.resolveAssetSource(require('../../assets/cmbclub.png')).uri;
@@ -335,11 +340,16 @@ export default function AdherentCardModal({ visible, adherent, onClose }) {
               <View style={styles.cardBodyVisual}>
                 {/* Photo & Category */}
                 <View style={styles.photoContainer}>
-                  {adherent.photo ? (
-                    <Image source={{ uri: getAdherentPhotoUri(adherent.photo) }} style={styles.photoImg} />
+                  {adherent.photo && !photoError ? (
+                    <Image
+                      source={{ uri: getAdherentPhotoUri(adherent.photo) }}
+                      style={styles.photoImg}
+                      onError={() => setPhotoError(true)}
+                    />
                   ) : (
                     <View style={styles.photoPlaceholder}>
                       <Text style={{ fontSize: 32 }}>{category.icon}</Text>
+                      {photoError ? <Text style={styles.photoUnavailable}>Photo indisponible — réimportez-la</Text> : null}
                     </View>
                   )}
                   <View style={[styles.categoryBadge, { backgroundColor: category.color + '25', borderColor: category.color }]}>
@@ -470,7 +480,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     gap: 16,
   },
   cardVisual: {
-    backgroundColor: '#0A1520',
+    backgroundColor: COLORS.bgInput,
     borderRadius: RADIUS.lg,
     padding: 16,
     borderWidth: 1,
@@ -497,7 +507,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderRadius: 18,
   },
   clubTitle: {
-    color: '#FFF',
+    color: COLORS.textPrimary,
     fontWeight: '900',
     fontSize: 15,
     letterSpacing: 1,
@@ -546,6 +556,12 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  photoUnavailable: {
+    color: COLORS.textMuted,
+    fontSize: 9,
+    textAlign: 'center',
+    paddingHorizontal: 4,
+  },
   categoryBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -561,7 +577,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     gap: 4,
   },
   memberName: {
-    color: '#FFF',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '800',
   },

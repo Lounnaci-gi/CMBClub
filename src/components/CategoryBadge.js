@@ -2,12 +2,12 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import useTheme from '../theme/useTheme';
-import { CATEGORIES } from '../utils/categories';
+import { CATEGORIES, getThemedCategory } from '../utils/categories';
 
 export default function CategoryBadge({ category, size = 'md' }) {
   const { colors: COLORS, RADIUS } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS), [COLORS, RADIUS]);
-  const cat = CATEGORIES.find(c => c.label === category) || CATEGORIES[0];
+  const cat = getThemedCategory(CATEGORIES.find(c => c.label === category) || CATEGORIES[0], COLORS);
   const isSmall = size === 'sm';
 
   return (

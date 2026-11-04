@@ -485,8 +485,8 @@ export default function PaymentListScreen({ navigation }) {
                     )}
                     {item.nbMensualites > 0 && (
                       <View style={styles.badgeChip}>
-                        <MaterialCommunityIcons name="calendar-month" size={12} color="#A855F7" />
-                        <Text style={[styles.badgeChipTxt, { color: '#A855F7' }]}>{item.nbMensualites} mois</Text>
+                        <MaterialCommunityIcons name="calendar-month" size={12} color={COLORS.secondary} />
+                        <Text style={[styles.badgeChipTxt, { color: COLORS.secondary }]}>{item.nbMensualites} mois</Text>
                       </View>
                     )}
                   </View>
@@ -532,7 +532,7 @@ export default function PaymentListScreen({ navigation }) {
                         setShowReminderModal(true);
                       }}
                     >
-                      <MaterialCommunityIcons name="bell-outline" size={14} color="#F59E0B" />
+                      <MaterialCommunityIcons name="bell-outline" size={14} color={COLORS.warning} />
                       <Text style={styles.reminderBtnTxt}>Rappeler</Text>
                     </TouchableOpacity>
                   )}
@@ -692,28 +692,28 @@ export default function PaymentListScreen({ navigation }) {
           {/* KPIs du rapport */}
           <View style={styles.kpiGrid}>
             <View style={styles.kpiGridCard}>
-              <Text style={[styles.kpiGridVal, { color: '#0284C7' }]}>
+              <Text style={[styles.kpiGridVal, { color: COLORS.primary }]}>
                 {((activeBilanReport.totalDuGlobal ?? activeBilanReport.totalDu ?? 0)).toLocaleString()} DA
               </Text>
               <Text style={styles.kpiGridLbl}>Total Dû</Text>
             </View>
 
             <View style={styles.kpiGridCard}>
-              <Text style={[styles.kpiGridVal, { color: '#10B981' }]}>
+              <Text style={[styles.kpiGridVal, { color: COLORS.success }]}>
                 {((activeBilanReport.totalEncaisseGlobal ?? activeBilanReport.totalEncaisse ?? 0)).toLocaleString()} DA
               </Text>
               <Text style={styles.kpiGridLbl}>Total Encaissé</Text>
             </View>
 
             <View style={styles.kpiGridCard}>
-              <Text style={[styles.kpiGridVal, { color: '#EF4444' }]}>
+              <Text style={[styles.kpiGridVal, { color: COLORS.danger }]}>
                 {((activeBilanReport.totalResteGlobal ?? activeBilanReport.totalDettes ?? activeBilanReport.totalRetards ?? 0)).toLocaleString()} DA
               </Text>
               <Text style={styles.kpiGridLbl}>Reste / Dettes</Text>
             </View>
 
             <View style={styles.kpiGridCard}>
-              <Text style={[styles.kpiGridVal, { color: '#8B5CF6' }]}>
+              <Text style={[styles.kpiGridVal, { color: COLORS.secondary }]}>
                 {activeBilanReport.tauxRecouvrement ?? 0}%
               </Text>
               <Text style={styles.kpiGridLbl}>Taux Recouvrement</Text>
@@ -736,20 +736,20 @@ export default function PaymentListScreen({ navigation }) {
                   <View key={disc} style={styles.discRowCard}>
                     <View style={styles.discHeader}>
                       <Text style={styles.discName}>🥋 {disc}</Text>
-                      <Text style={[styles.discPct, { color: pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444' }]}>
+                      <Text style={[styles.discPct, { color: pct >= 80 ? COLORS.success : pct >= 50 ? COLORS.warning : COLORS.danger }]}>
                         {pct}% encaissé
                       </Text>
                     </View>
 
                     <View style={styles.discBarBg}>
-                      <View style={[styles.discBarFill, { width: `${Math.min(100, pct)}%`, backgroundColor: pct >= 80 ? '#10B981' : '#0284C7' }]} />
+                      <View style={[styles.discBarFill, { width: `${Math.min(100, pct)}%`, backgroundColor: pct >= 80 ? COLORS.success : COLORS.primary }]} />
                     </View>
 
                     <View style={styles.discNumbers}>
                       <Text style={styles.discNumTxt}>Dû : <Text style={styles.boldTxt}>{du.toLocaleString()} DA</Text></Text>
-                      <Text style={[styles.discNumTxt, { color: '#10B981' }]}>Encaissé : <Text style={[styles.boldTxt, { color: '#10B981' }]}>{enc.toLocaleString()} DA</Text></Text>
+                      <Text style={[styles.discNumTxt, { color: COLORS.success }]}>Encaissé : <Text style={[styles.boldTxt, { color: COLORS.success }]}>{enc.toLocaleString()} DA</Text></Text>
                       {reste > 0 && (
-                        <Text style={[styles.discNumTxt, { color: '#EF4444' }]}>Reste : <Text style={[styles.boldTxt, { color: '#EF4444' }]}>{reste.toLocaleString()} DA</Text></Text>
+                        <Text style={[styles.discNumTxt, { color: COLORS.danger }]}>Reste : <Text style={[styles.boldTxt, { color: COLORS.danger }]}>{reste.toLocaleString()} DA</Text></Text>
                       )}
                     </View>
                   </View>
@@ -814,19 +814,19 @@ export default function PaymentListScreen({ navigation }) {
 }
 
 const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg || '#0B1320' },
+  container: { flex: 1, backgroundColor: COLORS.bg },
 
   // Onglets principaux
   mainTabWrapper: {
     flexDirection: 'row',
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     padding: 6,
     marginHorizontal: 16,
     marginTop: 10,
     marginBottom: 8,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: COLORS.border,
   },
   mainTabBtn: {
     flex: 1,
@@ -838,21 +838,21 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     borderRadius: 10,
   },
   mainTabBtnActive: {
-    backgroundColor: '#0284C7',
+    backgroundColor: COLORS.primary,
   },
   mainTabTxt: { color: COLORS.textMuted, fontSize: 13, fontWeight: '700' },
-  mainTabTxtActive: { color: '#FFF' },
+  mainTabTxtActive: { color: COLORS.textInverse },
 
   listContent: { paddingBottom: 100 },
   headerContainer: { paddingHorizontal: 16, paddingTop: 4 },
 
   // KPI Overview
   kpiCardContainer: {
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: COLORS.border,
     marginBottom: 12,
   },
   kpiRow: {
@@ -862,16 +862,16 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     marginBottom: 12,
   },
   kpiBox: { flex: 1, alignItems: 'center' },
-  kpiVal: { color: '#38BDF8', fontSize: 17, fontWeight: '900' },
-  kpiLbl: { color: '#94A3B8', fontSize: 10.5, fontWeight: '600', marginTop: 2 },
-  kpiDivider: { width: 1, height: 28, backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+  kpiVal: { color: COLORS.primaryLight, fontSize: 17, fontWeight: '900' },
+  kpiLbl: { color: COLORS.textSecondary, fontSize: 10.5, fontWeight: '600', marginTop: 2 },
+  kpiDivider: { width: 1, height: 28, backgroundColor: COLORS.border },
 
   alertBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#0284C7',
+    backgroundColor: COLORS.primary,
     paddingVertical: 10,
     borderRadius: 12,
   },
@@ -882,15 +882,15 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgInput,
     paddingHorizontal: 12,
     height: 44,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: COLORS.border,
     marginBottom: 10,
   },
-  searchInput: { flex: 1, color: '#FFF', fontSize: 13.5 },
+  searchInput: { flex: 1, color: COLORS.textPrimary, fontSize: 13.5 },
 
   // Type Chips
   typeChipsRow: { flexDirection: 'row', gap: 8, paddingBottom: 10 },
@@ -901,44 +901,44 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: COLORS.bgInput,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: COLORS.border,
   },
   typeChipActive: {
-    backgroundColor: 'rgba(2, 132, 199, 0.2)',
-    borderColor: '#0284C7',
+    backgroundColor: COLORS.primary + '20',
+    borderColor: COLORS.primary,
   },
   typeChipIcon: { fontSize: 12 },
-  typeChipTxt: { color: '#94A3B8', fontSize: 12, fontWeight: '600' },
-  typeChipTxtActive: { color: '#38BDF8', fontWeight: '700' },
+  typeChipTxt: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
+  typeChipTxtActive: { color: COLORS.primary, fontWeight: '700' },
 
-  countText: { color: '#64748B', fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  countText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '700', marginBottom: 6 },
 
   // Payment card
   paymentCard: {
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     marginHorizontal: 16,
     marginBottom: 10,
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: COLORS.border,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    borderBottomColor: COLORS.border,
     paddingBottom: 10,
     marginBottom: 10,
   },
-  adherentName: { color: '#F8FAFC', fontSize: 15, fontWeight: '800' },
+  adherentName: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '800' },
   metaRow: { flexDirection: 'row', gap: 6, marginTop: 4 },
-  codeTag: { color: '#64748B', fontSize: 11, fontFamily: 'monospace', fontWeight: '700' },
-  discTag: { color: '#0284C7', fontSize: 11, fontWeight: '700' },
-  catTag: { color: '#A855F7', fontSize: 11, fontWeight: '600' },
+  codeTag: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'monospace', fontWeight: '700' },
+  discTag: { color: COLORS.primary, fontSize: 11, fontWeight: '700' },
+  catTag: { color: COLORS.secondary, fontSize: 11, fontWeight: '600' },
 
   statusBadge: {
     paddingHorizontal: 8,
@@ -950,7 +950,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
 
   cardBody: { marginBottom: 10 },
   itemLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' },
-  itemLabel: { color: '#E2E8F0', fontSize: 13, fontWeight: '600' },
+  itemLabel: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
 
   // Badges inscription / mois
   badgeChip: {
@@ -960,16 +960,16 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 10,
-    backgroundColor: 'rgba(2, 132, 199, 0.12)',
+    backgroundColor: COLORS.primary + '18',
     borderWidth: 1,
-    borderColor: 'rgba(2, 132, 199, 0.25)',
+    borderColor: COLORS.primary + '50',
   },
-  badgeChipTxt: { color: '#38BDF8', fontSize: 11, fontWeight: '700' },
+  badgeChipTxt: { color: COLORS.primaryLight, fontSize: 11, fontWeight: '700' },
 
   // Barre de progression
   progressBg: {
     height: 5,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.bgInput,
     borderRadius: 3,
     overflow: 'hidden',
     marginBottom: 8,
@@ -979,20 +979,20 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   amountsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.bgInput,
     borderRadius: 10,
     padding: 8,
   },
   amtCol: { flex: 1, alignItems: 'center' },
-  amtVal: { color: '#FFF', fontSize: 13.5, fontWeight: '700' },
-  amtLbl: { color: '#64748B', fontSize: 10, textTransform: 'uppercase', marginTop: 1 },
+  amtVal: { color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '700' },
+  amtLbl: { color: COLORS.textMuted, fontSize: 10, textTransform: 'uppercase', marginTop: 1 },
 
   cardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    borderTopColor: COLORS.border,
     paddingTop: 8,
   },
   detailBtn: { flexDirection: 'row', alignItems: 'center', gap: 5 },
@@ -1001,17 +1001,17 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    backgroundColor: COLORS.warning + '20',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
+    borderColor: COLORS.warning + '60',
   },
-  reminderBtnTxt: { color: '#F59E0B', fontSize: 11.5, fontWeight: '700' },
+  reminderBtnTxt: { color: COLORS.warning, fontSize: 11.5, fontWeight: '700' },
 
   empty: { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyText: { color: '#64748B', fontSize: 14 },
+  emptyText: { color: COLORS.textMuted, fontSize: 14 },
 
   // ── Bilans Styles ──
   bilanScroll: { flex: 1 },
@@ -1029,75 +1029,75 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     gap: 6,
     paddingVertical: 9,
     borderRadius: 10,
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: COLORS.border,
   },
   bilanTypeBtnActive: {
-    backgroundColor: '#0284C7',
-    borderColor: '#0284C7',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
-  bilanTypeTxt: { color: '#94A3B8', fontSize: 12, fontWeight: '700' },
-  bilanTypeTxtActive: { color: '#FFF' },
+  bilanTypeTxt: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700' },
+  bilanTypeTxtActive: { color: COLORS.textInverse },
 
   monthsRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
   monthChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 14,
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgInput,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: COLORS.border,
   },
   monthChipActive: {
-    backgroundColor: '#0284C7',
-    borderColor: '#0284C7',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
-  monthChipTxt: { color: '#94A3B8', fontSize: 11.5, fontWeight: '600' },
-  monthChipTxtActive: { color: '#FFF', fontWeight: '700' },
+  monthChipTxt: { color: COLORS.textSecondary, fontSize: 11.5, fontWeight: '600' },
+  monthChipTxtActive: { color: COLORS.textInverse, fontWeight: '700' },
 
   // Intervalle de dates
   intervalCard: {
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     borderRadius: 14,
     padding: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: COLORS.border,
     gap: 10,
   },
   intervalHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  intervalCardTitle: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+  intervalCardTitle: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' },
   intervalFieldsRow: { flexDirection: 'row', gap: 10 },
   intervalShortcutsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   shortcutChip: {
-    backgroundColor: 'rgba(2, 132, 199, 0.12)',
+    backgroundColor: COLORS.primary + '18',
     borderWidth: 1,
-    borderColor: 'rgba(2, 132, 199, 0.3)',
+    borderColor: COLORS.primary + '50',
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  shortcutTxt: { color: '#38BDF8', fontSize: 11, fontWeight: '700' },
+  shortcutTxt: { color: COLORS.primaryLight, fontSize: 11, fontWeight: '700' },
 
   bilanHeaderCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     borderRadius: 14,
     padding: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: COLORS.border,
   },
-  bilanHeaderTitle: { color: '#FFF', fontSize: 16, fontWeight: '900' },
-  bilanHeaderSub: { color: '#94A3B8', fontSize: 11.5, marginTop: 2 },
+  bilanHeaderTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '900' },
+  bilanHeaderSub: { color: COLORS.textSecondary, fontSize: 11.5, marginTop: 2 },
   printBilanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#0284C7',
+    backgroundColor: COLORS.primary,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
@@ -1113,58 +1113,58 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
   kpiGridCard: {
     flex: 1,
     minWidth: '47%',
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: COLORS.border,
   },
   kpiGridVal: { fontSize: 16, fontWeight: '900', marginBottom: 2 },
-  kpiGridLbl: { color: '#94A3B8', fontSize: 11, fontWeight: '600' },
+  kpiGridLbl: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' },
 
   disciplineSection: { marginTop: 4 },
-  sectionHeading: { color: '#FFF', fontSize: 14, fontWeight: '800', marginBottom: 10 },
+  sectionHeading: { color: COLORS.textPrimary, fontSize: 14, fontWeight: '800', marginBottom: 10 },
   discRowCard: {
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: COLORS.border,
   },
   discHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  discName: { color: '#F8FAFC', fontSize: 13.5, fontWeight: '700' },
+  discName: { color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '700' },
   discPct: { fontSize: 12.5, fontWeight: '800' },
-  discBarBg: { height: 6, backgroundColor: '#0F172A', borderRadius: 3, overflow: 'hidden', marginBottom: 8 },
+  discBarBg: { height: 6, backgroundColor: COLORS.bgInput, borderRadius: 3, overflow: 'hidden', marginBottom: 8 },
   discBarFill: { height: '100%', borderRadius: 3 },
   discNumbers: { flexDirection: 'row', justifyContent: 'space-between' },
-  discNumTxt: { color: '#94A3B8', fontSize: 11.5 },
-  noDataTxt: { color: '#64748B', fontSize: 13, fontStyle: 'italic' },
+  discNumTxt: { color: COLORS.textSecondary, fontSize: 11.5 },
+  noDataTxt: { color: COLORS.textMuted, fontSize: 13, fontStyle: 'italic' },
 
   // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalBox: { width: '100%', maxWidth: 480, backgroundColor: '#132032', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  modalBox: { width: '100%', maxWidth: 480, backgroundColor: COLORS.bgModal, borderRadius: 16, padding: 18, borderWidth: 1, borderColor: COLORS.border },
   modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  modalTitle: { color: '#FFF', fontSize: 16, fontWeight: '800' },
-  modalSub: { color: '#94A3B8', fontSize: 13, marginBottom: 12 },
-  inputLabel: { color: '#94A3B8', fontSize: 12, fontWeight: '600', marginBottom: 6 },
+  modalTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' },
+  modalSub: { color: COLORS.textSecondary, fontSize: 13, marginBottom: 12 },
+  inputLabel: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 6 },
   textArea: {
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.bgInput,
     borderRadius: 10,
     padding: 10,
-    color: '#FFF',
+    color: COLORS.textPrimary,
     fontSize: 13,
     height: 90,
     textAlignVertical: 'top',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: COLORS.border,
     marginBottom: 16,
   },
   modalBtns: { flexDirection: 'row', gap: 10 },
-  cancelBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)' },
-  cancelBtnTxt: { color: '#94A3B8', fontWeight: '700' },
-  confirmBtn: { flex: 1.5, paddingVertical: 10, alignItems: 'center', borderRadius: 10, backgroundColor: '#0284C7' },
+  cancelBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, backgroundColor: COLORS.bgInput },
+  cancelBtnTxt: { color: COLORS.textSecondary, fontWeight: '700' },
+  confirmBtn: { flex: 1.5, paddingVertical: 10, alignItems: 'center', borderRadius: 10, backgroundColor: COLORS.primary },
   confirmBtnTxt: { color: '#FFF', fontWeight: '700' },
-  boldTxt: { fontWeight: '700', color: '#FFF' },
+  boldTxt: { fontWeight: '700', color: COLORS.textPrimary },
 });

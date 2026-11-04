@@ -23,6 +23,15 @@ export default function AdminDashboard({ navigation }) {
   const { user, stats, saisons, saisonActive, loadStats, loadSaisons, loadAdherents, loadCreneaux, loadConfig, logout } = useStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
+  const confirmLogout = () => Alert.alert(
+    'Confirmer la déconnexion',
+    'Voulez-vous vraiment vous déconnecter ?',
+    [
+      { text: 'Non', style: 'cancel' },
+      { text: 'Oui', style: 'destructive', onPress: logout },
+    ],
+  );
+
   const loadAll = useCallback(async () => {
     await Promise.all([loadSaisons(), loadAdherents(), loadConfig(), loadCreneaux()]);
     const saison = useStore.getState().saisonActive;
@@ -68,7 +77,7 @@ export default function AdminDashboard({ navigation }) {
   const quickActions = [
     { icon: 'account-plus', label: 'Nouvel adhérent', color: COLORS.primary, screen: 'AdherentForm' },
     { icon: 'clipboard-check-outline', label: 'Faire l\'appel', color: COLORS.success, onPress: handleFaireAppel },
-    { icon: 'cash-multiple', label: 'Paiements & Bilans', color: '#10B981', screen: 'PaymentList' },
+    { icon: 'cash-multiple', label: 'Paiements & Bilans', color: COLORS.success, screen: 'PaymentList' },
     { icon: 'clock-outline', label: 'Créneaux', color: COLORS.secondary, screen: 'Creneaux' },
     { icon: 'account-group', label: 'Adhérents', color: COLORS.catCadet, screen: 'AdherentList' },
     { icon: 'calendar-star', label: 'Saisons', color: COLORS.catMinime, screen: 'Seasons' },
@@ -82,7 +91,7 @@ export default function AdminDashboard({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={COLORS.statusBarStyle} />
       <LinearGradient
         colors={[COLORS.bg, COLORS.bgCard]}
         style={styles.header}
@@ -93,7 +102,7 @@ export default function AdminDashboard({ navigation }) {
               <Text style={styles.greeting}>Bonjour,</Text>
               <Text style={styles.userName}>{user?.username || 'Admin'} 👋</Text>
             </View>
-            <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+            <TouchableOpacity style={styles.logoutBtn} onPress={confirmLogout}>
               <MaterialCommunityIcons name="logout" size={22} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -172,7 +181,7 @@ export default function AdminDashboard({ navigation }) {
           <Text style={styles.sectionTitle}>Module de gestion</Text>
           <View style={[styles.menuList, isLarge && styles.menuGrid]}>
             {[
-              { icon: 'cash-register', label: 'Suivi des paiements & Bilans', sub: 'Frais, mensualités, avances, dettes & bilans', screen: 'PaymentList', color: '#10B981' },
+              { icon: 'cash-register', label: 'Suivi des paiements & Bilans', sub: 'Frais, mensualités, avances, dettes & bilans', screen: 'PaymentList', color: COLORS.success },
               { icon: 'account-multiple', label: 'Liste des adhérents', sub: 'Filtrer, rechercher, voir fiches', screen: 'AdherentList', color: COLORS.primary },
               { icon: 'clipboard-check', label: 'Gestion des présences', sub: 'Appel par créneau & suivi d\'assiduité', screen: 'Presences', color: COLORS.success },
               { icon: 'calendar-clock', label: 'Planning & Créneaux', sub: 'Horaires par discipline et catégorie', screen: 'Creneaux', color: COLORS.secondary },

@@ -30,6 +30,9 @@ export function getAdherentPhotoUri(photo) {
   if (uri.length > 128 && /^[A-Za-z0-9+/=\r\n]+$/.test(uri)) {
     return `data:image/jpeg;base64,${uri.replace(/\s/g, '')}`;
   }
+  if (uri.startsWith('/')) {
+    return `file://${uri.replace(/ /g, '%20')}`;
+  }
   return uri;
 }
 

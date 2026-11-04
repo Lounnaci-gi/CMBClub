@@ -11,7 +11,7 @@ import PhotoPicker from '../../components/PhotoPicker';
 import CategoryBadge from '../../components/CategoryBadge';
 import DateField from '../../components/DateField';
 import useTheme from '../../theme/useTheme';
-import { DISCIPLINES, BLOOD_GROUPS, CATEGORIES, getCategoryByAge, getEffectiveCategory } from '../../utils/categories';
+import { DISCIPLINES, BLOOD_GROUPS, CATEGORIES, getCategoryByAge, getEffectiveCategory, getThemedCategory } from '../../utils/categories';
 import { generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../../utils/payments';
 import { buildAdherentCodeBase, canGenerateAdherentCode, findAdherentDuplicate } from '../../utils/adherentCode';
 import { generateUniqueAdherentCode } from '../../database/database';
@@ -383,22 +383,28 @@ export default function AdherentFormScreen({ navigation, route }) {
                 <View style={styles.catDropdown}>
                   <Text style={styles.catDropdownTitle}>Choisir une catégorie</Text>
                   <View style={styles.catGrid}>
-                    {CATEGORIES.map(c => (
-                      <TouchableOpacity
-                        key={c.label}
-                        style={[
-                          styles.catChip,
-                          (form.categorieOverride === c.label) && { borderColor: c.color, backgroundColor: c.color + '20' },
-                        ]}
-                        onPress={() => {
-                          set('categorieOverride', c.label);
-                          setShowCatPicker(false);
-                        }}
-                      >
-                        <Text style={{ fontSize: 14 }}>{c.icon}</Text>
-                        <Text style={[styles.catChipText, { color: c.color }]}>{c.label}</Text>
-                      </TouchableOpacity>
-                    ))}
+                    {CATEGORIES.map(category => {
+                      const themedCategory = getThemedCategory(category, COLORS);
+                      return (
+                        <TouchableOpacity
+                          key={themedCategory.label}
+                          style={[
+                            styles.catChip,
+                            form.categorieOverride === themedCategory.label && {
+                              borderColor: themedCategory.color,
+                              backgroundColor: themedCategory.color + '20',
+                            },
+                          ]}
+                          onPress={() => {
+                            set('categorieOverride', themedCategory.label);
+                            setShowCatPicker(false);
+                          }}
+                        >
+                          <Text style={{ fontSize: 14 }}>{themedCategory.icon}</Text>
+                          <Text style={[styles.catChipText, { color: themedCategory.color }]}>{themedCategory.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                   {form.categorieOverride && (
                     <TouchableOpacity

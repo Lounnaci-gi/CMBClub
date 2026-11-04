@@ -33,7 +33,7 @@ const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
 
 // ── Admin navigation (stack inchangé) ──────────────────────────────────────
-function AdminStack({ screenOptions }) {
+function AdminStack({ screenOptions, COLORS }) {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen
@@ -51,12 +51,12 @@ function AdminStack({ screenOptions }) {
               onPress={() => navigation.navigate('Config')}
               style={{
                 width: 40, height: 40, borderRadius: 20,
-                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                backgroundColor: COLORS.bgInput,
                 alignItems: 'center', justifyContent: 'center', marginRight: 4,
               }}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons name="cog" size={22} color="#94A3B8" />
+              <MaterialCommunityIcons name="cog" size={22} color={COLORS.textSecondary} />
             </TouchableOpacity>
           ),
         })}
@@ -169,7 +169,7 @@ export default function AppNavigator() {
           <Stack.Screen name="Login" component={LoginScreen} />
         </Stack.Navigator>
       ) : user.role === 'admin' ? (
-        <AdminStack screenOptions={screenOptions} />
+        <AdminStack screenOptions={screenOptions} COLORS={COLORS} />
       ) : (
         <AdherentTabs COLORS={COLORS} />
       )}

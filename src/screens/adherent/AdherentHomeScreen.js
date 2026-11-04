@@ -2,14 +2,14 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, StatusBar, Image, Modal,
+  RefreshControl, StatusBar, Image, Modal, Alert,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import useTheme, { useResponsive } from '../../theme/useTheme';
-import { getEffectiveCategory, calculateAge } from '../../utils/categories';
+import { getEffectiveCategory, getThemedCategory, calculateAge } from '../../utils/categories';
 import { calculateBalance, PAYMENT_STATUS } from '../../utils/payments';
 import { getAdherentPhotoUri } from '../../utils/adherentPhotos';
 import {
@@ -33,6 +33,15 @@ export default function AdherentHomeScreen({ navigation }) {
   );
 
   const { user, saisonActive, creneaux, loadSaisons, loadCreneaux, logout } = useStore();
+
+  const confirmLogout = () => Alert.alert(
+    'Confirmer la déconnexion',
+    'Voulez-vous vraiment vous déconnecter ?',
+    [
+      { text: 'Non', style: 'cancel' },
+      { text: 'Oui', style: 'destructive', onPress: logout },
+    ],
+  );
 
   const [adherent, setAdherent]           = useState(null);
   const [paiements, setPaiements]         = useState([]);
@@ -83,7 +92,7 @@ export default function AdherentHomeScreen({ navigation }) {
     }
   };
 
-  const cat = adherent ? getEffectiveCategory(adherent) : null;
+  const cat = adherent ? getThemedCategory(getEffectiveCategory(adherent), COLORS) : null;
   const balance = calculateBalance(paiements);
   const unreadNotifs = useMemo(() => notifications.filter(n => !n.lu), [notifications]);
   const retards = useMemo(() => paiements.filter(p => p.statut === PAYMENT_STATUS.EN_RETARD), [paiements]);
@@ -111,7 +120,7 @@ export default function AdherentHomeScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={COLORS.statusBarStyle} />
 
       {/* Header gradient */}
       <LinearGradient colors={[COLORS.bg, COLORS.bgCard]} style={styles.header}>
@@ -134,7 +143,7 @@ export default function AdherentHomeScreen({ navigation }) {
                 <MaterialCommunityIcons
                   name={unreadNotifs.length > 0 ? 'bell-badge' : 'bell-outline'}
                   size={22}
-                  color={unreadNotifs.length > 0 ? '#F59E0B' : COLORS.textSecondary}
+                  color={unreadNotifs.length > 0 ? COLORS.warning : COLORS.textSecondary}
                 />
                 {unreadNotifs.length > 0 && (
                   <View style={styles.notifBadge}>
@@ -143,7 +152,7 @@ export default function AdherentHomeScreen({ navigation }) {
                 )}
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+              <TouchableOpacity style={styles.logoutBtn} onPress={confirmLogout}>
                 <MaterialCommunityIcons name="logout" size={22} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -188,13 +197,13 @@ export default function AdherentHomeScreen({ navigation }) {
                   <MaterialCommunityIcons
                     name={topAlertNotif.type === 'retard' ? 'alert-circle' : 'calendar-alert'}
                     size={24}
-                    color={topAlertNotif.type === 'retard' ? '#EF4444' : '#F59E0B'}
+                    color={topAlertNotif.type === 'retard' ? COLORS.danger : COLORS.warning}
                   />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.alertBannerTitle}>{topAlertNotif.titre}</Text>
                     <Text style={styles.alertBannerMsg} numberOfLines={2}>{topAlertNotif.message}</Text>
                   </View>
-                  <MaterialCommunityIcons name="chevron-right" size={20} color="#94A3B8" />
+                  <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textMuted} />
                 </TouchableOpacity>
               ) : (retards.length > 0 || balance.resteAVerser > 0) ? (
                 <TouchableOpacity
@@ -202,14 +211,14 @@ export default function AdherentHomeScreen({ navigation }) {
                   onPress={() => navigation.navigate('MesPaiements')}
                   activeOpacity={0.85}
                 >
-                  <MaterialCommunityIcons name="alert-circle" size={22} color="#EF4444" />
+                  <MaterialCommunityIcons name="alert-circle" size={22} color={COLORS.danger} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.alertBannerTitle}>Cotisation en attente</Text>
                     <Text style={styles.alertBannerMsg}>
                       {balance.resteAVerser.toLocaleString()} DA restant à régler pour cette saison.
                     </Text>
                   </View>
-                  <MaterialCommunityIcons name="chevron-right" size={20} color="#94A3B8" />
+                  <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.textMuted} />
                 </TouchableOpacity>
               ) : null}
 
@@ -394,7 +403,7 @@ export default function AdherentHomeScreen({ navigation }) {
                       <MaterialCommunityIcons
                         name={n.type === 'retard' ? 'alert-circle' : n.type === 'echeance_7j' ? 'calendar-clock' : 'information'}
                         size={20}
-                        color={n.type === 'retard' ? '#EF4444' : n.type === 'echeance_7j' ? '#F59E0B' : COLORS.primary}
+                        color={n.type === 'retard' ? COLORS.danger : n.type === 'echeance_7j' ? COLORS.warning : COLORS.primary}
                       />
                     </View>
                     <View style={{ flex: 1 }}>
@@ -440,7 +449,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     position: 'absolute',
     top: -3,
     right: -3,
-    backgroundColor: '#EF4444',
+    backgroundColor: COLORS.danger,
     borderRadius: 8,
     minWidth: 16,
     height: 16,
@@ -480,15 +489,15 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     borderWidth: 1,
   },
   alertBannerRetard: {
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    borderColor: 'rgba(239, 68, 68, 0.35)',
+    backgroundColor: COLORS.danger + '18',
+    borderColor: COLORS.danger + '60',
   },
   alertBanner7j: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderColor: 'rgba(245, 158, 11, 0.35)',
+    backgroundColor: COLORS.warning + '18',
+    borderColor: COLORS.warning + '60',
   },
-  alertBannerTitle: { color: '#FFF', fontSize: 13.5, fontWeight: '800', marginBottom: 2 },
-  alertBannerMsg: { color: '#CBD5E1', fontSize: 12, lineHeight: 17 },
+  alertBannerTitle: { color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '800', marginBottom: 2 },
+  alertBannerMsg: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 17 },
 
   /* Profil */
   profileCard: {
@@ -554,33 +563,33 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
 
   /* Modal Notifications */
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 16 },
-  modalBox: { width: '100%', maxWidth: 500, backgroundColor: '#132032', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  modalBox: { width: '100%', maxWidth: 500, backgroundColor: COLORS.bgModal, borderRadius: 16, padding: 18, borderWidth: 1, borderColor: COLORS.border },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  modalTitle: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+  modalTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' },
   markAllBtn: { alignSelf: 'flex-end', marginBottom: 10 },
-  markAllTxt: { color: '#38BDF8', fontSize: 12, fontWeight: '700' },
+  markAllTxt: { color: COLORS.primary, fontSize: 12, fontWeight: '700' },
   notifCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.bgInput,
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: COLORS.border,
   },
   notifCardUnread: {
-    borderColor: 'rgba(56, 189, 248, 0.35)',
-    backgroundColor: 'rgba(2, 132, 199, 0.1)',
+    borderColor: COLORS.primary + '60',
+    backgroundColor: COLORS.primary + '18',
   },
   notifIconCol: { marginTop: 2 },
-  notifTitle: { color: '#FFF', fontSize: 13.5, fontWeight: '700', marginBottom: 2 },
-  notifMsg: { color: '#94A3B8', fontSize: 12, lineHeight: 17, marginBottom: 4 },
-  notifDate: { color: '#64748B', fontSize: 10.5 },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#38BDF8', marginTop: 4 },
+  notifTitle: { color: COLORS.textPrimary, fontSize: 13.5, fontWeight: '700', marginBottom: 2 },
+  notifMsg: { color: COLORS.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 4 },
+  notifDate: { color: COLORS.textMuted, fontSize: 10.5 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary, marginTop: 4 },
   emptyNotifs: { alignItems: 'center', paddingVertical: 40, gap: 10 },
-  emptyNotifsTxt: { color: '#64748B', fontSize: 13 },
-  closeModalBtn: { marginTop: 12, paddingVertical: 10, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 10 },
-  closeModalTxt: { color: '#FFF', fontWeight: '700', fontSize: 13 },
+  emptyNotifsTxt: { color: COLORS.textMuted, fontSize: 13 },
+  closeModalBtn: { marginTop: 12, paddingVertical: 10, alignItems: 'center', backgroundColor: COLORS.bgInput, borderRadius: 10 },
+  closeModalTxt: { color: COLORS.textPrimary, fontWeight: '700', fontSize: 13 },
 });

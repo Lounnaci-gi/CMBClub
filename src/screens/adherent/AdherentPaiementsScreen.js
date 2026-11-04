@@ -40,7 +40,7 @@ export default function AdherentPaiementsScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={COLORS.statusBarStyle} />
 
       {/* Header */}
       <View style={styles.header}>
@@ -128,9 +128,9 @@ export default function AdherentPaiementsScreen() {
             const daysLeft = lastDayOfMonth - currentDay;
             if (daysLeft >= 0 && daysLeft <= 7) {
               return (
-                <View style={[styles.alertBox, { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: 'rgba(245, 158, 11, 0.35)' }]}>
-                  <MaterialCommunityIcons name="calendar-clock" size={16} color="#F59E0B" />
-                  <Text style={[styles.alertText, { color: '#F59E0B' }]}>
+                <View style={[styles.alertBox, { backgroundColor: COLORS.warning + '20', borderColor: COLORS.warning + '60' }]}>
+                  <MaterialCommunityIcons name="calendar-clock" size={16} color={COLORS.warning} />
+                  <Text style={[styles.alertText, { color: COLORS.warning }]}>
                     Votre mensualité expire dans {daysLeft} jour(s). Pensez à renouveler votre abonnement.
                   </Text>
                 </View>

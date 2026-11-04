@@ -563,7 +563,7 @@ export default function PresencesScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={COLORS.statusBarStyle} />
 
       {noOpenSeason && (
         <View style={styles.futureWarningBox}>
@@ -1484,7 +1484,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     ...SHADOWS.button,
   },
   printBtnUnsaved: {
-    backgroundColor: '#64748B',
+    backgroundColor: COLORS.textMuted,
   },
   printBtnText: {
     color: '#FFF',
@@ -1807,7 +1807,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS) => StyleSheet.create({
     ...SHADOWS.button,
   },
   countdownPrintBtnUnsaved: {
-    backgroundColor: '#64748B',
+    backgroundColor: COLORS.textMuted,
   },
   countdownPrintBtnText: {
     color: '#FFF',

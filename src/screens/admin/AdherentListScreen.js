@@ -10,7 +10,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../../store/useStore';
 import CategoryBadge from '../../components/CategoryBadge';
 import useTheme, { useResponsive } from '../../theme/useTheme';
-import { CATEGORIES, DISCIPLINES, getCategoryByAge, getEffectiveCategory, calculateAge } from '../../utils/categories';
+import { CATEGORIES, DISCIPLINES, getCategoryByAge, getEffectiveCategory, getThemedCategory, calculateAge } from '../../utils/categories';
 import { PAYMENT_STATUS, getStatusColor, getStatusLabel } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
 import { getAdherentPhotoUri } from '../../utils/adherentPhotos';
@@ -45,6 +45,8 @@ export default function AdherentListScreen({ navigation }) {
   const [genreFilter,   setGenreFilter]   = useState('all');
   const [assureFilter,  setAssureFilter]  = useState('all');
   const [enrollFilter,  setEnrollFilter]  = useState('all');
+  const [sortBy,        setSortBy]        = useState('registration');
+  const [sortOrder,     setSortOrder]     = useState('desc');
   const [payStatusMap,  setPayStatusMap]  = useState({});
   const [refreshing,    setRefreshing]    = useState(false);
   const [printing,      setPrinting]      = useState(false);
@@ -75,8 +77,11 @@ export default function AdherentListScreen({ navigation }) {
   // ── Filter options ────────────────────────────────────────────────────────
   const categoryFilters = useMemo(() => [
     { value: 'all', label: 'Toutes' },
-    ...CATEGORIES.map(c => ({ value: c.label, label: c.label, icon: c.icon, color: c.color })),
-  ], []);
+    ...CATEGORIES.map(category => {
+      const themedCategory = getThemedCategory(category, COLORS);
+      return { value: category.label, label: category.label, icon: category.icon, color: themedCategory.color };
+    }),
+  ], [COLORS]);
 
   const disciplineFilters = useMemo(() => {
     const list = (disciplines && disciplines.length > 0)
@@ -126,6 +131,30 @@ export default function AdherentListScreen({ navigation }) {
     });
   }, [adherents, search, catFilter, discFilter, payFilter, genreFilter, assureFilter, enrollFilter, payStatusMap]);
 
+  const sortedAdherents = useMemo(() => {
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'name') {
+        const nameA = `${a.nom || ''} ${a.prenom || ''}`.trim();
+        const nameB = `${b.nom || ''} ${b.prenom || ''}`.trim();
+        return nameA.localeCompare(nameB, 'fr', { sensitivity: 'base' }) * direction;
+      }
+
+      const dateA = sortBy === 'birthDate'
+        ? a.dateNaissance
+        : a.dateInscriptionSaison || a.dateInscription || a.createdAt;
+      const dateB = sortBy === 'birthDate'
+        ? b.dateNaissance
+        : b.dateInscriptionSaison || b.dateInscription || b.createdAt;
+      const timeA = dateA ? new Date(dateA).getTime() : NaN;
+      const timeB = dateB ? new Date(dateB).getTime() : NaN;
+
+      if (!Number.isFinite(timeA)) return Number.isFinite(timeB) ? 1 : 0;
+      if (!Number.isFinite(timeB)) return -1;
+      return (timeA - timeB) * direction;
+    });
+  }, [filtered, sortBy, sortOrder]);
+
   const activeFiltersCount = [catFilter, discFilter, payFilter, genreFilter, assureFilter, enrollFilter]
     .filter(f => f !== 'all').length + (search ? 1 : 0);
 
@@ -141,7 +170,7 @@ export default function AdherentListScreen({ navigation }) {
 
   // ── Print ─────────────────────────────────────────────────────────────────
   const handlePrintList = async () => {
-    if (filtered.length === 0) {
+    if (sortedAdherents.length === 0) {
       Alert.alert('Information', 'Aucun adhérent à imprimer avec les filtres actuels.');
       return;
     }
@@ -153,7 +182,7 @@ export default function AdherentListScreen({ navigation }) {
       const discText   = discFilter === 'all' ? 'Toutes' : discFilter;
       const payText    = payFilter  === 'all' ? 'Tous'   : getStatusLabel(payFilter);
 
-      const pages = paginateItems(filtered);
+      const pages = paginateItems(sortedAdherents);
       const pagesHtml = pages.map((page, pageIndex) => {
         const rowsHtml = page.map((item, index) => {
           const cat      = getEffectiveCategory(item);
@@ -185,7 +214,7 @@ export default function AdherentListScreen({ navigation }) {
               <div style="text-align:right">
                 <div class="badge">Saison ${saisonText}</div>
                 <div>Imprimé le : ${now}</div>
-                <div>Total : <strong>${filtered.length}</strong></div>
+                <div>Total : <strong>${sortedAdherents.length}</strong></div>
               </div>
             </div>
             <div class="filters">
@@ -235,14 +264,14 @@ export default function AdherentListScreen({ navigation }) {
   };
 
   const handlePrintCards = async () => {
-    if (filtered.length === 0) {
+    if (sortedAdherents.length === 0) {
       Alert.alert('Information', 'Aucun adhérent à imprimer avec les filtres actuels.');
       return;
     }
     setPrintingCards(true);
     try {
       await printAllAdherentCards({
-        adherents: filtered,
+        adherents: sortedAdherents,
         saison: saisonActive,
       });
     } catch (e) {
@@ -380,6 +409,41 @@ export default function AdherentListScreen({ navigation }) {
             </View>
           </View>
 
+          {/* Tri */}
+          <View style={styles.filterGroup}>
+            <Text style={styles.filterGroupLabel}>Trier par</Text>
+            <View style={styles.chipRow}>
+              {[
+                { value: 'registration', label: "Date d'inscription" },
+                { value: 'name', label: 'Nom & prénom' },
+                { value: 'birthDate', label: 'Date de naissance' },
+              ].map(option => renderChip(option, sortBy === option.value, () => setSortBy(option.value)))}
+            </View>
+            <View style={styles.sortOrderRow}>
+              {[
+                { value: 'asc', label: 'Croissant', icon: 'sort-ascending' },
+                { value: 'desc', label: 'Décroissant', icon: 'sort-descending' },
+              ].map(option => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.sortOrderButton, sortOrder === option.value && styles.sortOrderButtonActive]}
+                  onPress={() => setSortOrder(option.value)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: sortOrder === option.value }}
+                >
+                  <MaterialCommunityIcons
+                    name={option.icon}
+                    size={16}
+                    color={sortOrder === option.value ? COLORS.primary : COLORS.textSecondary}
+                  />
+                  <Text style={[styles.sortOrderText, sortOrder === option.value && styles.sortOrderTextActive]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           {/* Clear all */}
           {activeFiltersCount > 0 && (
             <TouchableOpacity style={styles.clearBtn} onPress={clearAllFilters}>
@@ -393,7 +457,7 @@ export default function AdherentListScreen({ navigation }) {
       {/* Count row */}
       <View style={styles.headerRow}>
         <Text style={styles.countText}>
-          {filtered.length} adhérent{filtered.length !== 1 ? 's' : ''}
+          {sortedAdherents.length} adhérent{sortedAdherents.length !== 1 ? 's' : ''}
           {activeFiltersCount > 0 ? ' (filtrés)' : ''}
         </Text>
 
@@ -404,7 +468,7 @@ export default function AdherentListScreen({ navigation }) {
             onPress={() => setShowAssuranceModal(true)}
             activeOpacity={0.8}
           >
-            <MaterialCommunityIcons name="shield-check" size={15} color="#10B981" />
+            <MaterialCommunityIcons name="shield-check" size={15} color={COLORS.success} />
             <Text style={styles.assurancesBtnText}>Assurances</Text>
           </TouchableOpacity>
 
@@ -416,11 +480,11 @@ export default function AdherentListScreen({ navigation }) {
             activeOpacity={0.8}
           >
             {printingCards ? (
-              <ActivityIndicator size="small" color="#C084FC" />
+              <ActivityIndicator size="small" color={COLORS.primary} />
             ) : (
               <>
-                <MaterialCommunityIcons name="badge-account-horizontal-outline" size={15} color="#C084FC" />
-                <Text style={styles.cardsBtnText}>Cartes ({filtered.length})</Text>
+                <MaterialCommunityIcons name="badge-account-horizontal-outline" size={15} color={COLORS.primary} />
+                <Text style={styles.cardsBtnText}>Cartes ({sortedAdherents.length})</Text>
               </>
             )}
           </TouchableOpacity>
@@ -433,10 +497,10 @@ export default function AdherentListScreen({ navigation }) {
             activeOpacity={0.8}
           >
             {printing ? (
-              <ActivityIndicator size="small" color="#38BDF8" />
+              <ActivityIndicator size="small" color={COLORS.primaryLight} />
             ) : (
               <>
-                <MaterialCommunityIcons name="printer" size={15} color="#38BDF8" />
+                <MaterialCommunityIcons name="printer" size={15} color={COLORS.primaryLight} />
                 <Text style={styles.printBtnText}>Liste</Text>
               </>
             )}
@@ -446,7 +510,7 @@ export default function AdherentListScreen({ navigation }) {
 
       {/* List */}
       <FlatList
-        data={filtered}
+        data={sortedAdherents}
         keyExtractor={item => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.list}
@@ -537,9 +601,9 @@ const AdherentAvatar = React.memo(function AdherentAvatar({ photo, catIcon, styl
 
 // ── Composant Carte Adhérent mémoïsé ─────────────────────────────────────────
 const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus, COLORS, styles, onPress }) {
-  const cat = getEffectiveCategory(item);
+  const cat = getThemedCategory(getEffectiveCategory(item), COLORS);
   const isFemme = item.genre === 'F';
-  const catColor = cat?.color || '#38BDF8';
+  const catColor = cat?.color || COLORS.primaryLight;
   const payColor = payStatus ? getStatusColor(payStatus) : null;
   const payLabel = payStatus ? getStatusLabel(payStatus) : null;
   const dateInsc = item.dateInscriptionSaison || item.dateInscription || item.createdAt?.slice(0, 10);
@@ -633,14 +697,14 @@ const AdherentCardItem = React.memo(function AdherentCardItem({ item, payStatus,
       </View>
 
       {/* Chevron droit */}
-      <MaterialCommunityIcons name="chevron-right" size={22} color="#475569" style={styles.chevron} />
+      <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.textMuted} style={styles.chevron} />
     </TouchableOpacity>
   );
 });
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPadding) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg || '#0B1320' },
+  container: { flex: 1, backgroundColor: COLORS.bg },
   innerWrapper: {
     flex: 1,
     width: '100%',
@@ -661,17 +725,17 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgInput,
     borderRadius: 14,
     paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: COLORS.border,
     gap: 10,
     height: 48,
   },
   searchInput: {
     flex: 1,
-    color: '#F8FAFC',
+    color: COLORS.textPrimary,
     fontSize: 14,
     paddingVertical: 0,
   },
@@ -679,21 +743,21 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     width: 48,
     height: 48,
     borderRadius: 14,
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgInput,
     borderWidth: 1,
-    borderColor: 'rgba(14, 165, 233, 0.35)',
+    borderColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   filterToggleBtnActive: {
-    backgroundColor: '#0284C7',
-    borderColor: '#0284C7',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   filterCountBadge: {
     position: 'absolute',
     top: -4,
     right: -4,
-    backgroundColor: COLORS.danger || '#EF4444',
+    backgroundColor: COLORS.danger,
     borderRadius: 8,
     minWidth: 16,
     height: 16,
@@ -705,10 +769,10 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
 
   // Filter panel
   filterPanel: {
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: COLORS.border,
     paddingVertical: 8,
     paddingBottom: 12,
     gap: 4,
@@ -720,7 +784,7 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingTop: 6,
   },
   filterGroupLabel: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.8,
@@ -734,6 +798,30 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 16,
     gap: 8,
   },
+  sortOrderRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    gap: 8,
+  },
+  sortOrderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.bgInput,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  sortOrderButtonActive: {
+    backgroundColor: COLORS.primary + '20',
+    borderColor: COLORS.primary,
+  },
+  sortOrderText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
+  sortOrderTextActive: { color: COLORS.primary, fontWeight: '700' },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -741,17 +829,17 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: RADIUS.full,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: COLORS.bgInput,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: COLORS.border,
   },
   filterChipActive: {
-    backgroundColor: 'rgba(14, 165, 233, 0.2)',
-    borderColor: '#0EA5E9',
+    backgroundColor: COLORS.primary + '20',
+    borderColor: COLORS.primary,
   },
   filterChipIcon: { fontSize: 13 },
-  filterChipText: { color: '#94A3B8', fontSize: 12, fontWeight: '600' },
-  filterChipTextActive: { color: '#38BDF8', fontWeight: '700' },
+  filterChipText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
+  filterChipTextActive: { color: COLORS.primary, fontWeight: '700' },
   clearBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -762,11 +850,11 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: RADIUS.full,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: COLORS.danger + '18',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderColor: COLORS.danger + '50',
   },
-  clearBtnText: { color: '#EF4444', fontSize: 12, fontWeight: '700' },
+  clearBtnText: { color: COLORS.danger, fontSize: 12, fontWeight: '700' },
 
   // Header row
   headerRow: {
@@ -776,67 +864,67 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  countText: { color: '#94A3B8', fontSize: 14, fontWeight: '700' },
+  countText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '700' },
   assurancesBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    backgroundColor: COLORS.success + '18',
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#10B981',
+    borderColor: COLORS.success,
   },
-  assurancesBtnText: { color: '#10B981', fontWeight: '700', fontSize: 12.5 },
+  assurancesBtnText: { color: COLORS.success, fontWeight: '700', fontSize: 12.5 },
   cardsBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(168, 85, 247, 0.12)',
+    backgroundColor: COLORS.primary + '18',
     paddingHorizontal: 11,
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#A855F7',
+    borderColor: COLORS.primary,
   },
-  cardsBtnText: { color: '#C084FC', fontWeight: '700', fontSize: 12.5 },
+  cardsBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: 12.5 },
   printBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(2, 132, 199, 0.12)',
+    backgroundColor: COLORS.primaryLight + '18',
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#0284C7',
+    borderColor: COLORS.primaryLight,
   },
-  printBtnText: { color: '#38BDF8', fontWeight: '700', fontSize: 12.5 },
+  printBtnText: { color: COLORS.primaryLight, fontWeight: '700', fontSize: 12.5 },
 
   // List
   list: { paddingBottom: 100, paddingTop: 4 },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#132032',
+    backgroundColor: COLORS.bgCard,
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 14,
     marginHorizontal: 16,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: COLORS.border,
   },
-  avatar: { width: 54, height: 54, marginRight: 12, borderRadius: 27, overflow: 'hidden', backgroundColor: '#1A2A3E' },
+  avatar: { width: 54, height: 54, marginRight: 12, borderRadius: 27, overflow: 'hidden', backgroundColor: COLORS.bgInput },
   photo: { width: '100%', height: '100%', borderRadius: 27, resizeMode: 'cover' },
   photoPlaceholder: {
     width: '100%',
     height: '100%',
     borderRadius: 27,
-    backgroundColor: '#1A2A3E',
+    backgroundColor: COLORS.bgInput,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -850,20 +938,20 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     gap: 8,
   },
   name: {
-    color: '#F8FAFC',
+    color: COLORS.textPrimary,
     fontWeight: '700',
     fontSize: 16,
     flexShrink: 1,
   },
   codeBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: COLORS.bgInput,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 5,
     maxWidth: 130,
   },
   codeText: {
-    color: '#64748B',
+    color: COLORS.textMuted,
     fontSize: 10,
     fontWeight: '600',
   },
@@ -889,12 +977,12 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
-    backgroundColor: 'rgba(14, 165, 233, 0.15)',
+    backgroundColor: COLORS.primary + '20',
     borderWidth: 1,
-    borderColor: 'rgba(14, 165, 233, 0.35)',
+    borderColor: COLORS.primary + '60',
   },
   genreTextM: {
-    color: '#38BDF8',
+    color: COLORS.primaryLight,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -902,12 +990,12 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
-    backgroundColor: 'rgba(236, 72, 153, 0.15)',
+    backgroundColor: COLORS.secondary + '20',
     borderWidth: 1,
-    borderColor: 'rgba(236, 72, 153, 0.35)',
+    borderColor: COLORS.secondary + '60',
   },
   genreTextF: {
-    color: '#F472B6',
+    color: COLORS.secondary,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -915,12 +1003,12 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: COLORS.success + '20',
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.35)',
+    borderColor: COLORS.success + '60',
   },
   assureText: {
-    color: '#34D399',
+    color: COLORS.success,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -928,12 +1016,12 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
-    backgroundColor: 'rgba(249, 115, 22, 0.15)',
+    backgroundColor: COLORS.danger + '20',
     borderWidth: 1,
-    borderColor: 'rgba(249, 115, 22, 0.35)',
+    borderColor: COLORS.danger + '60',
   },
   nonAssureText: {
-    color: '#FB923C',
+    color: COLORS.danger,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -958,23 +1046,23 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(2, 132, 199, 0.1)',
+    backgroundColor: COLORS.primary + '18',
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(2, 132, 199, 0.25)',
+    borderColor: COLORS.primary + '50',
   },
   disciplineIcon: {
     fontSize: 11,
   },
   disciplineText: {
-    color: '#38BDF8',
+    color: COLORS.primaryLight,
     fontSize: 11.5,
     fontWeight: '700',
   },
   metaItem: {
-    color: '#94A3B8',
+    color: COLORS.textSecondary,
     fontSize: 11.5,
     fontWeight: '600',
   },
@@ -984,27 +1072,27 @@ const createStyles = (COLORS, RADIUS, SHADOWS, isSmall, isLarge, horizontalPaddi
 
   // Empty
   empty: { alignItems: 'center', paddingTop: 60, gap: 12 },
-  emptyText: { color: '#64748B', fontSize: 15 },
+  emptyText: { color: COLORS.textMuted, fontSize: 15 },
 
   // FAB
   fab: {
     position: 'absolute',
     bottom: 24,
     right: 20,
-    backgroundColor: '#00A3FF',
+    backgroundColor: COLORS.primary,
     width: 60,
     height: 60,
     borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#00A3FF',
+    shadowColor: COLORS.primary,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
     elevation: 8,
   },
   fabDisabled: {
-    backgroundColor: '#475569',
+    backgroundColor: COLORS.bgInput,
     opacity: 0.5,
   },
 });

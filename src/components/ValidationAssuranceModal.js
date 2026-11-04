@@ -8,7 +8,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import useStore from '../store/useStore';
 import useTheme from '../theme/useTheme';
 import { printHtml } from '../services/printing';
-import { getCategoryByAge, getEffectiveCategory } from '../utils/categories';
+import { getCategoryByAge, getEffectiveCategory, getThemedCategory } from '../utils/categories';
 import { formatDate } from '../utils/seasons';
 import { getAdherentPhotoUri } from '../utils/adherentPhotos';
 
@@ -287,7 +287,7 @@ export default function ValidationAssuranceModal({ visible, onClose }) {
             ) : (
               filteredAdherents.map(item => {
                 const isAssure = Boolean(item.assure);
-                const cat = getEffectiveCategory(item);
+                const cat = getThemedCategory(getEffectiveCategory(item), COLORS);
                 const isToggling = togglingId === item.id;
 
                 return (

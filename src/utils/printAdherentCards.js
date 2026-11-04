@@ -95,23 +95,33 @@ export async function printAllAdherentCards({ adherents = [], saison = null }) {
     logoUri = '';
   }
 
-  // Résolution parallèle de toutes les photos
-  const cardsHtmlList = await Promise.all(
-    adherents.map(async (adherent) => {
-      const category = getEffectiveCategory(adherent);
-      const qrText = buildAdherentQrData(adherent, category.label, saison);
-      const qrImageUrl = getQrCodeImageUrl(qrText);
-      const photoSrc = await resolveAdherentPhotoDataUri(adherent.photo);
+  const cardsHtmlList = [];
+  let unavailablePhotoCount = 0;
+  for (const adherent of adherents) {
+    const category = getEffectiveCategory(adherent);
+    const qrText = buildAdherentQrData(adherent, category.label, saison);
+    const qrImageUrl = getQrCodeImageUrl(qrText);
+    let photoSrc = null;
 
-      return renderSingleCardHtml(adherent, {
-        photoSrc,
-        logoUri,
-        saisonLabel,
-        category,
-        qrImageUrl,
-      });
-    })
-  );
+    if (adherent.photo) {
+      try {
+        photoSrc = await resolveAdherentPhotoDataUri(adherent.photo);
+      } catch (error) {
+        unavailablePhotoCount += 1;
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.warn(`Photo indisponible pour la carte ${adherent.code || adherent.id}:`, error.message);
+        }
+      }
+    }
+
+    cardsHtmlList.push(renderSingleCardHtml(adherent, {
+      photoSrc,
+      logoUri,
+      saisonLabel,
+      category,
+      qrImageUrl,
+    }));
+  }
 
   const cardsGridHtml = cardsHtmlList.join('');
 
@@ -305,4 +315,11 @@ export async function printAllAdherentCards({ adherents = [], saison = null }) {
   `;
 
   await printHtml(html);
+
+  if (unavailablePhotoCount > 0) {
+    Alert.alert(
+      'Impression terminée avec des photos manquantes',
+      `${unavailablePhotoCount} photo(s) n'étaient plus accessibles sur cet appareil. Toutes les cartes ont été imprimées, avec l’icône de catégorie à la place de ces photos. Pour les rétablir, réimportez les photos dans les fiches concernées.`,
+    );
+  }
 }

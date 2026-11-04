@@ -15,6 +15,22 @@ export const DISCIPLINES = ['KickBoxing', 'Natation'];
 
 export const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
+const CATEGORY_THEME_KEYS = {
+  Poussin: 'catPoussin',
+  Pupille: 'catPupille',
+  Minime: 'catMinime',
+  Cadet: 'catCadet',
+  Junior: 'catJunior',
+  'Sénior': 'catSenior',
+  Vétéran: 'catVeteran',
+};
+
+export function getThemedCategory(category, colors) {
+  if (!category) return category;
+  const themeColor = colors?.[CATEGORY_THEME_KEYS[category.label]];
+  return themeColor ? { ...category, color: themeColor } : category;
+}
+
 /**
  * Calcule l'âge en années à partir d'une date de naissance
  */

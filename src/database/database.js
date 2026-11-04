@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { buildAdherentCodeBase, findAdherentDuplicate } from '../utils/adherentCode';
 import { computePaymentStatus, countOverdueAdherents, generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../utils/payments';
 import { isCloudflareEnabled, CloudflareAPI } from '../services/api';
+import { resolveAdherentPhotoDataUri } from '../utils/adherentPhotos';
 import { hashPassword, verifyPassword, encryptUsername, decryptUsername, matchesUsername } from '../utils/security';
 import {
   genererCreancesMois,
@@ -961,9 +962,17 @@ export async function checkAdherentDuplicate({ nom, prenom, dateNaissance, exclu
 }
 
 export async function createAdherent(adherent) {
+  let photo;
+  try {
+    photo = await resolveAdherentPhotoDataUri(adherent.photo);
+  } catch (error) {
+    throw new Error(`Impossible de lire la photo de l’adhérent. Sélectionnez-la à nouveau. ${error.message}`);
+  }
+  const adherentWithPortablePhoto = { ...adherent, photo };
+
   if (isCloudflareEnabled()) {
     try {
-      await CloudflareAPI.createAdherent(adherent);
+      await CloudflareAPI.createAdherent(adherentWithPortablePhoto);
     } catch (e) {
       rethrowOpenSeasonError(e);
       if (e.message && e.message.includes('existe déjà')) {
@@ -997,7 +1006,7 @@ export async function createAdherent(adherent) {
       adherent.id, adherent.code, adherent.nom, adherent.prenom,
       adherent.dateNaissance, adherent.lieuNaissance, adherent.telephone || null,
       adherent.taille || null, adherent.groupeSanguin || null,
-      adherent.observationsMedicales || null, adherent.photo || null,
+      adherent.observationsMedicales || null, adherentWithPortablePhoto.photo || null,
       adherent.discipline || null, adherent.genre || 'M', dateInscription, assureVal,
       adherent.categorieOverride || null, now, now,
     ],
@@ -1013,9 +1022,17 @@ export async function createAdherent(adherent) {
 }
 
 export async function updateAdherent(adherent) {
+  let photo;
+  try {
+    photo = await resolveAdherentPhotoDataUri(adherent.photo);
+  } catch (error) {
+    throw new Error(`Impossible de lire la photo de l’adhérent. Sélectionnez-la à nouveau. ${error.message}`);
+  }
+  const adherentWithPortablePhoto = { ...adherent, photo };
+
   if (isCloudflareEnabled()) {
     try {
-      await CloudflareAPI.updateAdherent(adherent);
+      await CloudflareAPI.updateAdherent(adherentWithPortablePhoto);
     } catch (e) {
       if (e.message && e.message.includes('existe déjà')) {
         throw e;
@@ -1045,7 +1062,7 @@ export async function updateAdherent(adherent) {
       adherent.nom, adherent.prenom, adherent.dateNaissance,
       adherent.lieuNaissance, adherent.telephone || null, adherent.taille || null,
       adherent.groupeSanguin || null, adherent.observationsMedicales || null,
-      adherent.photo || null, adherent.discipline || null, adherent.genre || 'M',
+      adherentWithPortablePhoto.photo || null, adherent.discipline || null, adherent.genre || 'M',
       assureVal, adherent.categorieOverride || null, now, adherent.id,
     ],
   );
@@ -2984,4 +3001,3 @@ export async function sendPaymentReminderToAdherent(adherentId, saisonId, type =
 export async function sendBulkPaymentReminders(saisonId) {
   return await generatePaymentAlertsForSaison(saisonId);
 }
-

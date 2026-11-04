@@ -15,6 +15,7 @@ jest.mock('react-native-fs', () => ({
 }));
 
 import { Alert } from 'react-native';
+import RNFS from 'react-native-fs';
 import { printHtml } from '../services/printing';
 import { printAllAdherentCards } from './printAdherentCards';
 
@@ -87,5 +88,27 @@ describe('printAdherentCards', () => {
 
     const html = printHtml.mock.calls[0][0];
     expect(html).toContain(`<img src="${photo}" class="photo-img" />`);
+  });
+
+  it('prints all cards when an old cached photo is no longer available', async () => {
+    RNFS.readFile.mockRejectedValueOnce(new Error('ENOENT: file not found'));
+
+    await printAllAdherentCards({
+      adherents: [{
+        id: '1',
+        nom: 'Benali',
+        prenom: 'Karim',
+        code: 'BKAR100101',
+        dateNaissance: '2010-01-01',
+        photo: 'file:///data/user/0/com.cmbclub.app/cache/ImagePicker/photo.jpg',
+      }],
+    });
+
+    expect(printHtml).toHaveBeenCalledTimes(1);
+    expect(printHtml.mock.calls[0][0]).toContain('photo-placeholder');
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'Impression terminée avec des photos manquantes',
+      expect.stringContaining('Toutes les cartes ont été imprimées'),
+    );
   });
 });

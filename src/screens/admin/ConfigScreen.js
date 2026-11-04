@@ -28,6 +28,15 @@ export default function ConfigScreen() {
   const { colors: COLORS, RADIUS, shadows: SHADOWS, themeId, setTheme } = useTheme();
   const styles = useMemo(() => createStyles(COLORS, RADIUS, SHADOWS), [COLORS, RADIUS, SHADOWS]);
 
+  const confirmLogout = () => Alert.alert(
+    'Confirmer la déconnexion',
+    'Voulez-vous vraiment vous déconnecter ?',
+    [
+      { text: 'Non', style: 'cancel' },
+      { text: 'Oui', style: 'destructive', onPress: logout },
+    ],
+  );
+
   const [fraisInscription, setFraisInscription] = useState(String(config.fraisInscription || 2000));
   const [fraisMensuel, setFraisMensuel] = useState(String(config.fraisMensuel || 1500));
   const [fraisAssurance, setFraisAssurance] = useState(String(config.fraisAssurance || 500));
@@ -524,7 +533,7 @@ export default function ConfigScreen() {
         </Text>
       </View>
 
-      <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+      <TouchableOpacity style={styles.logoutBtn} onPress={confirmLogout}>
         <MaterialCommunityIcons name="logout" size={18} color={COLORS.danger} />
         <Text style={styles.logoutText}>Se déconnecter</Text>
       </TouchableOpacity>

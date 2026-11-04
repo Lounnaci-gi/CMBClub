@@ -54,7 +54,7 @@ export default function AdherentPresencesScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={COLORS.statusBarStyle} />
 
       {/* Header */}
       <View style={styles.header}>
