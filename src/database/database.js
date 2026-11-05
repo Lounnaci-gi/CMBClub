@@ -7,7 +7,14 @@ import { buildAdherentCodeBase, findAdherentDuplicate } from '../utils/adherentC
 import { computePaymentStatus, countOverdueAdherents, generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../utils/payments';
 import { isCloudflareEnabled, CloudflareAPI } from '../services/api';
 import { resolveAdherentPhotoDataUri } from '../utils/adherentPhotos';
-import { hashPassword, verifyPassword, encryptUsername, decryptUsername, matchesUsername } from '../utils/security';
+import {
+  hashPassword,
+  verifyPassword,
+  generateTemporaryPassword,
+  encryptUsername,
+  decryptUsername,
+  matchesUsername,
+} from '../utils/security';
 import {
   genererCreancesMois,
   imputerVersement,
@@ -19,6 +26,7 @@ import {
 } from '../services/portefeuilleService';
 
 function logCloudflareFallback(action, err) {
+  if (err?.status === 401 || err?.status === 403) throw err;
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.log(`[Cloudflare ${action} fallback]:`, err?.message || err);
   }
@@ -381,32 +389,26 @@ async function initDatabase(database) {
     [process.env.CLOUDFLARE_API_URL || ''],
   );
 
-  // Seed single admin user (identifiant chiffré & mot de passe haché)
-  const defaultAdminUser = encryptUsername('admin');
-  const defaultAdminHash = hashPassword('admin123');
-  await database.runAsync(
-    `INSERT OR IGNORE INTO users (id, username, password, role, createdAt) VALUES ('admin-001', ?, ?, 'admin', datetime('now'))`,
-    [defaultAdminUser, defaultAdminHash],
+  const seededAdmin = await database.getFirstAsync(
+    "SELECT id, username, password FROM users WHERE id = 'admin-001'",
   );
+  if (
+    seededAdmin &&
+    matchesUsername('admin', seededAdmin.username) &&
+    await verifyPassword('admin123', seededAdmin.password)
+  ) {
+    await database.runAsync("DELETE FROM users WHERE id = 'admin-001'");
+  }
 
-  // Migration de sécurité : chiffrer les identifiants et hacher les mots de passe stockés en clair
-  try {
-    const legacyUsers = await database.getAllAsync("SELECT id, username, password FROM users");
-    for (const u of legacyUsers || []) {
-      const needsUserEnc = u.username && !u.username.startsWith('cmb_enc_u1:');
-      const needsPassHash = u.password && !u.password.startsWith('cmb_slt_v1:');
-      if (needsUserEnc || needsPassHash) {
-        const nextUser = needsUserEnc ? encryptUsername(u.username) : u.username;
-        const nextPass = needsPassHash ? hashPassword(u.password) : u.password;
-        await database.runAsync("UPDATE users SET username = ?, password = ? WHERE id = ?", [
-          nextUser,
-          nextPass,
-          u.id,
-        ]);
-      }
+  // Usernames are migrated at startup; password hashes are upgraded after a successful login.
+  const legacyUsers = await database.getAllAsync('SELECT id, username FROM users');
+  for (const user of legacyUsers || []) {
+    if (user.username && !user.username.startsWith('cmb_enc_u1:')) {
+      await database.runAsync('UPDATE users SET username = ? WHERE id = ?', [
+        encryptUsername(user.username),
+        user.id,
+      ]);
     }
-  } catch (_e) {
-    // ignore
   }
 
   // Enforce single admin policy: keep only one admin user, downgrade any extra admin users to 'adherent'
@@ -826,7 +828,7 @@ export async function closeSaison(saisonId, credentials = {}) {
       cleanUsername &&
       cleanPassword &&
       matchesUsername(cleanUsername, admin.username) &&
-      verifyPassword(cleanPassword, admin.password)
+      await verifyPassword(cleanPassword, admin.password)
     );
 
     if (!authorized) {
@@ -1401,12 +1403,8 @@ export async function getStatsBySaison(saisonId) {
 
 export async function getUserByCredentials(username, password) {
   if (isCloudflareEnabled()) {
-    try {
-      const res = await CloudflareAPI.login(username, password);
-      if (res?.user) return res.user;
-    } catch (e) {
-      logCloudflareFallback('login', e);
-    }
+    const res = await CloudflareAPI.login(username, password);
+    return res?.user || null;
   }
   const db = await getDatabase();
   const cleanUser = String(username || '').trim();
@@ -1438,10 +1436,12 @@ export async function getUserByCredentials(username, password) {
     }
   }
 
-  if (user && verifyPassword(cleanPass, user.password)) {
+  if (user && await verifyPassword(cleanPass, user.password)) {
     // Migration silencieuse si nécessaire
     const nextUser = user.username?.startsWith('cmb_enc_u1:') ? user.username : encryptUsername(cleanUser);
-    const nextPass = user.password?.startsWith('cmb_slt_v1:') ? user.password : hashPassword(cleanPass);
+    const nextPass = user.password?.startsWith('cmb_pbkdf2_v2:')
+      ? user.password
+      : await hashPassword(cleanPass);
     if (nextUser !== user.username || nextPass !== user.password) {
       await db.runAsync('UPDATE users SET username = ?, password = ? WHERE id = ?', [
         nextUser,
@@ -1493,6 +1493,35 @@ export async function getAdminCount() {
   return row?.count || 0;
 }
 
+export async function initializeAdminUser(username, password) {
+  const cleanUsername = String(username || '').trim();
+  const cleanPassword = String(password || '');
+  if (cleanUsername.length < 2 || cleanUsername.length > 64) {
+    throw new Error("L'identifiant administrateur doit contenir entre 2 et 64 caractères.");
+  }
+  if (cleanPassword.trim().length < 12 || cleanPassword.length > 128) {
+    throw new Error('Le mot de passe administrateur doit contenir entre 12 et 128 caractères.');
+  }
+
+  const database = await getDatabase();
+  const existingAdmin = await database.getFirstAsync("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+  if (existingAdmin) throw new Error('Un compte administrateur existe déjà.');
+
+  const user = {
+    id: `admin-${uuidv4()}`,
+    username: cleanUsername,
+    password: cleanPassword,
+    role: 'admin',
+  };
+  await createUser(user);
+  return {
+    id: user.id,
+    username: cleanUsername,
+    role: 'admin',
+    adherentId: null,
+  };
+}
+
 export async function createUser(user) {
   const db = await getDatabase();
   let requestedRole = user.role || 'adherent';
@@ -1509,9 +1538,9 @@ export async function createUser(user) {
     ? user.username
     : encryptUsername(user.username || '');
 
-  const hashedPassword = user.password?.startsWith('cmb_slt_v1:')
+  const hashedPassword = user.password?.startsWith('cmb_pbkdf2_v2:')
     ? user.password
-    : hashPassword(user.password || '');
+    : await hashPassword(user.password || '');
 
   await db.runAsync(
     `INSERT INTO users (id, username, password, role, adherentId, createdAt) VALUES (?, ?, ?, ?, ?, datetime('now'))`,
@@ -1545,7 +1574,7 @@ export async function updateAdminCredentials(newUsername, newPassword) {
   }
 
   const encryptedUsername = encryptUsername(cleanUsername);
-  const hashedPassword = hashPassword(cleanPassword);
+  const hashedPassword = await hashPassword(cleanPassword);
   await db.runAsync(
     "UPDATE users SET username = ?, password = ? WHERE id = ?",
     [encryptedUsername, hashedPassword, admin.id],
@@ -1555,12 +1584,12 @@ export async function updateAdminCredentials(newUsername, newPassword) {
 
 export async function updateUserPassword(userId, password) {
   const db = await getDatabase();
-  const hashedPassword = hashPassword(password);
+  const hashedPassword = await hashPassword(password);
   await db.runAsync('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
 }
 
 /**
- * Crée un compte adhérent (username = code, mot de passe = date AAMMJJ) avec identifiant chiffré & mot de passe haché
+ * Crée un compte adhérent avec un mot de passe temporaire aléatoire.
  */
 export async function ensureAdherentAccount(adherent) {
   const existing = await getUserByAdherentId(adherent.id);
@@ -1572,11 +1601,11 @@ export async function ensureAdherentAccount(adherent) {
     };
   }
 
-  const plainPassword = (adherent.dateNaissance || '').replace(/-/g, '').slice(2) || '000000';
+  const plainPassword = generateTemporaryPassword();
   const user = {
     id: `user-${adherent.id}`,
     username: encryptUsername(adherent.code),
-    password: hashPassword(plainPassword),
+    password: await hashPassword(plainPassword),
     role: 'adherent',
     adherentId: adherent.id,
   };

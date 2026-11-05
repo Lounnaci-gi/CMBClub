@@ -4,18 +4,14 @@ import { cors } from 'hono/cors';
 const app = new Hono();
 
 // ── CORS : restreindre aux origines autorisées ──
-const ALLOWED_ORIGINS = [
-  'http://localhost:8081',
-  'http://localhost:19000',
-  'http://localhost:19006',
-  'exp://',
-];
-
 app.use('*', cors({
-  origin: (origin) => {
-    if (!origin) return 'http://localhost:8081'; // app mobile native (pas d'origine HTTP)
-    if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return origin;
-    return null; // bloque les origines non autorisées
+  origin: (origin, c) => {
+    if (!origin) return null;
+    const allowedOrigins = String(c.env.CORS_ORIGINS || '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean);
+    return allowedOrigins.includes(origin) ? origin : null;
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
@@ -87,62 +83,83 @@ async function findAdherentDuplicateInDb(db, nom, prenom, dateNaissance, exclude
 }
 
 
-// ── Rate Limiting anti-brute force (en mémoire Worker, par IP) ──
-const loginAttempts = new Map(); // Map<ip, { count, firstAttempt, lockedUntil }>
-
-const RATE_LIMIT = {
-  MAX_ATTEMPTS: 5,
-  WINDOW_MS: 15 * 60 * 1000,   // 15 minutes
-  LOCKOUT_MS: 15 * 60 * 1000,  // 15 minutes de verrouillage
+// ── Limitation distribuée des tentatives de connexion (D1) ──
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT_DELAYS = {
+  THIRD_FAILURE_MS: 30 * 1000,
+  FIFTH_FAILURE_MS: 5 * 60 * 1000,
+  EIGHTH_FAILURE_MS: 15 * 60 * 1000,
 };
 
 function getClientIp(c) {
-  return (
-    c.req.header('cf-connecting-ip') ||
-    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
-    c.req.header('x-real-ip') ||
-    'unknown'
+  return c.req.header('cf-connecting-ip') || 'unknown';
+}
+
+async function loginRateLimitKey(env, dimension, value) {
+  const secret = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(requireJwtSecret(env)),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
   );
+  const digest = new Uint8Array(await crypto.subtle.sign(
+    'HMAC',
+    secret,
+    new TextEncoder().encode(`cmbclub-login:${dimension}:${String(value).trim().toLowerCase()}`),
+  ));
+  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function checkRateLimit(ip) {
+async function checkRateLimit(db, keys) {
   const now = Date.now();
-  const state = loginAttempts.get(ip) || { count: 0, firstAttempt: now, lockedUntil: null };
-
-  // Déverrouillage automatique après la période
-  if (state.lockedUntil && now >= state.lockedUntil) {
-    loginAttempts.delete(ip);
-    return { allowed: true, remaining: RATE_LIMIT.MAX_ATTEMPTS };
+  for (const key of keys) {
+    const state = await db.prepare(
+      'SELECT blockedUntil, updatedAt FROM auth_login_attempts WHERE rateKey = ?'
+    ).bind(key).first();
+    if (state?.blockedUntil > now && state.updatedAt > now - RATE_WINDOW_MS) {
+      return { allowed: false, retryAfter: Math.ceil((state.blockedUntil - now) / 1000) };
+    }
   }
-
-  // Encore verrouillé
-  if (state.lockedUntil && now < state.lockedUntil) {
-    const retryAfter = Math.ceil((state.lockedUntil - now) / 1000);
-    return { allowed: false, retryAfter };
-  }
-
-  // Réinitialiser la fenêtre si expirée
-  if (now - state.firstAttempt > RATE_LIMIT.WINDOW_MS) {
-    loginAttempts.delete(ip);
-    return { allowed: true, remaining: RATE_LIMIT.MAX_ATTEMPTS };
-  }
-
-  const remaining = RATE_LIMIT.MAX_ATTEMPTS - state.count;
-  return { allowed: remaining > 0, remaining, state };
+  return { allowed: true };
 }
 
-function recordFailedAttempt(ip) {
+async function recordFailedAttempts(db, keys) {
   const now = Date.now();
-  const state = loginAttempts.get(ip) || { count: 0, firstAttempt: now, lockedUntil: null };
-  state.count += 1;
-  if (state.count >= RATE_LIMIT.MAX_ATTEMPTS) {
-    state.lockedUntil = now + RATE_LIMIT.LOCKOUT_MS;
+  const windowStartedBefore = now - RATE_WINDOW_MS;
+  const nextFailures = `CASE WHEN auth_login_attempts.windowStartedAt <= ? THEN 1 ELSE auth_login_attempts.failures + 1 END`;
+  for (const key of keys) {
+    await db.prepare(
+      `INSERT INTO auth_login_attempts (rateKey, failures, windowStartedAt, blockedUntil, updatedAt)
+       VALUES (?, 1, ?, NULL, ?)
+       ON CONFLICT(rateKey) DO UPDATE SET
+         failures = ${nextFailures},
+         windowStartedAt = CASE
+           WHEN auth_login_attempts.windowStartedAt <= ? THEN excluded.windowStartedAt
+           ELSE auth_login_attempts.windowStartedAt
+         END,
+         blockedUntil = CASE
+           WHEN ${nextFailures} >= 8 THEN ?
+           WHEN ${nextFailures} >= 5 THEN ?
+           WHEN ${nextFailures} >= 3 THEN ?
+           ELSE NULL
+         END,
+         updatedAt = excluded.updatedAt`
+    ).bind(
+      key, now, now,
+      windowStartedBefore,
+      windowStartedBefore,
+      windowStartedBefore, now + RATE_LIMIT_DELAYS.EIGHTH_FAILURE_MS,
+      windowStartedBefore, now + RATE_LIMIT_DELAYS.FIFTH_FAILURE_MS,
+      windowStartedBefore, now + RATE_LIMIT_DELAYS.THIRD_FAILURE_MS,
+    ).run();
   }
-  loginAttempts.set(ip, state);
 }
 
-function resetAttempts(ip) {
-  loginAttempts.delete(ip);
+async function resetRateLimit(db, keys) {
+  for (const key of keys) {
+    await db.prepare('DELETE FROM auth_login_attempts WHERE rateKey = ?').bind(key).run();
+  }
 }
 
 // Helper pour formater les réponses JSON
@@ -207,7 +224,9 @@ app.get('/api/health', async (c) => {
 });
 
 // ── Vérification compatible avec les mots de passe déjà enregistrés ──
-const SALT_PREFIX = 'cmb_slt_v1:';
+const LEGACY_SALT_PREFIX = 'cmb_slt_v1:';
+const PASSWORD_HASH_PREFIX = 'cmb_pbkdf2_v2:';
+const PASSWORD_HASH_ITERATIONS = 120000;
 const ENC_PREFIX = 'cmb_enc_u1:';
 
 function decryptUsername(cipherUsername, cipherKey) {
@@ -245,11 +264,40 @@ async function sha256(text) {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function derivePasswordHash(password, salt, iterations) {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    keyMaterial,
+    256,
+  );
+  return new Uint8Array(bits);
+}
+
 async function hashPassword(plainPassword) {
   if (!plainPassword) return '';
   const clean = String(plainPassword).trim();
-  const hash = await sha256(`cmb_${clean}_club_secure`);
-  return `${SALT_PREFIX}${hash}`;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const digest = await derivePasswordHash(clean, salt, PASSWORD_HASH_ITERATIONS);
+  return `${PASSWORD_HASH_PREFIX}${PASSWORD_HASH_ITERATIONS}:${bytesToHex(salt)}:${bytesToHex(digest)}`;
 }
 
 async function verifyPassword(inputPassword, storedHash) {
@@ -257,13 +305,33 @@ async function verifyPassword(inputPassword, storedHash) {
   const cleanInput = String(inputPassword).trim();
   const cleanStored = String(storedHash).trim();
 
-  const computedHash = await hashPassword(cleanInput);
-  if (cleanStored === computedHash) return true;
+  if (cleanStored.startsWith(PASSWORD_HASH_PREFIX)) {
+    const [iterationsText, saltHex, expectedHash] = cleanStored.slice(PASSWORD_HASH_PREFIX.length).split(':');
+    const iterations = Number(iterationsText);
+    if (
+      !Number.isInteger(iterations) ||
+      iterations < 60000 ||
+      iterations > 1000000 ||
+      !/^[0-9a-f]{32}$/i.test(saltHex || '') ||
+      !/^[0-9a-f]{64}$/i.test(expectedHash || '')
+    ) return false;
+    const actualHash = bytesToHex(await derivePasswordHash(cleanInput, hexToBytes(saltHex), iterations));
+    let difference = 0;
+    for (let i = 0; i < expectedHash.length; i++) {
+      difference |= expectedHash.charCodeAt(i) ^ actualHash.charCodeAt(i);
+    }
+    return difference === 0;
+  }
+
+  if (cleanStored.startsWith(LEGACY_SALT_PREFIX)) {
+    const legacyHash = await sha256(`cmb_${cleanInput}_club_secure`);
+    if (cleanStored === `${LEGACY_SALT_PREFIX}${legacyHash}`) return true;
+  }
 
   const directHash = await sha256(cleanInput);
   if (cleanStored === directHash) return true;
 
-  return false;
+  return cleanStored === cleanInput;
 }
 
 const JWT_ISSUER = 'cmbclub-api';
@@ -338,6 +406,9 @@ async function verifyAccessToken(env, token) {
       payload.iss !== JWT_ISSUER ||
       payload.aud !== JWT_AUDIENCE ||
       !payload.sub ||
+      typeof payload.jti !== 'string' ||
+      !payload.jti ||
+      !['admin', 'adherent'].includes(payload.role) ||
       !Number.isInteger(payload.exp) ||
       payload.exp <= now ||
       !Number.isInteger(payload.iat) ||
@@ -380,7 +451,22 @@ async function authenticateRequest(c) {
   const authorization = c.req.header('Authorization') || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   if (!match) return null;
-  return verifyAccessToken(c.env, match[1]);
+  const claims = await verifyAccessToken(c.env, match[1]);
+  if (!claims) return null;
+  const revoked = await c.env.DB.prepare(
+    'SELECT jti FROM revoked_access_tokens WHERE jti = ? AND expiresAt > ?'
+  ).bind(claims.jti, Date.now()).first();
+  if (revoked) return null;
+  const user = await c.env.DB.prepare(
+    'SELECT id, role, adherentId FROM users WHERE id = ?'
+  ).bind(claims.sub).first();
+  if (
+    !user ||
+    !['admin', 'adherent'].includes(user.role) ||
+    user.role !== claims.role ||
+    (user.role === 'adherent' && (user.adherentId || null) !== (claims.adherentId || null))
+  ) return null;
+  return { ...claims, id: user.id, role: user.role, adherentId: user.adherentId || null };
 }
 
 const PUBLIC_API_PATHS = new Set([
@@ -396,32 +482,73 @@ app.use('/api/*', async (c, next) => {
     const authUser = await authenticateRequest(c);
     if (!authUser) return err(c, 'Jeton d’accès invalide ou expiré.', 401);
     c.set('authUser', authUser);
+    if (!isAuthorizedForRoute(c, authUser)) {
+      return err(c, 'Accès interdit.', 403);
+    }
     return next();
   } catch {
     return err(c, 'Service d’authentification indisponible.', 503);
   }
 });
 
+function decodePathSegment(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return '';
+  }
+}
+
+function isAuthorizedForRoute(c, user) {
+  if (user.role === 'admin') return true;
+  if (user.role !== 'adherent' || c.req.method !== 'GET' || !user.adherentId) return false;
+
+  const path = c.req.path;
+  if (
+    path === '/api/saisons' ||
+    path === '/api/saisons/active' ||
+    path === '/api/disciplines' ||
+    path === '/api/creneaux'
+  ) return true;
+
+  const ownProfile = path.match(/^\/api\/adherents\/([^/]+)$/);
+  if (ownProfile) return decodePathSegment(ownProfile[1]) === user.adherentId;
+
+  const ownPresences = path.match(/^\/api\/presences\/adherent\/([^/]+)$/);
+  if (ownPresences) return decodePathSegment(ownPresences[1]) === user.adherentId;
+
+  if (path === '/api/paiements') {
+    return c.req.query('adherentId') === user.adherentId;
+  }
+  return false;
+}
+
 // ── Auth & Users ──
 app.post('/api/auth/login', async (c) => {
   try {
-    // ── Rate Limiting : anti brute force ──
-    const ip = getClientIp(c);
-    const rateCheck = checkRateLimit(ip);
-    if (!rateCheck.allowed) {
-      c.res.headers.set('Retry-After', String(rateCheck.retryAfter));
-      return c.json(
-        { success: false, error: `Trop de tentatives. Réessayez dans ${Math.ceil(rateCheck.retryAfter / 60)} minute(s).` },
-        429
-      );
+    const ipKey = await loginRateLimitKey(c.env, 'ip', getClientIp(c));
+    const ipCheck = await checkRateLimit(c.env.DB, [ipKey]);
+    if (!ipCheck.allowed) {
+      c.res.headers.set('Retry-After', String(ipCheck.retryAfter));
+      return err(c, 'Identifiant ou mot de passe incorrect', 429);
     }
+    await c.env.DB.prepare('DELETE FROM auth_login_attempts WHERE updatedAt <= ?')
+      .bind(Date.now() - RATE_WINDOW_MS).run();
 
     const body = await c.req.json();
     const rawUser = sanitizeCredential(body.username, 64);
     const rawPass = sanitizeCredential(body.password, 128);
+    const accountKey = await loginRateLimitKey(c.env, 'account', rawUser || 'invalid');
+    const rateKeys = [ipKey, accountKey];
+    const rateCheck = await checkRateLimit(c.env.DB, rateKeys);
+    if (!rateCheck.allowed) {
+      c.res.headers.set('Retry-After', String(rateCheck.retryAfter));
+      return err(c, 'Identifiant ou mot de passe incorrect', 429);
+    }
+
     if (!rawUser || !rawPass) return err(c, 'Identifiant et mot de passe requis');
     if (rawUser.length < 2 || rawPass.length < 4) {
-      recordFailedAttempt(ip);
+      await recordFailedAttempts(c.env.DB, rateKeys);
       return err(c, 'Identifiant ou mot de passe incorrect', 401);
     }
 
@@ -432,8 +559,17 @@ app.post('/api/auth/login', async (c) => {
       matchesUsername(rawUser, candidate.username, c.env.USERNAME_CIPHER_KEY)
     );
 
-    if (user && await verifyPassword(rawPass, user.password)) {
-      resetAttempts(ip);
+    if (
+      user &&
+      ['admin', 'adherent'].includes(user.role) &&
+      (user.role !== 'adherent' || user.adherentId) &&
+      await verifyPassword(rawPass, user.password)
+    ) {
+      if (!user.password.startsWith(PASSWORD_HASH_PREFIX)) {
+        await c.env.DB.prepare('UPDATE users SET password = ? WHERE id = ? AND password = ?')
+          .bind(await hashPassword(rawPass), user.id, user.password).run();
+      }
+      await resetRateLimit(c.env.DB, rateKeys);
       const accessToken = await signAccessToken(c.env, user);
       const refresh = await issueRefreshToken(c.env.DB, user.id);
       return ok(c, {
@@ -444,15 +580,11 @@ app.post('/api/auth/login', async (c) => {
       });
     }
 
-    // Identifiants incorrects → enregistrer la tentative.
-    // La table users existante n’est jamais modifiée ni complétée ici.
-    recordFailedAttempt(ip);
-    const newCheck = checkRateLimit(ip);
+    await recordFailedAttempts(c.env.DB, rateKeys);
+    const newCheck = await checkRateLimit(c.env.DB, rateKeys);
     if (!newCheck.allowed) {
-      return c.json(
-        { success: false, error: `Trop de tentatives. Compte verrouillé pendant ${Math.ceil(RATE_LIMIT.LOCKOUT_MS / 60000)} minutes.` },
-        429
-      );
+      c.res.headers.set('Retry-After', String(newCheck.retryAfter));
+      return err(c, 'Identifiant ou mot de passe incorrect', 429);
     }
     return err(c, 'Identifiant ou mot de passe incorrect', 401);
   } catch (e) {
@@ -484,7 +616,9 @@ app.post('/api/auth/refresh', async (c) => {
     const user = await c.env.DB.prepare(
       'SELECT id, username, role, adherentId FROM users WHERE id = ?'
     ).bind(current.userId).first();
-    if (!user) return err(c, 'Utilisateur introuvable.', 401);
+    if (!user || !['admin', 'adherent'].includes(user.role) || (user.role === 'adherent' && !user.adherentId)) {
+      return err(c, 'Refresh token invalide ou expiré.', 401);
+    }
 
     const refresh = await issueRefreshToken(c.env.DB, user.id);
     await c.env.DB.prepare(
@@ -511,6 +645,17 @@ app.post('/api/auth/logout', async (c) => {
         'UPDATE refresh_tokens SET revokedAt = COALESCE(revokedAt, ?) WHERE tokenHash = ?'
       ).bind(new Date().toISOString(), await sha256(cleanToken)).run();
     }
+    const authorization = c.req.header('Authorization') || '';
+    const accessMatch = authorization.match(/^Bearer\s+(.+)$/i);
+    if (accessMatch) {
+      const claims = await verifyAccessToken(c.env, accessMatch[1]);
+      if (claims) {
+        await c.env.DB.prepare(
+          'INSERT OR IGNORE INTO revoked_access_tokens (jti, expiresAt, createdAt) VALUES (?, ?, ?)'
+        ).bind(claims.jti, claims.exp * 1000, Date.now()).run();
+      }
+    }
+    await c.env.DB.prepare('DELETE FROM revoked_access_tokens WHERE expiresAt <= ?').bind(Date.now()).run();
     return ok(c, { loggedOut: true });
   } catch (e) {
     return err(c, e.message, 500);
@@ -776,6 +921,38 @@ app.get('/api/adherents/:id', async (c) => {
     const id = c.req.param('id');
     const adherent = await c.env.DB.prepare('SELECT * FROM adherents WHERE id = ?').bind(id).first();
     if (!adherent) return err(c, 'Adhérent non trouvé', 404);
+    if (c.get('authUser').role === 'adherent') {
+      const {
+        id: adherentId,
+        code,
+        nom,
+        prenom,
+        dateNaissance,
+        lieuNaissance,
+        telephone,
+        groupeSanguin,
+        photo,
+        discipline,
+        genre,
+        categorieOverride,
+        assure,
+      } = adherent;
+      return ok(c, {
+        id: adherentId,
+        code,
+        nom,
+        prenom,
+        dateNaissance,
+        lieuNaissance,
+        telephone,
+        groupeSanguin,
+        photo,
+        discipline,
+        genre,
+        categorieOverride,
+        assure,
+      });
+    }
     return ok(c, adherent);
   } catch (e) {
     return err(c, e.message, 500);
@@ -979,14 +1156,16 @@ app.get('/api/paiements', async (c) => {
   try {
     const adherentId = c.req.query('adherentId');
     const saisonId = c.req.query('saisonId');
+    const authUser = c.get('authUser');
 
-    let query = `SELECT p.*, a.nom, a.prenom, a.code, a.discipline, a.dateNaissance
-      FROM paiements p
-      JOIN adherents a ON a.id = p.adherentId
-      WHERE 1=1`;
+    let query = authUser.role === 'admin'
+      ? `SELECT p.*, a.nom, a.prenom, a.code, a.discipline, a.dateNaissance
+         FROM paiements p JOIN adherents a ON a.id = p.adherentId WHERE 1=1`
+      : 'SELECT p.* FROM paiements p WHERE p.adherentId = ?';
     let binds = [];
 
-    if (adherentId) {
+    if (authUser.role === 'adherent') binds.push(authUser.adherentId);
+    if (adherentId && authUser.role === 'admin') {
       query += ' AND p.adherentId = ?';
       binds.push(adherentId);
     }

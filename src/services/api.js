@@ -157,7 +157,7 @@ export const CloudflareAPI = {
         const response = await fetchApi('/api/auth/logout', {
           method: 'POST',
           body: JSON.stringify({ refreshToken }),
-        }, false);
+        });
         await parseResponse(response);
       }
     } finally {

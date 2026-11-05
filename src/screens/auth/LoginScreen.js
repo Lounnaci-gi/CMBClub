@@ -7,7 +7,12 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { getUserByCredentials } from '../../database/database';
+import {
+  getUserByCredentials,
+  getAdminCount,
+  initializeAdminUser,
+} from '../../database/database';
+import { isCloudflareEnabled } from '../../services/api';
 import useStore from '../../store/useStore';
 import useTheme, { useResponsive } from '../../theme/useTheme';
 import { THEME_IDS } from '../../theme/themes';
@@ -31,12 +36,30 @@ export default function LoginScreen() {
   );
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [setupCheckComplete, setSetupCheckComplete] = useState(false);
   const [error, setError] = useState('');
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
   const lockTimerRef = useRef(null);
   const setUser = useStore(s => s.setUser);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const hasLocalAdmin = await getAdminCount();
+        if (active) setSetupRequired(!isCloudflareEnabled() && hasLocalAdmin === 0);
+      } catch {
+        if (active) setError('Impossible de vérifier le compte administrateur local.');
+      } finally {
+        if (active) setSetupCheckComplete(true);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
   // Mise à jour du compte à rebours quand l'écran est verrouillé
   useEffect(() => {
@@ -99,6 +122,33 @@ export default function LoginScreen() {
     }
   };
 
+  const handleInitializeAdmin = async () => {
+    setError('');
+    if (username.trim().length < 2 || username.trim().length > 64) {
+      setError("L'identifiant administrateur doit contenir entre 2 et 64 caractères.");
+      return;
+    }
+    if (password.length < 12 || password.length > 128) {
+      setError('Le mot de passe administrateur doit contenir entre 12 et 128 caractères.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Les mots de passe ne correspondent pas.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const user = await initializeAdminUser(username, password);
+      setUser(user);
+    } catch (e) {
+      setError(e.message || "Impossible de créer le compte administrateur.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = setupRequired ? handleInitializeAdmin : handleLogin;
   const isLocked = lockoutSeconds > 0;
 
   return (
@@ -124,13 +174,15 @@ export default function LoginScreen() {
 
           {/* Form */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Connexion</Text>
+            <Text style={styles.cardTitle}>
+              {setupRequired ? 'Créer le compte administrateur' : 'Connexion'}
+            </Text>
 
             <View style={[styles.inputWrapper, isLocked && styles.inputDisabled]}>
               <MaterialCommunityIcons name="account-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Identifiant"
+                placeholder={setupRequired ? 'Identifiant administrateur' : 'Identifiant'}
                 placeholderTextColor={COLORS.textMuted}
                 value={username}
                 onChangeText={t => { setUsername(t); setError(''); }}
@@ -145,7 +197,7 @@ export default function LoginScreen() {
               <MaterialCommunityIcons name="lock-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={[styles.input, { flex: 1 }]}
-                placeholder="Mot de passe"
+                placeholder={setupRequired ? 'Mot de passe (12 caractères minimum)' : 'Mot de passe'}
                 placeholderTextColor={COLORS.textMuted}
                 value={password}
                 onChangeText={t => { setPassword(t); setError(''); }}
@@ -161,6 +213,21 @@ export default function LoginScreen() {
                 />
               </TouchableOpacity>
             </View>
+
+            {setupRequired && (
+              <View style={styles.inputWrapper}>
+                <MaterialCommunityIcons name="lock-check-outline" size={20} color={COLORS.textMuted} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Confirmer le mot de passe"
+                  placeholderTextColor={COLORS.textMuted}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry
+                  maxLength={128}
+                />
+              </View>
+            )}
 
             {error ? (
               <View style={[styles.errorBox, isLocked && styles.errorBoxLocked]}>
@@ -184,16 +251,18 @@ export default function LoginScreen() {
 
             <TouchableOpacity
               style={[styles.loginBtn, (loading || isLocked) && styles.loginBtnDisabled]}
-              onPress={handleLogin}
+              onPress={handleSubmit}
               activeOpacity={0.85}
-              disabled={loading || isLocked}
+              disabled={loading || isLocked || !setupCheckComplete}
             >
               {loading ? (
                 <ActivityIndicator color={COLORS.textInverse} />
               ) : (
                 <>
-                  <MaterialCommunityIcons name={isLocked ? 'lock' : 'login'} size={20} color={COLORS.textInverse} />
-                  <Text style={styles.loginText}>{isLocked ? 'Accès verrouillé' : 'Se connecter'}</Text>
+                  <MaterialCommunityIcons name={isLocked ? 'lock' : setupRequired ? 'account-plus' : 'login'} size={20} color={COLORS.textInverse} />
+                  <Text style={styles.loginText}>
+                    {isLocked ? 'Accès verrouillé' : setupRequired ? 'Créer le compte' : 'Se connecter'}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>

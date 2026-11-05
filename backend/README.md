@@ -50,6 +50,15 @@ npm run d1:init:remote
 ```
 *(ou `npx wrangler d1 execute cmbclub-db --remote --file=./schema.sql`)*
 
+Le script crée aussi les tables de limitation des connexions et de révocation des
+jetons. La table `users` doit être provisionnée séparément avec des mots de passe
+au format PBKDF2 utilisé par l’application; aucun compte administrateur par défaut
+n’est créé. Ne réutilisez pas de mots de passe temporaires basés sur une date de naissance.
+
+Configurez ensuite `CORS_ORIGINS` comme variable Worker, avec une liste séparée
+par des virgules contenant uniquement les origines Web exactes autorisées.
+L’application mobile native n’envoie pas d’en-tête `Origin`.
+
 ### Étape 5 : Déployer le Worker
 ```bash
 npm run deploy
@@ -77,9 +86,13 @@ L'API sera disponible sur `http://localhost:8787` (ou `http://10.0.2.2:8787` sur
 
 ## 📱 Lier l'API à l'Application Mobile
 
-1. Ouvrez l'application **CMBClub**.
-2. Connectez-vous en tant qu'administrateur (`admin` / `admin123`).
-3. Rendez-vous dans **Configuration / Paramètres**.
+1. Provisionnez un compte administrateur sur la base D1.
+2. Ouvrez l'application **CMBClub**.
+3. Rendez-vous dans **Configuration / Paramètres** après connexion locale.
 4. Dans la section **Cloudflare Backend**, renseignez l'URL de votre API :
    `https://cmbclub-api.<votre-compte>.workers.dev`
 5. Cliquez sur **Tester la connexion** puis **Enregistrer**.
+
+En mode local sans backend configuré, la première ouverture demande de créer un
+compte administrateur avec un mot de passe d’au moins 12 caractères. Il n’existe
+plus d’identifiants par défaut.

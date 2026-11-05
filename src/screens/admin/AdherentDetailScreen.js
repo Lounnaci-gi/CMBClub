@@ -17,6 +17,7 @@ import { getCategoryByAge, getEffectiveCategory, getThemedCategory, calculateAge
 import { calculateBalance, generatePaymentSchedule, PAYMENT_STATUS } from '../../utils/payments';
 import { formatDate } from '../../utils/seasons';
 import { getAdherentPhotoUri } from '../../utils/adherentPhotos';
+import { generateTemporaryPassword } from '../../utils/security';
 import {
   getPaiementsByAdherent,
   getUserByAdherentId,
@@ -103,7 +104,6 @@ export default function AdherentDetailScreen({ navigation, route }) {
   const cat = getThemedCategory(getEffectiveCategory(adherent), COLORS);
   const age = calculateAge(adherent.dateNaissance);
   const balance = calculateBalance(paiements);
-  const defaultPassword = (adherent.dateNaissance || '').replace(/-/g, '').slice(2);
 
   const handleDelete = () => {
     Alert.alert(
@@ -138,14 +138,15 @@ export default function AdherentDetailScreen({ navigation, route }) {
     if (!account) return;
     Alert.alert(
       'Réinitialiser le mot de passe',
-      `Remettre le mot de passe à la date de naissance (${defaultPassword}) ?`,
+      'Générer un mot de passe temporaire aléatoire ?',
       [
         { text: 'Annuler', style: 'cancel' },
         {
           text: 'Réinitialiser',
           onPress: async () => {
-            await updateUserPassword(account.id, defaultPassword);
-            Alert.alert('Mot de passe réinitialisé', `Nouveau mot de passe : ${defaultPassword}`);
+            const temporaryPassword = generateTemporaryPassword();
+            await updateUserPassword(account.id, temporaryPassword);
+            Alert.alert('Mot de passe réinitialisé', `Nouveau mot de passe : ${temporaryPassword}`);
           },
         },
       ],
