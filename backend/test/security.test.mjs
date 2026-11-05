@@ -133,6 +133,7 @@ async function request(path, {
     { id: 'user-1', role: 'adherent', adherentId: 'adherent-1' },
     { id: 'admin-1', role: 'admin', adherentId: null },
   ]),
+  env = {},
 } = {}) {
   const requestHeaders = new Headers(headers);
   if (user) requestHeaders.set('Authorization', `Bearer ${user}`);
@@ -146,6 +147,7 @@ async function request(path, {
       CORS_ORIGINS: 'https://app.example',
       USERNAME_CIPHER_KEY: 'legacy-test-key',
       USERNAME_ENCRYPTION_KEY: 'test-username-encryption-key-at-least-32-chars',
+      ...env,
     },
   );
   return { response, db, body: await response.json() };
@@ -308,6 +310,38 @@ test('successful legacy login migrates password and username encryption', async 
   });
   assert.equal(secondLogin.response.status, 200);
   assert.equal(secondLogin.body.data.user.username, 'admin');
+});
+
+test('a username encryption migration failure does not block a verified login', async () => {
+  const password = 'legacy-password';
+  const legacyHash = `cmb_slt_v1:${createHash('sha256')
+    .update(`cmb_${password}_club_secure`)
+    .digest('hex')}`;
+  const username = `cmb_enc_u1:${Array.from(Buffer.from('admin'), (byte, index) =>
+    (byte ^ 'legacy-test-key'.charCodeAt(index % 'legacy-test-key'.length)).toString(16).padStart(2, '0')
+  ).join('')}`;
+  const user = { id: 'admin-1', username, password: legacyHash, role: 'admin', adherentId: null };
+  const db = new TestD1([user]);
+  const originalError = console.error;
+  const migrationErrors = [];
+  console.error = (...args) => migrationErrors.push(args);
+
+  try {
+    const result = await request('/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin', password },
+      headers: { 'cf-connecting-ip': '192.0.2.93' },
+      db,
+      env: { USERNAME_ENCRYPTION_KEY: 'too-short' },
+    });
+
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.user.username, 'admin');
+    assert.equal(user.username, username);
+    assert.ok(migrationErrors.some(([, details]) => details?.stage === 'username-encryption'));
+  } finally {
+    console.error = originalError;
+  }
 });
 
 test('successful login upgrades an existing 120000-iteration hash', async () => {

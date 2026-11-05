@@ -23,6 +23,7 @@ import {
   recordFailedLoginAttempt,
   resetLoginAttempts,
   getRemainingAttempts,
+  getLoginErrorMessage,
 } from '../../utils/validation';
 
 export default function LoginScreen() {
@@ -116,7 +117,7 @@ export default function LoginScreen() {
         setUser(user);
       }
     } catch (e) {
-      setError('Erreur de connexion. Veuillez réessayer.');
+      setError(getLoginErrorMessage(e));
     } finally {
       setLoading(false);
     }

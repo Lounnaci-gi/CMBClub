@@ -628,14 +628,28 @@ app.post('/api/auth/login', async (c) => {
       await verifyPassword(rawPass, user.password)
     ) {
       if (needsPasswordHashUpgrade(user.password)) {
-        await c.env.DB.prepare('UPDATE users SET password = ? WHERE id = ? AND password = ?')
-          .bind(await hashPassword(rawPass), user.id, user.password).run();
+        try {
+          await c.env.DB.prepare('UPDATE users SET password = ? WHERE id = ? AND password = ?')
+            .bind(await hashPassword(rawPass), user.id, user.password).run();
+        } catch (error) {
+          console.error('Authentication credential migration failed', {
+            stage: 'password-hash',
+            errorName: error?.name || 'Error',
+          });
+        }
       }
-        if (needsUsernameEncryptionUpgrade(user.username)) {
+      if (needsUsernameEncryptionUpgrade(user.username)) {
+        try {
           await c.env.DB.prepare('UPDATE users SET username = ? WHERE id = ? AND username = ?')
             .bind(await encryptUsername(await decryptUsername(user.username, c.env), c.env), user.id, user.username).run();
+        } catch (error) {
+          console.error('Authentication credential migration failed', {
+            stage: 'username-encryption',
+            errorName: error?.name || 'Error',
+          });
         }
-        await resetRateLimit(c.env.DB, rateKeys);
+      }
+      await resetRateLimit(c.env.DB, rateKeys);
       const accessToken = await signAccessToken(c.env, user);
       const refresh = await issueRefreshToken(c.env.DB, user.id);
       return ok(c, {

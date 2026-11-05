@@ -52,6 +52,18 @@ export function validateLoginInput(username, password) {
   return { valid: true, username: u, password: p };
 }
 
+export function getLoginErrorMessage(error) {
+  const status = Number(error?.status);
+  if (status === 401) return 'Identifiant ou mot de passe incorrect.';
+  if (status === 429) return 'Trop de tentatives. Réessayez plus tard.';
+  if (status === 503) return 'Le service de connexion est temporairement indisponible.';
+  if (status >= 500) {
+    return `Le serveur de connexion a rencontré une erreur (HTTP ${status}). Vérifiez le Worker et D1.`;
+  }
+  if (!status) return 'Impossible de joindre le service. Vérifiez votre connexion Internet.';
+  return 'Connexion refusée. Vérifiez les informations saisies.';
+}
+
 /**
  * Valide les données d'un adhérent avant enregistrement
  */
