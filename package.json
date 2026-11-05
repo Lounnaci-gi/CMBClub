@@ -34,6 +34,9 @@
     "test": "jest"
   },
   "private": true,
+  "op-sqlite": {
+    "sqlcipher": true
+  },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@react-native-community/cli": "20.1.0",

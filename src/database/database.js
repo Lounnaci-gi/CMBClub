@@ -1,8 +1,8 @@
 // src/database/database.js
 // Couche SQLite – Init, migrations, CRUD complet
 
-import { open } from '@op-engineering/op-sqlite';
 import { v4 as uuidv4 } from 'uuid';
+import { openProtectedDatabase } from './databaseEncryption';
 import { buildAdherentCodeBase, findAdherentDuplicate } from '../utils/adherentCode';
 import { computePaymentStatus, countOverdueAdherents, generatePaymentSchedule, PAYMENT_STATUS, PAYMENT_TYPES } from '../utils/payments';
 import { isCloudflareEnabled, CloudflareAPI } from '../services/api';
@@ -81,7 +81,7 @@ export async function getDatabase() {
   if (db) return db;
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
-      const database = createDatabaseAdapter(open({ name: 'cmbclub.db', location: 'SQLite' }));
+      const database = createDatabaseAdapter(await openProtectedDatabase());
       await initDatabase(database);
       db = database;
     })();
