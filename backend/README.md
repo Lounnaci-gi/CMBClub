@@ -54,6 +54,11 @@ Le script crée aussi les tables de limitation des connexions et de révocation 
 jetons. La table `users` doit être provisionnée séparément avec des mots de passe
 au format PBKDF2 utilisé par l’application; aucun compte administrateur par défaut
 n’est créé. Ne réutilisez pas de mots de passe temporaires basés sur une date de naissance.
+Les nouveaux hachages utilisent PBKDF2-HMAC-SHA256 avec 600 000 itérations.
+Les hachages existants moins coûteux sont revalidés puis renforcés lors d’une
+connexion réussie. Sur Android, le calcul est exécuté par `react-native-quick-crypto`;
+une nouvelle compilation native de l’application est nécessaire après l’installation
+de cette dépendance.
 
 Configurez ensuite `CORS_ORIGINS` comme variable Worker, avec une liste séparée
 par des virgules contenant uniquement les origines Web exactes autorisées.

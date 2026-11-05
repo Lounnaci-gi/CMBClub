@@ -256,7 +256,7 @@ test('repeated login failures are limited across requests', async () => {
   assert.equal(results[1].body.error, results[2].body.error);
 });
 
-test('successful legacy login upgrades the stored password hash', async () => {
+test('successful legacy login upgrades the stored password hash to 600000 iterations', async () => {
   const plainPassword = 'legacy-password';
   const legacyHash = `cmb_slt_v1:${createHash('sha256')
     .update(`cmb_${plainPassword}_club_secure`)
@@ -278,8 +278,32 @@ test('successful legacy login upgrades the stored password hash', async () => {
 
   assert.equal(result.response.status, 200);
   const [, iterations, saltHex, digest] = user.password.split(':');
-  assert.equal(iterations, '120000');
-  assert.equal(digest, pbkdf2Sync(plainPassword, Buffer.from(saltHex, 'hex'), 120000, 32, 'sha256').toString('hex'));
+  assert.equal(iterations, '600000');
+  assert.equal(digest, pbkdf2Sync(plainPassword, Buffer.from(saltHex, 'hex'), 600000, 32, 'sha256').toString('hex'));
+});
+
+test('successful login upgrades an existing 120000-iteration hash', async () => {
+  const plainPassword = 'existing-pbkdf2-password';
+  const salt = Buffer.alloc(16, 7);
+  const digest = pbkdf2Sync(plainPassword, salt, 120000, 32, 'sha256').toString('hex');
+  const user = {
+    id: 'admin-1',
+    username: 'admin',
+    password: `cmb_pbkdf2_v2:120000:${salt.toString('hex')}:${digest}`,
+    role: 'admin',
+    adherentId: null,
+  };
+  const db = new TestD1([user]);
+  const result = await request('/api/auth/login', {
+    method: 'POST',
+    body: { username: 'admin', password: plainPassword },
+    headers: { 'cf-connecting-ip': '192.0.2.90' },
+    db,
+  });
+
+  assert.equal(result.response.status, 200);
+  const [, iterations] = user.password.split(':');
+  assert.equal(iterations, '600000');
 });
 
 test('login errors do not reveal whether the account exists', async () => {

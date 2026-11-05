@@ -226,8 +226,14 @@ app.get('/api/health', async (c) => {
 // ── Vérification compatible avec les mots de passe déjà enregistrés ──
 const LEGACY_SALT_PREFIX = 'cmb_slt_v1:';
 const PASSWORD_HASH_PREFIX = 'cmb_pbkdf2_v2:';
-const PASSWORD_HASH_ITERATIONS = 120000;
+const PASSWORD_HASH_ITERATIONS = 600000;
 const ENC_PREFIX = 'cmb_enc_u1:';
+
+function needsPasswordHashUpgrade(storedHash) {
+  if (!String(storedHash || '').startsWith(PASSWORD_HASH_PREFIX)) return true;
+  const iterations = Number(String(storedHash).slice(PASSWORD_HASH_PREFIX.length).split(':')[0]);
+  return !Number.isInteger(iterations) || iterations < PASSWORD_HASH_ITERATIONS;
+}
 
 function decryptUsername(cipherUsername, cipherKey) {
   if (!cipherUsername) return '';
@@ -565,7 +571,7 @@ app.post('/api/auth/login', async (c) => {
       (user.role !== 'adherent' || user.adherentId) &&
       await verifyPassword(rawPass, user.password)
     ) {
-      if (!user.password.startsWith(PASSWORD_HASH_PREFIX)) {
+      if (needsPasswordHashUpgrade(user.password)) {
         await c.env.DB.prepare('UPDATE users SET password = ? WHERE id = ? AND password = ?')
           .bind(await hashPassword(rawPass), user.id, user.password).run();
       }
@@ -846,7 +852,7 @@ app.put('/api/saisons/:id/close', async (c) => {
     const cleanUsername = sanitizeCredential(username, 64);
     const cleanPassword = sanitizeCredential(password, 128);
     const admin = await c.env.DB.prepare(
-      "SELECT username, password FROM users WHERE role = 'admin' LIMIT 1"
+      "SELECT id, username, password FROM users WHERE role = 'admin' LIMIT 1"
     ).first();
     const authorized = Boolean(
       admin &&
@@ -858,6 +864,10 @@ app.put('/api/saisons/:id/close', async (c) => {
 
     if (!authorized) {
       return err(c, 'Identifiants administrateur invalides.', 401);
+    }
+    if (needsPasswordHashUpgrade(admin.password)) {
+      await c.env.DB.prepare('UPDATE users SET password = ? WHERE id = ? AND password = ?')
+        .bind(await hashPassword(cleanPassword), admin.id, admin.password).run();
     }
 
     // La colonne dateFin des anciennes bases D1 est NOT NULL. Une chaîne vide

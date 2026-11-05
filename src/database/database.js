@@ -10,6 +10,7 @@ import { resolveAdherentPhotoDataUri } from '../utils/adherentPhotos';
 import {
   hashPassword,
   verifyPassword,
+  needsPasswordHashUpgrade,
   generateTemporaryPassword,
   encryptUsername,
   decryptUsername,
@@ -821,7 +822,7 @@ export async function closeSaison(saisonId, credentials = {}) {
     const cleanUsername = String(credentials.username || '').trim();
     const cleanPassword = String(credentials.password || '').trim();
     const admin = await db.getFirstAsync(
-      "SELECT username, password FROM users WHERE role = 'admin' LIMIT 1"
+      "SELECT id, username, password FROM users WHERE role = 'admin' LIMIT 1"
     );
     const authorized = Boolean(
       admin &&
@@ -833,6 +834,13 @@ export async function closeSaison(saisonId, credentials = {}) {
 
     if (!authorized) {
       throw new Error('Identifiants administrateur invalides.');
+    }
+    if (needsPasswordHashUpgrade(admin.password)) {
+      await db.runAsync('UPDATE users SET password = ? WHERE id = ? AND password = ?', [
+        await hashPassword(cleanPassword),
+        admin.id,
+        admin.password,
+      ]);
     }
   }
 
@@ -1439,9 +1447,9 @@ export async function getUserByCredentials(username, password) {
   if (user && await verifyPassword(cleanPass, user.password)) {
     // Migration silencieuse si nécessaire
     const nextUser = user.username?.startsWith('cmb_enc_u1:') ? user.username : encryptUsername(cleanUser);
-    const nextPass = user.password?.startsWith('cmb_pbkdf2_v2:')
-      ? user.password
-      : await hashPassword(cleanPass);
+    const nextPass = needsPasswordHashUpgrade(user.password)
+      ? await hashPassword(cleanPass)
+      : user.password;
     if (nextUser !== user.username || nextPass !== user.password) {
       await db.runAsync('UPDATE users SET username = ?, password = ? WHERE id = ?', [
         nextUser,

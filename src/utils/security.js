@@ -1,10 +1,12 @@
 // src/utils/security.js
 // Fonctions de sécurité pour le chiffrement des identifiants et le hachage des mots de passe
+import { pbkdf2 } from 'react-native-quick-crypto';
 
 const LEGACY_SALT_PREFIX = 'cmb_slt_v1:';
 const PASSWORD_HASH_PREFIX = 'cmb_pbkdf2_v2:';
-const PASSWORD_HASH_ITERATIONS = 60000;
+const PASSWORD_HASH_ITERATIONS = 600000;
 const PASSWORD_SALT_BYTES = 16;
+const PASSWORD_HASH_BYTES = 32;
 const ENC_PREFIX = 'cmb_enc_u1:';
 // Clé lue depuis .env (USERNAME_CIPHER_KEY).
 // Le fallback conserve la rétrocompatibilité avec les noms d'utilisateur
@@ -114,53 +116,27 @@ function bytesToHex(bytes) {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function hmacSha256(key, message) {
-  let normalizedKey = key;
-  if (normalizedKey.length > 64) normalizedKey = hexToBytes(sha256(normalizedKey));
-  const inner = new Uint8Array(64 + message.length);
-  const outer = new Uint8Array(96);
-  for (let i = 0; i < 64; i++) {
-    const byte = normalizedKey[i] || 0;
-    inner[i] = byte ^ 0x36;
-    outer[i] = byte ^ 0x5c;
-  }
-  inner.set(message, 64);
-  outer.set(hexToBytes(sha256(inner)), 64);
-  return hexToBytes(sha256(outer));
+export function needsPasswordHashUpgrade(storedHash) {
+  if (!String(storedHash || '').startsWith(PASSWORD_HASH_PREFIX)) return true;
+  const iterations = Number(String(storedHash).slice(PASSWORD_HASH_PREFIX.length).split(':')[0]);
+  return !Number.isInteger(iterations) || iterations < PASSWORD_HASH_ITERATIONS;
 }
 
 async function derivePasswordHash(password, salt, iterations) {
   const passwordBytes = utf8Bytes(password);
-  if (globalThis.crypto?.subtle?.deriveBits) {
-    const keyMaterial = await globalThis.crypto.subtle.importKey(
-      'raw',
-      passwordBytes,
-      'PBKDF2',
-      false,
-      ['deriveBits'],
-    );
-    const bits = await globalThis.crypto.subtle.deriveBits(
-      { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
-      keyMaterial,
-      256,
-    );
-    return bytesToHex(new Uint8Array(bits));
-  }
-
-  const firstBlock = new Uint8Array(salt.length + 4);
-  firstBlock.set(salt);
-  firstBlock[firstBlock.length - 1] = 1;
-
-  let current = hmacSha256(passwordBytes, firstBlock);
-  const derived = current.slice();
-  for (let round = 1; round < iterations; round++) {
-    current = hmacSha256(passwordBytes, current);
-    for (let i = 0; i < derived.length; i++) derived[i] ^= current[i];
-    if (round % 2048 === 0) {
-      await new Promise(resolve => setTimeout(resolve, 0));
-    }
-  }
-  return bytesToHex(derived);
+  return new Promise((resolve, reject) => {
+    pbkdf2(passwordBytes, salt, iterations, PASSWORD_HASH_BYTES, 'sha256', (error, digest) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (!digest) {
+        reject(new Error('Le calcul PBKDF2 natif n’a retourné aucun résultat.'));
+        return;
+      }
+      resolve(bytesToHex(digest));
+    });
+  });
 }
 
 /**
