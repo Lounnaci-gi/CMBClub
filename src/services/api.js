@@ -94,10 +94,6 @@ export function setApiUrl(url) {
   currentApiUrl = url.trim().replace(/\/+$/, '');
 }
 
-export function getApiUrl() {
-  return currentApiUrl;
-}
-
 export function isCloudflareEnabled() {
   return Boolean(currentApiUrl && currentApiUrl.startsWith('http'));
 }

@@ -12,12 +12,4 @@ export default function useTheme() {
   return { colors, themeId, setTheme, RADIUS, shadows };
 }
 
-export function useThemedStyles(factory) {
-  const theme = useTheme();
-  return useMemo(
-    () => factory(theme.colors, theme.RADIUS, theme.shadows),
-    [theme.colors, theme.RADIUS, theme.shadows, factory],
-  );
-}
-
 export { useResponsive } from './responsive';

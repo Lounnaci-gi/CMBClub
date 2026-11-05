@@ -81,19 +81,3 @@ export function formatDate(dateStr) {
     return dateStr;
   }
 }
-
-export function formatDateTime(dateStr) {
-  if (!dateStr) return '-';
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    const hours = String(d.getHours()).padStart(2, '0');
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    return `${day}/${month}/${year} ${hours}h${mins}`;
-  } catch {
-    return dateStr;
-  }
-}
