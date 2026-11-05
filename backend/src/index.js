@@ -227,47 +227,14 @@ app.get('/api/health', async (c) => {
 const LEGACY_SALT_PREFIX = 'cmb_slt_v1:';
 const PASSWORD_HASH_PREFIX = 'cmb_pbkdf2_v2:';
 const PASSWORD_HASH_ITERATIONS = 600000;
-const ENC_PREFIX = 'cmb_enc_u1:';
+const LEGACY_USERNAME_PREFIX = 'cmb_enc_u1:';
+const USERNAME_ENCRYPTION_PREFIX = 'cmb_srv_usr_aesgcm_v1:';
+let usernameEncryptionKeyPromise;
 
 function needsPasswordHashUpgrade(storedHash) {
   if (!String(storedHash || '').startsWith(PASSWORD_HASH_PREFIX)) return true;
   const iterations = Number(String(storedHash).slice(PASSWORD_HASH_PREFIX.length).split(':')[0]);
   return !Number.isInteger(iterations) || iterations < PASSWORD_HASH_ITERATIONS;
-}
-
-function decryptUsername(cipherUsername, cipherKey) {
-  if (!cipherUsername) return '';
-  const str = String(cipherUsername).trim();
-  if (!str.startsWith(ENC_PREFIX)) return str;
-  if (!cipherKey) return '';
-  const hex = str.slice(ENC_PREFIX.length);
-  let utf8 = '';
-  for (let i = 0; i < hex.length; i += 2) {
-    const enc = parseInt(hex.substr(i, 2), 16);
-    const keyChar = cipherKey.charCodeAt((i / 2) % cipherKey.length);
-    utf8 += String.fromCharCode(enc ^ keyChar);
-  }
-  try {
-    return decodeURIComponent(escape(utf8));
-  } catch {
-    return utf8;
-  }
-}
-
-function matchesUsername(inputUsername, storedUsername, cipherKey) {
-  if (!inputUsername || !storedUsername) return false;
-  const cleanInput = String(inputUsername).trim().toLowerCase();
-  if (cleanInput === String(storedUsername).trim().toLowerCase()) return true;
-  const decrypted = decryptUsername(storedUsername, cipherKey).toLowerCase();
-  if (cleanInput === decrypted) return true;
-  return false;
-}
-
-async function sha256(text) {
-  const msgBuffer = new TextEncoder().encode(String(text || ''));
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function hexToBytes(hex) {
@@ -280,6 +247,90 @@ function hexToBytes(hex) {
 
 function bytesToHex(bytes) {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function getUsernameEncryptionKey(env) {
+  const secret = String(env.USERNAME_ENCRYPTION_KEY || '');
+  if (secret.length < 32) {
+    throw new Error('USERNAME_ENCRYPTION_KEY doit être configurée avec au moins 32 caractères aléatoires.');
+  }
+  if (!usernameEncryptionKeyPromise) {
+    usernameEncryptionKeyPromise = (async () => {
+      const keyBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
+      return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    })().catch(error => {
+      usernameEncryptionKeyPromise = null;
+      throw error;
+    });
+  }
+  return usernameEncryptionKeyPromise;
+}
+
+async function encryptUsername(username, env) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    await getUsernameEncryptionKey(env),
+    new TextEncoder().encode(String(username).trim()),
+  );
+  return `${USERNAME_ENCRYPTION_PREFIX}${bytesToHex(iv)}:${bytesToHex(new Uint8Array(ciphertext))}`;
+}
+
+async function decryptUsername(cipherUsername, env) {
+  if (!cipherUsername) return '';
+  const str = String(cipherUsername).trim();
+  if (str.startsWith(USERNAME_ENCRYPTION_PREFIX)) {
+    const [ivHex, ciphertextHex] = str.slice(USERNAME_ENCRYPTION_PREFIX.length).split(':');
+    if (
+      !/^[0-9a-f]{24}$/i.test(ivHex || '') ||
+      !/^(?:[0-9a-f]{2}){16,}$/i.test(ciphertextHex || '')
+    ) {
+      throw new Error('Le nom d’utilisateur chiffré est invalide.');
+    }
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: hexToBytes(ivHex) },
+      await getUsernameEncryptionKey(env),
+      hexToBytes(ciphertextHex),
+    );
+    return new TextDecoder().decode(plaintext);
+  }
+  if (!str.startsWith(LEGACY_USERNAME_PREFIX)) return str;
+
+  const cipherKey = String(env.USERNAME_CIPHER_KEY || '');
+  if (!cipherKey) throw new Error('USERNAME_CIPHER_KEY est requise pour migrer les anciens identifiants.');
+  const hex = str.slice(LEGACY_USERNAME_PREFIX.length);
+  if (!/^(?:[0-9a-f]{2})+$/i.test(hex)) throw new Error('Le nom d’utilisateur hérité est invalide.');
+  let utf8 = '';
+  for (let i = 0; i < hex.length; i += 2) {
+    const enc = parseInt(hex.slice(i, i + 2), 16);
+    const keyChar = cipherKey.charCodeAt((i / 2) % cipherKey.length);
+    utf8 += String.fromCharCode(enc ^ keyChar);
+  }
+  try {
+    return decodeURIComponent(escape(utf8));
+  } catch {
+    return utf8;
+  }
+}
+
+function needsUsernameEncryptionUpgrade(storedUsername) {
+  return Boolean(storedUsername) && !String(storedUsername).startsWith(USERNAME_ENCRYPTION_PREFIX);
+}
+
+async function matchesUsername(inputUsername, storedUsername, env) {
+  if (!inputUsername || !storedUsername) return false;
+  const cleanInput = String(inputUsername).trim().toLowerCase();
+  if (cleanInput === String(storedUsername).trim().toLowerCase()) return true;
+  const decrypted = (await decryptUsername(storedUsername, env)).toLowerCase();
+  if (cleanInput === decrypted) return true;
+  return false;
+}
+
+async function sha256(text) {
+  const msgBuffer = new TextEncoder().encode(String(text || ''));
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function derivePasswordHash(password, salt, iterations) {
@@ -444,10 +495,10 @@ async function issueRefreshToken(db, userId) {
   return { id, token };
 }
 
-function safeUser(user, env) {
+async function safeUser(user, env) {
   return {
     id: user.id,
-    username: decryptUsername(user.username, env.USERNAME_CIPHER_KEY),
+    username: await decryptUsername(user.username, env),
     role: user.role,
     adherentId: user.adherentId || null,
   };
@@ -524,7 +575,8 @@ function isAuthorizedForRoute(c, user) {
   if (ownPresences) return decodePathSegment(ownPresences[1]) === user.adherentId;
 
   if (path === '/api/paiements') {
-    return c.req.query('adherentId') === user.adherentId;
+    const requestedAdherentId = c.req.query('adherentId');
+    return !requestedAdherentId || requestedAdherentId === user.adherentId;
   }
   return false;
 }
@@ -561,9 +613,13 @@ app.post('/api/auth/login', async (c) => {
     const { results: users } = await c.env.DB.prepare(
       'SELECT id, username, password, role, adherentId FROM users'
     ).all();
-    const user = (users || []).find((candidate) =>
-      matchesUsername(rawUser, candidate.username, c.env.USERNAME_CIPHER_KEY)
-    );
+    let user = null;
+    for (const candidate of users || []) {
+      if (await matchesUsername(rawUser, candidate.username, c.env)) {
+        user = candidate;
+        break;
+      }
+    }
 
     if (
       user &&
@@ -575,11 +631,15 @@ app.post('/api/auth/login', async (c) => {
         await c.env.DB.prepare('UPDATE users SET password = ? WHERE id = ? AND password = ?')
           .bind(await hashPassword(rawPass), user.id, user.password).run();
       }
-      await resetRateLimit(c.env.DB, rateKeys);
+        if (needsUsernameEncryptionUpgrade(user.username)) {
+          await c.env.DB.prepare('UPDATE users SET username = ? WHERE id = ? AND username = ?')
+            .bind(await encryptUsername(await decryptUsername(user.username, c.env), c.env), user.id, user.username).run();
+        }
+        await resetRateLimit(c.env.DB, rateKeys);
       const accessToken = await signAccessToken(c.env, user);
       const refresh = await issueRefreshToken(c.env.DB, user.id);
       return ok(c, {
-        user: safeUser(user, c.env),
+        user: await safeUser(user, c.env),
         accessToken,
         refreshToken: refresh.token,
         expiresIn: ACCESS_TOKEN_TTL_SECONDS,
@@ -632,7 +692,7 @@ app.post('/api/auth/refresh', async (c) => {
     ).bind(refresh.id, current.id).run();
 
     return ok(c, {
-      user: safeUser(user, c.env),
+      user: await safeUser(user, c.env),
       accessToken: await signAccessToken(c.env, user),
       refreshToken: refresh.token,
       expiresIn: ACCESS_TOKEN_TTL_SECONDS,
@@ -674,7 +734,7 @@ app.get('/api/auth/admin', async (c) => {
       "SELECT id, username, role FROM users WHERE role = 'admin' LIMIT 1"
     ).first();
     if (!admin) return ok(c, null);
-    return ok(c, safeUser(admin, c.env));
+    return ok(c, await safeUser(admin, c.env));
   } catch (e) {
     return err(c, e.message, 500);
   }
@@ -858,7 +918,7 @@ app.put('/api/saisons/:id/close', async (c) => {
       admin &&
       cleanUsername &&
       cleanPassword &&
-      matchesUsername(cleanUsername, admin.username, c.env.USERNAME_CIPHER_KEY) &&
+      await matchesUsername(cleanUsername, admin.username, c.env) &&
       await verifyPassword(cleanPassword, admin.password)
     );
 
@@ -868,6 +928,10 @@ app.put('/api/saisons/:id/close', async (c) => {
     if (needsPasswordHashUpgrade(admin.password)) {
       await c.env.DB.prepare('UPDATE users SET password = ? WHERE id = ? AND password = ?')
         .bind(await hashPassword(cleanPassword), admin.id, admin.password).run();
+    }
+    if (needsUsernameEncryptionUpgrade(admin.username)) {
+      await c.env.DB.prepare('UPDATE users SET username = ? WHERE id = ? AND username = ?')
+        .bind(await encryptUsername(await decryptUsername(admin.username, c.env), c.env), admin.id, admin.username).run();
     }
 
     // La colonne dateFin des anciennes bases D1 est NOT NULL. Une chaîne vide

@@ -1,18 +1,25 @@
 // src/utils/security.js
 // Fonctions de sécurité pour le chiffrement des identifiants et le hachage des mots de passe
-import { pbkdf2 } from 'react-native-quick-crypto';
+import {
+  Buffer,
+  createCipheriv,
+  createDecipheriv,
+  pbkdf2,
+  randomBytes,
+} from 'react-native-quick-crypto';
+import * as Keychain from 'react-native-keychain';
 
 const LEGACY_SALT_PREFIX = 'cmb_slt_v1:';
 const PASSWORD_HASH_PREFIX = 'cmb_pbkdf2_v2:';
 const PASSWORD_HASH_ITERATIONS = 600000;
 const PASSWORD_SALT_BYTES = 16;
 const PASSWORD_HASH_BYTES = 32;
-const ENC_PREFIX = 'cmb_enc_u1:';
-// Clé lue depuis .env (USERNAME_CIPHER_KEY).
-// Le fallback conserve la rétrocompatibilité avec les noms d'utilisateur
-// déjà chiffrés en base SQLite locale si la variable n'est pas définie.
-const SECRET_KEY =
+const LEGACY_USERNAME_PREFIX = 'cmb_enc_u1:';
+const USERNAME_ENCRYPTION_PREFIX = 'cmb_usr_aesgcm_v1:';
+const USERNAME_KEYCHAIN_SERVICE = 'cmbclub.username-encryption-key';
+const LEGACY_USERNAME_KEY =
   process.env.USERNAME_CIPHER_KEY || 'CMBClub@SecureKey#2026_AuthVault';
+let usernameKeyPromise;
 
 const SHA256_CONSTANTS = (() => {
   const initialHash = [];
@@ -139,55 +146,97 @@ async function derivePasswordHash(password, salt, iterations) {
   });
 }
 
-/**
- * Chiffre le nom d'utilisateur avant enregistrement en base de données
- */
-export function encryptUsername(plainUsername) {
-  if (!plainUsername) return '';
-  const text = String(plainUsername).trim();
-  if (text.startsWith(ENC_PREFIX)) return text;
-  const utf8 = unescape(encodeURIComponent(text));
-  let result = '';
-  for (let i = 0; i < utf8.length; i++) {
-    const charCode = utf8.charCodeAt(i);
-    const keyChar = SECRET_KEY.charCodeAt(i % SECRET_KEY.length);
-    const enc = charCode ^ keyChar;
-    result += enc.toString(16).padStart(2, '0');
+async function getUsernameEncryptionKey() {
+  if (!usernameKeyPromise) {
+    usernameKeyPromise = (async () => {
+      const credentials = await Keychain.getGenericPassword({ service: USERNAME_KEYCHAIN_SERVICE });
+      if (credentials) {
+        if (!/^[0-9a-f]{64}$/i.test(credentials.password)) {
+          throw new Error('La clé de chiffrement des identifiants stockée est invalide.');
+        }
+        return Buffer.from(credentials.password, 'hex');
+      }
+
+      const key = randomBytes(32);
+      const saved = await Keychain.setGenericPassword(
+        'username-encryption-key',
+        key.toString('hex'),
+        { service: USERNAME_KEYCHAIN_SERVICE },
+      );
+      if (!saved) throw new Error('Impossible de protéger la clé de chiffrement dans le trousseau sécurisé.');
+      return key;
+    })().catch(error => {
+      usernameKeyPromise = null;
+      throw error;
+    });
   }
-  return `${ENC_PREFIX}${result}`;
+  return usernameKeyPromise;
 }
 
-/**
- * Déchiffre le nom d'utilisateur pour l'affichage dans l'application
- */
-export function decryptUsername(cipherUsername) {
-  if (!cipherUsername) return '';
-  const str = String(cipherUsername).trim();
-  if (!str.startsWith(ENC_PREFIX)) return str;
-  const hex = str.slice(ENC_PREFIX.length);
-  let utf8 = '';
+function decryptLegacyUsername(cipherUsername) {
+  const hex = cipherUsername.slice(LEGACY_USERNAME_PREFIX.length);
+  if (!/^(?:[0-9a-f]{2})+$/i.test(hex)) {
+    throw new Error('Le nom d’utilisateur chiffré hérité est invalide.');
+  }
+  let decoded = '';
   for (let i = 0; i < hex.length; i += 2) {
-    const enc = parseInt(hex.substr(i, 2), 16);
-    const keyChar = SECRET_KEY.charCodeAt((i / 2) % SECRET_KEY.length);
-    utf8 += String.fromCharCode(enc ^ keyChar);
+    const encryptedByte = parseInt(hex.slice(i, i + 2), 16);
+    const keyByte = LEGACY_USERNAME_KEY.charCodeAt((i / 2) % LEGACY_USERNAME_KEY.length);
+    decoded += String.fromCharCode(encryptedByte ^ keyByte);
   }
   try {
-    return decodeURIComponent(escape(utf8));
+    return decodeURIComponent(escape(decoded));
   } catch {
-    return utf8;
+    return decoded;
   }
 }
 
-/**
- * Compare un identifiant saisi avec un identifiant stocké (chiffré ou en clair)
- */
-export function matchesUsername(inputUsername, storedUsername) {
+export async function encryptUsername(plainUsername) {
+  if (!plainUsername) return '';
+  const text = await decryptUsername(plainUsername);
+  const key = await getUsernameEncryptionKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${USERNAME_ENCRYPTION_PREFIX}${iv.toString('hex')}:${authTag.toString('hex')}:${ciphertext.toString('hex')}`;
+}
+
+export async function decryptUsername(cipherUsername) {
+  if (!cipherUsername) return '';
+  const str = String(cipherUsername).trim();
+  if (str.startsWith(LEGACY_USERNAME_PREFIX)) return decryptLegacyUsername(str);
+  if (!str.startsWith(USERNAME_ENCRYPTION_PREFIX)) return str;
+
+  const [ivHex, tagHex, ciphertextHex] = str.slice(USERNAME_ENCRYPTION_PREFIX.length).split(':');
+  if (
+    !/^[0-9a-f]{24}$/i.test(ivHex || '') ||
+    !/^[0-9a-f]{32}$/i.test(tagHex || '') ||
+    !/^(?:[0-9a-f]{2})*$/i.test(ciphertextHex || '')
+  ) {
+    throw new Error('Le nom d’utilisateur chiffré est invalide.');
+  }
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    await getUsernameEncryptionKey(),
+    Buffer.from(ivHex, 'hex'),
+  );
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(ciphertextHex, 'hex')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
+export async function matchesUsername(inputUsername, storedUsername) {
   if (!inputUsername || !storedUsername) return false;
   const cleanInput = String(inputUsername).trim().toLowerCase();
-  const decrypted = decryptUsername(storedUsername).toLowerCase();
-  if (cleanInput === decrypted) return true;
-  if (cleanInput === String(storedUsername).trim().toLowerCase()) return true;
-  return false;
+  const decrypted = (await decryptUsername(storedUsername)).toLowerCase();
+  return cleanInput === decrypted || cleanInput === String(storedUsername).trim().toLowerCase();
+}
+
+export function needsUsernameEncryptionUpgrade(storedUsername) {
+  return Boolean(storedUsername) && !String(storedUsername).startsWith(USERNAME_ENCRYPTION_PREFIX);
 }
 
 /**

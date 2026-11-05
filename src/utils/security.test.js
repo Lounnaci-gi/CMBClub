@@ -1,23 +1,44 @@
 import { pbkdf2Sync } from 'node:crypto';
 import {
   generateTemporaryPassword,
+  decryptUsername,
+  encryptUsername,
   hashPassword,
+  matchesUsername,
   needsPasswordHashUpgrade,
+  needsUsernameEncryptionUpgrade,
   sha256,
   verifyPassword,
 } from './security';
 
 jest.mock('react-native-quick-crypto', () => {
-  const { pbkdf2Sync } = require('node:crypto');
+  const crypto = require('node:crypto');
   return {
+    Buffer: require('node:buffer').Buffer,
+    createCipheriv: crypto.createCipheriv,
+    createDecipheriv: crypto.createDecipheriv,
+    randomBytes: crypto.randomBytes,
     pbkdf2(password, salt, iterations, keylen, digest, callback) {
       setImmediate(() => {
         try {
-          callback(null, pbkdf2Sync(password, salt, iterations, keylen, digest));
+          callback(null, crypto.pbkdf2Sync(password, salt, iterations, keylen, digest));
         } catch (error) {
           callback(error);
         }
       });
+    },
+  };
+});
+
+jest.mock('react-native-keychain', () => {
+  let credentials = null;
+  return {
+    async getGenericPassword() {
+      return credentials;
+    },
+    async setGenericPassword(username, password) {
+      credentials = { username, password };
+      return credentials;
     },
   };
 });
@@ -58,6 +79,33 @@ describe('password security', () => {
     await expect(verifyPassword(password, oldHash)).resolves.toBe(true);
     expect(needsPasswordHashUpgrade(oldHash)).toBe(true);
     expect(needsPasswordHashUpgrade(await hashPassword(password))).toBe(false);
+  });
+
+  test('encrypts usernames with authenticated encryption and migrates legacy XOR values', async () => {
+    const username = 'A001-Été';
+    const [first, second] = await Promise.all([
+      encryptUsername(username),
+      encryptUsername(username),
+    ]);
+
+    expect(first).toMatch(/^cmb_usr_aesgcm_v1:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/);
+    expect(first).not.toContain(username);
+    expect(first).not.toBe(second);
+    await expect(decryptUsername(first)).resolves.toBe(username);
+    await expect(matchesUsername(username.toLowerCase(), first)).resolves.toBe(true);
+    expect(needsUsernameEncryptionUpgrade(first)).toBe(false);
+
+    const legacyKey = 'CMBClub@SecureKey#2026_AuthVault';
+    const legacyHex = Array.from(new TextEncoder().encode(username), (byte, index) =>
+      (byte ^ legacyKey.charCodeAt(index % legacyKey.length)).toString(16).padStart(2, '0'),
+    ).join('');
+    const legacy = `cmb_enc_u1:${legacyHex}`;
+    expect(needsUsernameEncryptionUpgrade(legacy)).toBe(true);
+    await expect(decryptUsername(legacy)).resolves.toBe(username);
+    await expect(decryptUsername(await encryptUsername(legacy))).resolves.toBe(username);
+
+    const tampered = `${first.slice(0, -1)}${first.endsWith('0') ? '1' : '0'}`;
+    await expect(decryptUsername(tampered)).rejects.toThrow();
   });
 
   test('generates non-date-derived temporary passwords', () => {

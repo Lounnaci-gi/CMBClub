@@ -109,6 +109,9 @@ class TestD1 {
         } else if (sql.includes('UPDATE users SET password = ?')) {
           const user = db.users.find(row => row.id === values[1]);
           if (user && user.password === values[2]) user.password = values[0];
+        } else if (sql.includes('UPDATE users SET username = ?')) {
+          const user = db.users.find(row => row.id === values[1]);
+          if (user && user.username === values[2]) user.username = values[0];
         }
         return { meta: { changes: 1 } };
       },
@@ -137,7 +140,13 @@ async function request(path, {
   const response = await app.request(
     path,
     { method, headers: requestHeaders, body: body === undefined ? undefined : JSON.stringify(body) },
-    { DB: db, JWT_SECRET, CORS_ORIGINS: 'https://app.example' },
+    {
+      DB: db,
+      JWT_SECRET,
+      CORS_ORIGINS: 'https://app.example',
+      USERNAME_CIPHER_KEY: 'legacy-test-key',
+      USERNAME_ENCRYPTION_KEY: 'test-username-encryption-key-at-least-32-chars',
+    },
   );
   return { response, db, body: await response.json() };
 }
@@ -165,6 +174,11 @@ test('an adherent can read a limited version of their own profile', async () => 
 
 test('an adherent can read their own payments but cannot read or modify another account', async () => {
   const token = await createToken();
+  const withoutAdherentId = await request('/api/paiements', { user: token });
+  assert.equal(withoutAdherentId.response.status, 200);
+  const ownPaymentQuery = withoutAdherentId.db.queries.find(query => query.sql.includes('FROM paiements'));
+  assert.ok(ownPaymentQuery.values.includes('adherent-1'));
+
   const own = await request('/api/paiements?adherentId=adherent-1', { user: token });
   assert.equal(own.response.status, 200);
 
@@ -256,14 +270,16 @@ test('repeated login failures are limited across requests', async () => {
   assert.equal(results[1].body.error, results[2].body.error);
 });
 
-test('successful legacy login upgrades the stored password hash to 600000 iterations', async () => {
+test('successful legacy login migrates password and username encryption', async () => {
   const plainPassword = 'legacy-password';
   const legacyHash = `cmb_slt_v1:${createHash('sha256')
     .update(`cmb_${plainPassword}_club_secure`)
     .digest('hex')}`;
   const user = {
     id: 'admin-1',
-    username: 'admin',
+    username: `cmb_enc_u1:${Array.from(Buffer.from('admin'), (byte, index) =>
+      (byte ^ 'legacy-test-key'.charCodeAt(index % 'legacy-test-key'.length)).toString(16).padStart(2, '0')
+    ).join('')}`,
     password: legacyHash,
     role: 'admin',
     adherentId: null,
@@ -277,9 +293,21 @@ test('successful legacy login upgrades the stored password hash to 600000 iterat
   });
 
   assert.equal(result.response.status, 200);
+  assert.equal(result.body.data.user.username, 'admin');
+  assert.match(user.username, /^cmb_srv_usr_aesgcm_v1:/);
+  assert.doesNotMatch(user.username, /admin/);
   const [, iterations, saltHex, digest] = user.password.split(':');
   assert.equal(iterations, '600000');
   assert.equal(digest, pbkdf2Sync(plainPassword, Buffer.from(saltHex, 'hex'), 600000, 32, 'sha256').toString('hex'));
+
+  const secondLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: { username: 'admin', password: plainPassword },
+    headers: { 'cf-connecting-ip': '192.0.2.92' },
+    db,
+  });
+  assert.equal(secondLogin.response.status, 200);
+  assert.equal(secondLogin.body.data.user.username, 'admin');
 });
 
 test('successful login upgrades an existing 120000-iteration hash', async () => {

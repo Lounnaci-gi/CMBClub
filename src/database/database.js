@@ -15,6 +15,7 @@ import {
   encryptUsername,
   decryptUsername,
   matchesUsername,
+  needsUsernameEncryptionUpgrade,
 } from '../utils/security';
 import {
   genererCreancesMois,
@@ -395,21 +396,10 @@ async function initDatabase(database) {
   );
   if (
     seededAdmin &&
-    matchesUsername('admin', seededAdmin.username) &&
+    await matchesUsername('admin', seededAdmin.username) &&
     await verifyPassword('admin123', seededAdmin.password)
   ) {
     await database.runAsync("DELETE FROM users WHERE id = 'admin-001'");
-  }
-
-  // Usernames are migrated at startup; password hashes are upgraded after a successful login.
-  const legacyUsers = await database.getAllAsync('SELECT id, username FROM users');
-  for (const user of legacyUsers || []) {
-    if (user.username && !user.username.startsWith('cmb_enc_u1:')) {
-      await database.runAsync('UPDATE users SET username = ? WHERE id = ?', [
-        encryptUsername(user.username),
-        user.id,
-      ]);
-    }
   }
 
   // Enforce single admin policy: keep only one admin user, downgrade any extra admin users to 'adherent'
@@ -828,7 +818,7 @@ export async function closeSaison(saisonId, credentials = {}) {
       admin &&
       cleanUsername &&
       cleanPassword &&
-      matchesUsername(cleanUsername, admin.username) &&
+      await matchesUsername(cleanUsername, admin.username) &&
       await verifyPassword(cleanPassword, admin.password)
     );
 
@@ -1417,17 +1407,14 @@ export async function getUserByCredentials(username, password) {
   const db = await getDatabase();
   const cleanUser = String(username || '').trim();
   const cleanPass = String(password || '').trim();
-  const encUser = encryptUsername(cleanUser);
-
-  // 1. Recherche par nom d'utilisateur chiffré ou en clair
-  let user = await db.getFirstAsync(
-    'SELECT * FROM users WHERE username = ? OR LOWER(username) = LOWER(?)',
-    [encUser, cleanUser],
-  );
-
-  if (!user) {
-    const allUsers = await db.getAllAsync('SELECT * FROM users');
-    user = allUsers.find(u => matchesUsername(cleanUser, u.username));
+  // Username ciphertext uses a fresh nonce, so lookup compares decrypted values.
+  const allUsers = await db.getAllAsync('SELECT * FROM users');
+  let user = null;
+  for (const candidate of allUsers) {
+    if (await matchesUsername(cleanUser, candidate.username)) {
+      user = candidate;
+      break;
+    }
   }
 
   // 2. Recherche alternative pour les adhérents (par code d'adhérent ou nom)
@@ -1446,7 +1433,9 @@ export async function getUserByCredentials(username, password) {
 
   if (user && await verifyPassword(cleanPass, user.password)) {
     // Migration silencieuse si nécessaire
-    const nextUser = user.username?.startsWith('cmb_enc_u1:') ? user.username : encryptUsername(cleanUser);
+    const nextUser = needsUsernameEncryptionUpgrade(user.username)
+      ? await encryptUsername(user.username)
+      : user.username;
     const nextPass = needsPasswordHashUpgrade(user.password)
       ? await hashPassword(cleanPass)
       : user.password;
@@ -1460,7 +1449,7 @@ export async function getUserByCredentials(username, password) {
     const { password: _, ...safeUser } = user;
     return {
       ...safeUser,
-      username: decryptUsername(safeUser.username),
+      username: await decryptUsername(safeUser.username),
     };
   }
 
@@ -1473,7 +1462,7 @@ export async function getUserByAdherentId(adherentId) {
   if (!user) return null;
   return {
     ...user,
-    username: decryptUsername(user.username),
+    username: await decryptUsername(user.username),
   };
 }
 
@@ -1481,7 +1470,7 @@ export async function getAdminUser() {
   if (isCloudflareEnabled()) {
     try {
       const admin = await CloudflareAPI.getAdminUser();
-      if (admin) return { ...admin, username: decryptUsername(admin.username) };
+      if (admin) return { ...admin, username: await decryptUsername(admin.username) };
     } catch (e) {
       logCloudflareFallback('getAdminUser', e);
     }
@@ -1491,7 +1480,7 @@ export async function getAdminUser() {
   if (!admin) return null;
   return {
     ...admin,
-    username: decryptUsername(admin.username),
+    username: await decryptUsername(admin.username),
   };
 }
 
@@ -1542,9 +1531,9 @@ export async function createUser(user) {
     }
   }
 
-  const encryptedUsername = user.username?.startsWith('cmb_enc_u1:')
-    ? user.username
-    : encryptUsername(user.username || '');
+  const encryptedUsername = needsUsernameEncryptionUpgrade(user.username)
+    ? await encryptUsername(user.username || '')
+    : user.username;
 
   const hashedPassword = user.password?.startsWith('cmb_pbkdf2_v2:')
     ? user.password
@@ -1576,12 +1565,18 @@ export async function updateAdminCredentials(newUsername, newPassword) {
   }
 
   const allUsers = await db.getAllAsync("SELECT id, username FROM users WHERE id != ?", [admin.id]);
-  const duplicate = allUsers.some(u => matchesUsername(cleanUsername, u.username));
+  let duplicate = false;
+  for (const user of allUsers) {
+    if (await matchesUsername(cleanUsername, user.username)) {
+      duplicate = true;
+      break;
+    }
+  }
   if (duplicate) {
     throw new Error("Cet identifiant est déjà utilisé par un autre utilisateur.");
   }
 
-  const encryptedUsername = encryptUsername(cleanUsername);
+  const encryptedUsername = await encryptUsername(cleanUsername);
   const hashedPassword = await hashPassword(cleanPassword);
   await db.runAsync(
     "UPDATE users SET username = ?, password = ? WHERE id = ?",
@@ -1603,7 +1598,7 @@ export async function ensureAdherentAccount(adherent) {
   const existing = await getUserByAdherentId(adherent.id);
   if (existing) {
     return {
-      user: { ...existing, username: decryptUsername(existing.username) },
+      user: { ...existing, username: await decryptUsername(existing.username) },
       created: false,
       password: null,
     };
@@ -1612,7 +1607,7 @@ export async function ensureAdherentAccount(adherent) {
   const plainPassword = generateTemporaryPassword();
   const user = {
     id: `user-${adherent.id}`,
-    username: encryptUsername(adherent.code),
+    username: await encryptUsername(adherent.code),
     password: await hashPassword(plainPassword),
     role: 'adherent',
     adherentId: adherent.id,

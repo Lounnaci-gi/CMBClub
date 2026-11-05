@@ -64,6 +64,21 @@ Configurez ensuite `CORS_ORIGINS` comme variable Worker, avec une liste séparé
 par des virgules contenant uniquement les origines Web exactes autorisées.
 L’application mobile native n’envoie pas d’en-tête `Origin`.
 
+Avant le déploiement, configurez une clé dédiée au chiffrement AES-GCM des noms
+d’utilisateur stockés dans D1 :
+```bash
+npx wrangler secret put USERNAME_ENCRYPTION_KEY
+```
+Fournissez au moins 32 caractères générés aléatoirement. Cette clé reste dans
+Cloudflare et ne doit jamais être ajoutée au `.env` mobile. Sauvegardez-la dans
+votre gestionnaire de secrets : la remplacer sans rechiffrer les données rendrait
+les noms déjà chiffrés illisibles. Les anciens noms
+d’utilisateur XOR côté Worker sont convertis après une authentification réussie;
+conservez l’ancienne `USERNAME_CIPHER_KEY` côté Worker jusqu’à la fin de cette
+migration. Côté mobile, cette ancienne clé ne sert qu’à lire les valeurs XOR
+existantes; les nouveaux noms utilisent une clé aléatoire du trousseau Keychain
+et ne dépendent pas de cette variable.
+
 ### Étape 5 : Déployer le Worker
 ```bash
 npm run deploy
